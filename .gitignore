@@ -1,0 +1,35 @@
+# IDE
+.idea/
+.vscode/
+
+# Python bytecode/cache
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+.venv/
+venv/
+myenv/
+
+# Test/coverage caches
+.pytest_cache/
+htmlcov/
+.coverage
+.coverage.*
+
+# Type checker caches
+.mypy_cache/
+
+# Logs
+*.log
+
+# Environment/secrets
+.env
+secrets.csv
+
+# Local data/results
+.csv
+digital_twin_results.csv
+trivia.json
+engagement.json
+playthrough.json

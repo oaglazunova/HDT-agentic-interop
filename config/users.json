@@ -1,0 +1,77 @@
+{
+    "users": [
+        {
+            "user_id": 1,
+            "connected_apps_diabetes_data": [
+                {
+                    "connected_application": "GameBus",
+                    "player_id": 1,
+                    "auth_bearer": "Z2FtZWJ1c19iYXNlX2FwcDppdkFxTFNSSnBRaDJ4QzE4OVYySEFvblVXWmd4UnVZQg=="
+                }
+            ],
+            "connected_apps_walk_data": [
+                {
+                    "connected_application": "Google Fit",
+                    "player_id": "me",
+                    "auth_bearer": "AIzaSyDL1FUvx766s8ZSBeM4B_rHyu7TO1pPt3g"
+                }
+            ],
+            "connected_apps_nutrition_data": [
+                {
+                    "connected_application": "Placeholder nutrition app",
+                    "player_id": 111,
+                    "auth_bearer": "example auth bearer nutrition 1"
+                }
+            ]
+        },
+        {
+            "user_id": 2,
+            "connected_apps_diabetes_data": [
+                {
+                    "connected_application": "Placeholder diabetes app",
+                    "player_id": 2,
+                    "auth_bearer": "auth bearer diabetes app"
+                }
+            ],
+            "connected_apps_walk_data": [
+                {
+                    "connected_application": "GameBus",
+                    "player_id": 22,
+                    "auth_bearer": "auth bearer GameBus"
+                }
+            ],
+            "connected_apps_nutrition_data": [
+                {
+                    "connected_application": "Placeholder nutrition app",
+                    "player_id": 222,
+                    "auth_bearer": "auth bearer nutrition app"
+                }
+            ]
+        },
+        {
+            "user_id": 3,
+            "connected_apps_diabetes_data": [
+                {
+                    "connected_application": "Placeholder diabetes app",
+                    "player_id": 3,
+                    "auth_bearer": "auth bearer diabetes app"
+                }
+            ],
+            "connected_apps_walk_data": [
+                {
+                    "connected_application": "Placeholder walk app",
+                    "player_id": 33,
+                    "auth_bearer": "auth bearer walk app"
+                }
+            ],
+            "connected_apps_nutrition_data": [
+                {
+                    "connected_application": "Placeholder nutrition app",
+                    "player_id": 333,
+                    "auth_bearer": "auth bearer nutrition app"
+                }
+            ]
+            
+        }
+    ]
+}

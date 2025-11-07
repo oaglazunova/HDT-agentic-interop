@@ -1,0 +1,11 @@
+{
+  "server": "HDT-MCP",
+  "version": "0.1.0",
+  "tools": [
+    {"name":"hdt.get_trivia_data@v1","desc":"Standardized trivia metrics"},
+    {"name":"hdt.get_sugarvita_data@v1","desc":"SugarVita metrics"},
+    {"name":"hdt.get_walk_data@v1","desc":"Walk metrics"},
+    {"name":"behavior_strategy@v1","desc":"TTM/COM-B policy engine"},
+    {"name":"intervention_time@v1","desc":"Heuristic next intervention window"}
+  ]
+}

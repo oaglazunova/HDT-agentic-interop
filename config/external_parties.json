@@ -1,0 +1,10 @@
+{
+    "external_parties": [
+        {
+            "client_id": "MODEL_DEVELOPER_1"
+        },
+        {
+            "client_id": "HEALTH_APP_1"
+        }
+    ]
+}

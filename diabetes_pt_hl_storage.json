@@ -1,0 +1,188 @@
+{
+    "users": {
+        "1": {
+            "entries": [
+                {
+                    "date": "2024-12-05T20:25:07Z",
+                    "final_scores": {
+                        "health_literacy_score": {
+                            "domain": {
+                                "name": "diabetes",
+                                "score": 0.7721689397272327,
+                                "sources": {
+                                    "trivia": 0.7202815662120545,
+                                    "sugarvita": 0.85
+                                }
+                            }
+                        },
+                        "player_types_labels": {
+                            "Socializer": 0.36773368814750973,
+                            "Competitive": 0.11494228630734814,
+                            "Explorer": 0.1827245678762588
+                        }
+                    },
+                    "metrics_overviews": {
+                        "trivia": {
+                            "avg_hint": 0.06557377049180328,
+                            "avg_correct": 0.7192982456140351,
+                            "avg_incorrect": 0.2807017543859649
+                        },
+                        "sugarvita": {
+                            "pt": {
+                                "avg_score": 116.89189189189189,
+                                "sd_score": 55.259315198802135,
+                                "avg_playtimes": 199.83783783783784,
+                                "sd_playtimes": 328.5996644386584,
+                                "avg_days_session": 1.0714285714285714,
+                                "sd_days_session": 0.25753937681885636,
+                                "total_home_path": 141,
+                                "total_outdoors_path": 101,
+                                "total_work_path": 66
+                            },
+                            "hl": {
+                                "avg_glucose_accuracy": 68,
+                                "trips_to_hospital_per_game": 0.0,
+                                "avg_glucose_critical_value_response": 0
+                            }
+                        }
+                    }
+                },
+                {
+                    "date": "2024-12-05T21:09:02Z",
+                    "final_scores": {
+                        "health_literacy_score": {
+                            "domain": {
+                                "name": "diabetes",
+                                "score": 0.7721689397272327,
+                                "sources": {
+                                    "trivia": 0.7202815662120545,
+                                    "sugarvita": 0.85
+                                }
+                            }
+                        },
+                        "player_types_labels": {
+                            "Socializer": 0.36773368814750973,
+                            "Competitive": 0.11494228630734814,
+                            "Explorer": 0.1827245678762588
+                        }
+                    },
+                    "metrics_overviews": {
+                        "trivia": {
+                            "avg_hint": 0.06557377049180328,
+                            "avg_correct": 0.7192982456140351,
+                            "avg_incorrect": 0.2807017543859649
+                        },
+                        "sugarvita": {
+                            "pt": {
+                                "avg_score": 116.89189189189189,
+                                "sd_score": 55.259315198802135,
+                                "avg_playtimes": 199.83783783783784,
+                                "sd_playtimes": 328.5996644386584,
+                                "avg_days_session": 1.0714285714285714,
+                                "sd_days_session": 0.25753937681885636,
+                                "total_home_path": 141,
+                                "total_outdoors_path": 101,
+                                "total_work_path": 66
+                            },
+                            "hl": {
+                                "avg_glucose_accuracy": 68,
+                                "trips_to_hospital_per_game": 0.0,
+                                "avg_glucose_critical_value_response": 0
+                            }
+                        }
+                    }
+                },
+                {
+                    "date": "2024-12-05T22:22:40Z",
+                    "final_scores": {
+                        "health_literacy_score": {
+                            "domain": {
+                                "name": "diabetes",
+                                "score": 0.7721689397272327,
+                                "sources": {
+                                    "trivia": 0.7202815662120545,
+                                    "sugarvita": 0.85
+                                }
+                            }
+                        },
+                        "player_types_labels": {
+                            "Socializer": 0.36773368814750973,
+                            "Competitive": 0.11494228630734814,
+                            "Explorer": 0.1827245678762588
+                        }
+                    },
+                    "metrics_overviews": {
+                        "trivia": {
+                            "avg_hint": 0.06557377049180328,
+                            "avg_correct": 0.7192982456140351,
+                            "avg_incorrect": 0.2807017543859649
+                        },
+                        "sugarvita": {
+                            "pt": {
+                                "avg_score": 116.89189189189189,
+                                "sd_score": 55.259315198802135,
+                                "avg_playtimes": 199.83783783783784,
+                                "sd_playtimes": 328.5996644386584,
+                                "avg_days_session": 1.0714285714285714,
+                                "sd_days_session": 0.25753937681885636,
+                                "total_home_path": 141,
+                                "total_outdoors_path": 101,
+                                "total_work_path": 66
+                            },
+                            "hl": {
+                                "avg_glucose_accuracy": 68,
+                                "trips_to_hospital_per_game": 0.0,
+                                "avg_glucose_critical_value_response": 0
+                            }
+                        }
+                    }
+                },
+                {
+                    "date": "2024-12-05T23:27:47Z",
+                    "final_scores": {
+                        "health_literacy_score": {
+                            "domain": {
+                                "name": "diabetes",
+                                "score": 0.7721689397272327,
+                                "sources": {
+                                    "trivia": 0.7202815662120545,
+                                    "sugarvita": 0.85
+                                }
+                            }
+                        },
+                        "player_types_labels": {
+                            "Socializer": 0.36773368814750973,
+                            "Competitive": 0.11494228630734814,
+                            "Explorer": 0.1827245678762588
+                        }
+                    },
+                    "metrics_overviews": {
+                        "trivia": {
+                            "avg_hint": 0.06557377049180328,
+                            "avg_correct": 0.7192982456140351,
+                            "avg_incorrect": 0.2807017543859649
+                        },
+                        "sugarvita": {
+                            "pt": {
+                                "avg_score": 116.89189189189189,
+                                "sd_score": 55.259315198802135,
+                                "avg_playtimes": 199.83783783783784,
+                                "sd_playtimes": 328.5996644386584,
+                                "avg_days_session": 1.0714285714285714,
+                                "sd_days_session": 0.25753937681885636,
+                                "total_home_path": 141,
+                                "total_outdoors_path": 101,
+                                "total_work_path": 66
+                            },
+                            "hl": {
+                                "avg_glucose_accuracy": 68,
+                                "trips_to_hospital_per_game": 0.0,
+                                "avg_glucose_critical_value_response": 0
+                            }
+                        }
+                    }
+                }
+            ]
+        }
+    }
+}

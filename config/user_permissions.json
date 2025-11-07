@@ -1,0 +1,21 @@
+{
+    "1": {
+        "allowed_clients": {
+            "MODEL_DEVELOPER_1": ["get_walk_data", "get_meal_plans", "get_trivia_data", "get_sugarvita_data"],
+            "HEALTH_APP_1": ["get_meal_plans", "get_sugarvita_player_types", "get_health_literacy_diabetes"]
+        }
+    },
+    "2": {
+        "allowed_clients": {
+            "MODEL_DEVELOPER_1": ["get_walk_data", "get_meal_plans", "get_trivia_data", "get_sugarvita_data"],
+            "HEALTH_APP_1": ["get_sugarvita_player_types", "get_health_literacy_diabetes"]
+        }
+    },
+    
+    "3": {
+        "allowed_clients": {
+            "MODEL_DEVELOPER_1": ["get_walk_data"],
+            "HEALTH_APP_1": []
+        }
+    }
+}
