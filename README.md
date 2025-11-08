@@ -156,6 +156,8 @@ In the future, this file should be replaced by a proper ui with advanced authent
 
 4. In another terminal, start the MCP inspector:
 `mcp dev HDT_MCP/server.py`
+Or with config:
+`npx @modelcontextprotocol/inspector --config .\config\mcp.json --server hdt-mcp`
 
 
 ### Interacting with the API

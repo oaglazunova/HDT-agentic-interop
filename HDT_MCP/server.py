@@ -2,15 +2,31 @@ from typing import Literal, TypedDict
 import os
 import json
 import requests
-from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
+import time as _time
+import datetime as _dt
+from pathlib import Path
+from dotenv import load_dotenv
 
-load_dotenv()
+
+# Load .env from repo root (…/HDT-agentic-interop/.env)
+ENV_PATH = Path(__file__).resolve().parents[1] / ".env"
+load_dotenv(ENV_PATH)  # replaces your plain load_dotenv()
 
 # Your existing API that the MCP façade talks to (your Flask/whatever service).
 HDT_API_BASE = os.environ.get("HDT_API_BASE", "http://localhost:5000")
 # If your API uses a key/header, grab it from env. Adjust header name if needed.
 HDT_API_KEY  = os.environ.get("HDT_API_KEY", os.environ.get("MODEL_DEVELOPER_1_API_KEY", ""))  # reuse your .env
+print(f"[HDT-MCP] HDT_API_BASE={HDT_API_BASE}  HDT_API_KEY={'<set>' if HDT_API_KEY else '<missing>'}")
+
+_ENABLE_POLICY = (os.getenv("HDT_ENABLE_POLICY_TOOLS", "0") or "").strip().lower() in {"1","true","yes","on"}
+print(f"[HDT-MCP] POLICY_TOOLS={_ENABLE_POLICY} (HDT_ENABLE_POLICY_TOOLS={os.getenv('HDT_ENABLE_POLICY_TOOLS')})")
+
+_TELEMETRY_DIR = Path(__file__).parent / "telemetry"
+_TELEMETRY_DIR.mkdir(exist_ok=True)
+
+_cache: dict[tuple[str, tuple], tuple[float, dict]] = {}
+_CACHE_TTL = 15.0  # seconds
 
 # Create the MCP server façade (B0: MCP Core / Orchestrator)
 mcp = FastMCP(
@@ -22,14 +38,46 @@ mcp = FastMCP(
 
 # --- helpers ----------------------------------------------------------------
 
+def _headers() -> dict[str, str]:
+    """Send the key in both header styles (your Flask accepts either)."""
+    if not HDT_API_KEY:
+        return {}
+    return {
+        "X-API-KEY": HDT_API_KEY,
+        "Authorization": f"Bearer {HDT_API_KEY}",
+    }
+
+def _api_url(path: str) -> str:
+    """Robust join of base + path (no double/missing slashes)."""
+    return f"{HDT_API_BASE.rstrip('/')}/{path.lstrip('/')}"
+
 def _hdt_get(path: str, params: dict | None=None) -> dict:
-    url = f"{HDT_API_BASE}{path}"
-    headers = {}
-    if HDT_API_KEY:
-        headers["X-API-KEY"] = HDT_API_KEY
-    r = requests.get(url, headers=headers, params=params or {}, timeout=60)
+    url = _api_url(path)
+    r = requests.get(url, headers=_headers(), params=params or {}, timeout=60)
     r.raise_for_status()
     return r.json()
+
+def _log_event(kind: str, name: str, args: dict, ok: bool, ms: int) -> None:
+    rec = {
+        "ts": _dt.datetime.utcnow().isoformat() + "Z",
+        "kind": kind,  # "tool" | "resource"
+        "name": name,
+        "args": args,
+        "ok": ok,
+        "ms": ms,
+    }
+    with open(_TELEMETRY_DIR / "mcp-telemetry.jsonl", "a", encoding="utf-8") as f:
+        f.write(json.dumps(rec) + "\n")
+
+def _cached_get(path: str, params: dict | None=None) -> dict:
+    key = (path, tuple(sorted((params or {}).items())))
+    now = _time.time()
+    hit = _cache.get(key)
+    if hit and now - hit[0] < _CACHE_TTL:
+        return hit[1]
+    data = _hdt_get(path, params)
+    _cache[key] = (now, data)
+    return data
 
 
 # ---------- RESOURCES (context / “read-only”) ----------
@@ -38,16 +86,37 @@ def _hdt_get(path: str, params: dict | None=None) -> dict:
 @mcp.resource("vault://user/{user_id}/integrated")
 def get_integrated_view(user_id: str) -> dict:
     """
-    Integrated HDT View (VG in the diagram). Minimal “Integrated HDT View” resource from your local storage file.
-    Extend to unify multiple stores over time.
-    For now, we read from the local JSON store; later, swap to the real vault.
+    Minimal integrated view: pulls walk data from the API and returns
+    raw records + tiny rollups. Extend with trivia/sugarvita later.
     """
-    try:
-        with open("diabetes_pt_hl_storage.json", "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except FileNotFoundError:
-        data = {}
-    return {"user_id": user_id, "integrated": data.get(user_id) or data}
+    # walk
+    walk = tool_get_walk_data(user_id)  # reuse our tool
+    records = []
+    if isinstance(walk, list):
+        # API may already return a list of user envelopes
+        # normalize to just this user's records
+        leaf = next((r for r in walk if str(r.get("user_id")) == str(user_id)), None)
+        records = (leaf or {}).get("data", []) or (leaf or {}).get("records", [])
+    elif isinstance(walk, dict):
+        # façade might already return {'records': [...]}
+        records = walk.get("records", walk.get("data", [])) or []
+
+    # primitive rollups
+    days = len(records)
+    total_steps = sum(int(r.get("steps", 0) or 0) for r in records)
+    avg_steps = int(total_steps / days) if days else 0
+
+    return {
+        "user_id": user_id,
+        "streams": {
+            "walk": {
+                "records": records,
+                "stats": {"days": days, "total_steps": total_steps, "avg_steps": avg_steps}
+            }
+        },
+        "generated_at": int(_time.time())
+    }
+
 
 @mcp.resource("hdt://{user_id}/sources")
 def list_sources(user_id: str) -> dict:
@@ -55,10 +124,23 @@ def list_sources(user_id: str) -> dict:
     (what the README calls out in config/users.json)."""
     try:
         with open("config/users.json", "r", encoding="utf-8") as f:
-            users = json.load(f)
+            root = json.load(f)
+        users = root.get("users", [])
+        u = next((u for u in users if str(u.get("user_id")) == str(user_id)), None)
     except FileNotFoundError:
-        users = {}
-    return {"user_id": user_id, "sources": users.get(user_id, {})}
+        u = None
+    return {"user_id": user_id, "sources": (u or {}).get("connected_apps_walk_data", [])}
+
+@mcp.resource("registry://tools")
+def registry_tools() -> dict:
+    return {
+        "server": "HDT-MCP",
+        "tools": [
+            {"name": "hdt.get_walk_data@v1", "args": ["user_id"]},
+            {"name": "hdt.get_trivia_data@v1", "args": ["user_id"]},
+            {"name": "hdt.get_sugarvita_data@v1", "args": ["user_id"]},
+        ]
+    }
 
 
 # --- 2) TOOLS (actions / compute) -------------------------------------------
@@ -67,17 +149,51 @@ def list_sources(user_id: str) -> dict:
 @mcp.tool(name="hdt.get_trivia_data@v1")
 def tool_get_trivia_data(user_id: str) -> dict:
     """Wraps /get_trivia_data endpoint."""
-    return _hdt_get("/get_trivia_data", {"user_id": user_id})
+    t0 = _time.time()
+    try:
+        out = _cached_get("/get_trivia_data", {"user_id": user_id})
+        _log_event("tool", "hdt.get_trivia_data@v1", {"user_id": user_id}, True, int((_time.time()-t0)*1000))
+        return out
+    except Exception as e:
+        _log_event("tool", "hdt.get_trivia_data@v1", {"user_id": user_id, "error": str(e)}, False, int((_time.time()-t0)*1000))
+        return {"error": str(e), "user_id": user_id}
 
 @mcp.tool(name="hdt.get_sugarvita_data@v1")
 def tool_get_sugarvita_data(user_id: str) -> dict:
     """Wraps /get_sugarvita_data endpoint."""
-    return _hdt_get("/get_sugarvita_data", {"user_id": user_id})
+    t0 = _time.time()
+    try:
+        out = _cached_get("/get_sugarvita_data", {"user_id": user_id})
+        _log_event("tool", "hdt.get_sugarvita_data@v1", {"user_id": user_id}, True, int((_time.time()-t0)*1000))
+        return out
+    except Exception as e:
+        _log_event("tool", "hdt.get_sugarvita_data@v1", {"user_id": user_id, "error": str(e)}, False, int((_time.time()-t0)*1000))
+        return {"error": str(e), "user_id": user_id}
 
 @mcp.tool(name="hdt.get_walk_data@v1")
 def tool_get_walk_data(user_id: str) -> dict:
     """Wraps /get_walk_data endpoint."""
-    return _hdt_get("/get_walk_data", {"user_id": user_id})
+    t0 = _time.time()
+    try:
+        out = _cached_get("/get_walk_data", {"user_id": user_id})
+        _log_event("tool", "hdt.get_walk_data@v1", {"user_id": user_id}, True, int((_time.time()-t0)*1000))
+        return out
+    except Exception as e:
+        _log_event("tool", "hdt.get_walk_data@v1", {"user_id": user_id, "error": str(e)}, False, int((_time.time()-t0)*1000))
+        return {"error": str(e), "user_id": user_id}
+
+@mcp.tool(name="policy.evaluate@v1")
+def policy_evaluate(purpose: Literal["analytics", "modeling", "coaching"] = "analytics") -> dict:
+    enabled = (os.getenv("HDT_ENABLE_POLICY_TOOLS", "1").strip().lower() in {"1","true","yes","on"})
+    if not enabled:
+        return {
+            "purpose": purpose,
+            "allow": False,
+            "redact_fields": [],
+            "disabled": True,
+            "reason": "HDT_ENABLE_POLICY_TOOLS=0"
+        }
+    return {"purpose": purpose, "allow": True, "redact_fields": []}
 
 
 # --- 3) “Model Hub” placeholders (M1/M2) ------------------------------------
@@ -94,38 +210,6 @@ class Strategy(TypedDict):
     com_b_focus: list[Literal["Capability", "Opportunity", "Motivation"]]
     suggestions: list[str]
     bct_refs: list[str]
-
-@mcp.tool(name="behavior_strategy@v1")
-def behavior_strategy(
-    stage: Literal[
-        "precontemplation",
-        "contemplation",
-        "preparation",
-        "action",
-        "maintenance",
-    ],
-    com_b_focus: list[str] = []
-) -> Strategy:
-    """
-    Toy COM-B/TTM policy engine to prove the façade path from C2→MH works.
-    """
-    base = {
-        "precontemplation": (["Increase awareness of benefits", "Prompt self-reflection"], ["5.1","5.3","1.1"]),
-        "contemplation":    (["Weigh pros/cons", "Draft if-then plans"], ["1.2","1.4","1.2"]),
-        "preparation":      (["Set graded tasks", "Action planning with cues"], ["1.4","8.7","7.1"]),
-        "action":           (["Problem solve barriers", "Schedule social support"], ["1.2","3.1","3.2"]),
-        "maintenance":      (["Relapse prevention", "Review behavior goals"], ["1.2","1.5","8.3"]),
-    }
-    sug, bct = base[stage]
-    if "Capability" in com_b_focus:  sug += ["Instruction: how to perform behavior"]
-    if "Opportunity" in com_b_focus: sug += ["Restructure environment (physical/social)"]
-    if "Motivation" in com_b_focus:  sug += ["Identity salience & reinforcement schedule"]
-    # de-dup suggestions while preserving order
-    seen, dedup = set(), []
-    for s in sug:
-        if s not in seen:
-            seen.add(s); dedup.append(s)
-    return {"stage": stage, "com_b_focus": com_b_focus, "suggestions": dedup, "bct_refs": bct}
 
 
 class TimingPlan(TypedDict):
