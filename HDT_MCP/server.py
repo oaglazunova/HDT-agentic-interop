@@ -1,4 +1,4 @@
-from typing import Literal, TypedDict
+from typing import Literal, TypedDict, Any
 import os
 import json
 import requests
@@ -12,6 +12,8 @@ from dotenv import load_dotenv
 # Load .env from repo root (…/HDT-agentic-interop/.env)
 ENV_PATH = Path(__file__).resolve().parents[1] / ".env"
 load_dotenv(ENV_PATH)  # replaces your plain load_dotenv()
+
+MCP_CLIENT_ID = os.getenv("MCP_CLIENT_ID", "MODEL_DEVELOPER_1")
 
 # Your existing API that the MCP façade talks to (your Flask/whatever service).
 HDT_API_BASE = os.environ.get("HDT_API_BASE", "http://localhost:5000")
@@ -27,6 +29,11 @@ _TELEMETRY_DIR.mkdir(exist_ok=True)
 
 _cache: dict[tuple[str, tuple], tuple[float, dict]] = {}
 _CACHE_TTL = 15.0  # seconds
+
+_POLICY_PATH = Path(__file__).resolve().parents[1] / "config" / "policy.json"
+
+_CACHE_TTL = int(os.getenv("HDT_CACHE_TTL", "15"))
+_RETRY_MAX = int(os.getenv("HDT_RETRY_MAX", "2"))
 
 # Create the MCP server façade (B0: MCP Core / Orchestrator)
 mcp = FastMCP(
@@ -78,6 +85,76 @@ def _cached_get(path: str, params: dict | None=None) -> dict:
     data = _hdt_get(path, params)
     _cache[key] = (now, data)
     return data
+
+def _load_policy() -> dict:
+    try:
+        with open(_POLICY_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {"defaults": {"analytics": {"allow": True, "redact": []}}}
+
+def _get_policy_decision(tool_name: str, purpose: str, client_id: str | None) -> dict:
+    p = _load_policy()
+    # precedence: tools > clients > defaults
+    node = (p.get("tools", {}).get(tool_name, {}).get(purpose)
+            or (p.get("clients", {}).get(client_id or "", {}).get(purpose))
+            or p.get("defaults", {}).get(purpose)
+            or {"allow": True, "redact": []})
+    return {"allow": bool(node.get("allow", True)),
+            "redact": list(node.get("redact", []))}
+
+def _redact_inplace(obj: Any, paths: list[str]) -> Any:
+    for path in paths:
+        parts = path.split(".")
+        _redact_path(obj, parts)
+    return obj
+
+def _redact_path(curr: Any, parts: list[str]):
+    if not parts:
+        return
+    key = parts[0]
+    rest = parts[1:]
+    # lists: apply to every element
+    if isinstance(curr, list):
+        for item in curr:
+            _redact_path(item, parts)
+        return
+    # dicts
+    if isinstance(curr, dict):
+        if not rest and key in curr:
+            curr[key] = "***redacted***"
+            return
+        nxt = curr.get(key)
+        if nxt is not None:
+            _redact_path(nxt, rest)
+
+def _with_policy(tool_name: str, payload: dict, purpose: str = "analytics") -> dict:
+    decision = _get_policy_decision(tool_name, purpose, MCP_CLIENT_ID)
+    out = {"allowed": decision["allow"], "purpose": purpose, "tool": tool_name}
+    if not decision["allow"]:
+        out["error"] = "Blocked by policy"
+        return out
+    # redact in a copy
+    data = json.loads(json.dumps(payload))
+    _redact_inplace(data, decision["redact"])
+    out["data"] = data
+    out["redactions_applied"] = decision["redact"]
+    return out
+
+def _hdt_get(path: str, params: dict | None=None) -> dict:
+    url = _api_url(path)
+    last = None
+    for attempt in range(1, _RETRY_MAX + 2):
+        try:
+            r = requests.get(url, headers=_headers(), params=params or {}, timeout=30)
+            r.raise_for_status()
+            return r.json()
+        except Exception as e:
+            last = e
+            if attempt <= _RETRY_MAX:
+                _time.sleep(0.5 * attempt)  # simple backoff
+            else:
+                raise last
 
 
 # ---------- RESOURCES (context / “read-only”) ----------
@@ -142,6 +219,14 @@ def registry_tools() -> dict:
         ]
     }
 
+@mcp.resource("telemetry://recent/{n}")
+def telemetry_recent(n: int = 50) -> dict:
+    p = _TELEMETRY_DIR / "mcp-telemetry.jsonl"
+    if not p.exists():
+        return {"records": []}
+    lines = p.read_text(encoding="utf-8").splitlines()[-n:]
+    return {"records": [json.loads(x) for x in lines]}
+
 
 # --- 2) TOOLS (actions / compute) -------------------------------------------
 # Tools are callables with typed params; MCP auto-generates JSON Schemas (B1).
@@ -151,9 +236,10 @@ def tool_get_trivia_data(user_id: str) -> dict:
     """Wraps /get_trivia_data endpoint."""
     t0 = _time.time()
     try:
-        out = _cached_get("/get_trivia_data", {"user_id": user_id})
+        raw = _cached_get("/get_trivia_data", {"user_id": user_id})
+        wrapped = _with_policy("hdt.get_trivia_data@v1", raw)
         _log_event("tool", "hdt.get_trivia_data@v1", {"user_id": user_id}, True, int((_time.time()-t0)*1000))
-        return out
+        return wrapped
     except Exception as e:
         _log_event("tool", "hdt.get_trivia_data@v1", {"user_id": user_id, "error": str(e)}, False, int((_time.time()-t0)*1000))
         return {"error": str(e), "user_id": user_id}
@@ -163,23 +249,48 @@ def tool_get_sugarvita_data(user_id: str) -> dict:
     """Wraps /get_sugarvita_data endpoint."""
     t0 = _time.time()
     try:
-        out = _cached_get("/get_sugarvita_data", {"user_id": user_id})
+        raw = _cached_get("/get_sugarvita_data", {"user_id": user_id})
+        wrapped = _with_policy("hdt.get_sugarvita_data@v1", raw)
         _log_event("tool", "hdt.get_sugarvita_data@v1", {"user_id": user_id}, True, int((_time.time()-t0)*1000))
-        return out
+        return wrapped
     except Exception as e:
         _log_event("tool", "hdt.get_sugarvita_data@v1", {"user_id": user_id, "error": str(e)}, False, int((_time.time()-t0)*1000))
         return {"error": str(e), "user_id": user_id}
 
 @mcp.tool(name="hdt.get_walk_data@v1")
-def tool_get_walk_data(user_id: str) -> dict:
-    """Wraps /get_walk_data endpoint."""
+def tool_get_walk_data(user_id: str, purpose: Literal["analytics","modeling","coaching"]="analytics") -> dict:
     t0 = _time.time()
     try:
-        out = _cached_get("/get_walk_data", {"user_id": user_id})
-        _log_event("tool", "hdt.get_walk_data@v1", {"user_id": user_id}, True, int((_time.time()-t0)*1000))
+        raw = _cached_get("/get_walk_data", {"user_id": user_id})
+        wrapped = _with_policy("hdt.get_walk_data@v1", raw, purpose=purpose)
+        _log_event("tool", "hdt.get_walk_data@v1", {"user_id": user_id, "purpose": purpose}, True, int((_time.time()-t0)*1000))
+        return wrapped
+    except Exception as e:
+        _log_event("tool", "hdt.get_walk_data@v1", {"user_id": user_id, "purpose": purpose, "error": str(e)}, False, int((_time.time()-t0)*1000))
+        return {"error": str(e), "user_id": user_id}
+
+@mcp.tool(name="hdt.get_sugarvita_player_types@v1")
+def tool_get_sugarvita_player_types(user_id: str, purpose: Literal["analytics","modeling","coaching"]="analytics") -> dict:
+    t0 = _time.time()
+    try:
+        raw = _cached_get("/get_sugarvita_player_types", {"user_id": user_id})
+        out = _with_policy("hdt.get_sugarvita_player_types@v1", raw, purpose)
+        _log_event("tool", "hdt.get_sugarvita_player_types@v1", {"user_id": user_id, "purpose": purpose}, True, int((_time.time()-t0)*1000))
         return out
     except Exception as e:
-        _log_event("tool", "hdt.get_walk_data@v1", {"user_id": user_id, "error": str(e)}, False, int((_time.time()-t0)*1000))
+        _log_event("tool", "hdt.get_sugarvita_player_types@v1", {"user_id": user_id, "purpose": purpose, "error": str(e)}, False, int((_time.time()-t0)*1000))
+        return {"error": str(e), "user_id": user_id}
+
+@mcp.tool(name="hdt.get_health_literacy_diabetes@v1")
+def tool_get_health_literacy_diabetes(user_id: str, purpose: Literal["analytics","modeling","coaching"]="analytics") -> dict:
+    t0 = _time.time()
+    try:
+        raw = _cached_get("/get_health_literacy_diabetes", {"user_id": user_id})
+        out = _with_policy("hdt.get_health_literacy_diabetes@v1", raw, purpose)
+        _log_event("tool", "hdt.get_health_literacy_diabetes@v1", {"user_id": user_id, "purpose": purpose}, True, int((_time.time()-t0)*1000))
+        return out
+    except Exception as e:
+        _log_event("tool", "hdt.get_health_literacy_diabetes@v1", {"user_id": user_id, "purpose": purpose, "error": str(e)}, False, int((_time.time()-t0)*1000))
         return {"error": str(e), "user_id": user_id}
 
 @mcp.tool(name="policy.evaluate@v1")

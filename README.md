@@ -1,4 +1,4 @@
-# Interoperable and Modular HDT System Prototype
+# HDT Prototype with Agentic Interoperability 
 
 This project provides a prototype of an interoperable and modular **Human Digital Twins (HDT)** system architecture.
 
@@ -7,11 +7,6 @@ Interoperability refers to the system's ability to access, synthesize, and stand
 Modularity refers to the system's capacity to support the open development, testing, and integration of various virtual twin models. This flexibility encourages collaboration and facilitates the extension of the system with new functionalities.
 
 This prototype establishes a solid foundation for future expansion and improvement. To foster further development, this public repository is intended to serve as a collaborative resource for researchers and developers interested in advancing such systems.
-
-For detailed information about the project, please refer to the associated master's thesis paper [Thesis Paper (06-12-24 V2)](docs/Thesis%20paper%2006-12-24%20V2.pdf), titled:
-
-**"Designing an Interoperable and Modular System Architecture to Support the Development of Human Digital Twins for Promoting Healthy Lifestyle Behaviors"**
-
 
 
 The remainder of this README provides detailed information about the system components and instructions for deployment.
@@ -97,14 +92,14 @@ Full documentation for the **HDT API endpoints** is available through Swagger:
 ### Environment Setup
 1. Clone the repository:
    ```bash
-   git clone https://github.com/YourUsername/Interoperable-and-modular-HDT-system-prototype.git
-   cd Interoperable-and-modular-HDT-system-prototype
+   git clone https://github.com/YourUsername/HDT-agentic-interop.git
+   cd HDT-agentic-interop
    ```
 
 2. Set up a virtual environment:
    ```bash
-   python3 -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   python -m venv venv
+   .\.venv\Scripts\Activate.ps1
    ```
 
 3. Install dependencies:
@@ -112,10 +107,16 @@ Full documentation for the **HDT API endpoints** is available through Swagger:
    pip install -r requirements.txt
    ```
 
-4. Ensure the `.env` file in the `config` folder contains valid API keys:
+4. Set up the `.env` file in the root folder:
    ```plaintext
-   MODEL_DEVELOPER_1_API_KEY=your_key_here
-   HEALTH_APP_1_API_KEY=your_key_here
+   HDT_API_BASE=http://localhost:5000 
+   HDT_API_KEY=your_key_here
+   MCP_TRANSPORT=stdio
+   HDT_ALLOW_PLACEHOLDER_MOCKS=1
+   HDT_ENABLE_POLICY_TOOLS=1
+   MCP_CLIENT_ID=your_client_ID_here
+   HDT_CACHE_TTL=60
+   HDT_RETRY_MAX=3
    ```
 
 ---
@@ -151,24 +152,28 @@ In the future, this file should be replaced by a proper ui with advanced authent
 
 2. The API will run on `http://localhost:5000`.
 
-3. In another terminal, start the MCP façade:
-`python HDT_MCP/server.py`
+3. In another terminal, start the MCP façade (stdio on Windows):
+```powershell
+python -m HDT_MCP.server
+```
 
-4. In another terminal, start the MCP inspector:
-`mcp dev HDT_MCP/server.py`
-Or with config:
-`npx @modelcontextprotocol/inspector --config .\config\mcp.json --server hdt-mcp`
+4. Start the MCP Inspector:
+- Simple dev mode:
+```powershell
+mcp dev HDT_MCP/server.py
+```
+- Or using the provided config:
+```powershell
+npx @modelcontextprotocol/inspector --config .\config\mcp.json --server hdt-mcp
+```
 
 
 ### Interacting with the API
-- Use tools like [Postman](https://www.postman.com/) to test the API endpoints.
-- Example endpoints:
-  - `/get_trivia_data`
-  - `/get_sugarvita_data`
-  - `/get_walk_data`
-
-Refer to the [Swagger Documentation](https://pimvanvroonhoven.github.io/Interoperable-and-modular-HDT-system-prototype/) for full details.
-
+You can interact with API using MCP tools in the Inspector or via HTTP requests (e.g., Postman, cURL).
+Example cURL request to fetch trivia data:
+```bash
+curl -X GET "http://localhost:5000/get_trivia_data?user_id=1" -H "X-API-KEY: your_key_here"
+```
 ---
 
 ## How Components Interact
@@ -198,10 +203,219 @@ Refer to the [Swagger Documentation](https://pimvanvroonhoven.github.io/Interope
 
 ---
 
-## Contributing
 
-Contributions are welcome! Please fork the repository and submit a pull request with your changes.
+## MCP Facade (Model Context Protocol)
 
+This repository includes an MCP server (façade) that exposes the HDT API and a few convenience utilities as MCP tools and resources. You can run it over stdio (best for local tooling and the Inspector) or as an HTTP server.
 
+### Overview
+- Location: `HDT_MCP/server.py`
+- Entrypoint (Windows, stdio):
+  ```powershell
+  python -m HDT_MCP.server
+  ```
+- Transport selection: set `MCP_TRANSPORT` environment variable to `"stdio"` (default) or `"streamable-http"`.
+- Policy file: `config/policy.json` (see Policy contract below)
+- Telemetry file: `HDT_MCP/telemetry/mcp-telemetry.jsonl`
 
+### 1) Run the API first
+Start the HDT API so the MCP façade can call it:
+```powershell
+python -m HDT_CORE_INFRASTRUCTURE.HDT_API
+```
+The API serves on `http://localhost:5000` by default.
 
+### 2) Run the MCP server
+
+#### A. Stdio transport (recommended for local dev and Inspector)
+PowerShell (Windows):
+```powershell
+# Optional: ensure stdio (this is the default)
+$env:MCP_TRANSPORT = "stdio"
+
+# Optionally pass API base/key via environment variables
+$env:HDT_API_BASE = "http://localhost:5000"
+$env:HDT_API_KEY  = "YOUR_API_KEY"
+
+# Start the server
+python -m HDT_MCP.server
+```
+
+#### B. HTTP transport (for desktop agents / remote clients)
+PowerShell (Windows):
+```powershell
+$env:MCP_TRANSPORT = "streamable-http"
+$env:HDT_API_BASE  = "http://localhost:5000"
+$env:HDT_API_KEY   = "YOUR_API_KEY"
+python -m HDT_MCP.server
+```
+Notes:
+- The HTTP transport is provided by `FastMCP`. Default host/port may be printed on launch by the library. If your agent needs a specific port/host, consult `mcp.server.fastmcp` docs for environment variables or wrapper options.
+- For most model/dev workflows, stdio with the Inspector is simplest.
+
+### 3) Inspector setup
+You can use the MCP Inspector to explore and call tools.
+
+Option 1 — Use the provided config file:
+```powershell
+# From the repo root (Windows)
+# This uses config/mcp.json to start a stdio server via the Python MCP CLI
+npx @modelcontextprotocol/inspector --config .\config\mcp.json --server hdt-mcp
+```
+
+Option 2 — Simple dev mode (no config):
+```powershell
+# Ensure the API is running, then in another terminal:
+python -m HDT_MCP.server   # stdio server
+
+# And start Inspector in dev mode, pointing at the Python entrypoint:
+npx @modelcontextprotocol/inspector dev HDT_MCP/server.py
+```
+
+Tip: If you installed the Python `mcp` CLI, you can also use:
+```powershell
+mcp dev HDT_MCP/server.py
+```
+
+### 4) Environment variables
+- `HDT_API_BASE` (default `http://localhost:5000`): Where the MCP façade sends API requests.
+- `HDT_API_KEY`: API key forwarded in `X-API-KEY` and `Authorization: Bearer ...` headers.
+- `MCP_TRANSPORT` (default `stdio`): `stdio` or `streamable-http`.
+- `MCP_CLIENT_ID` (default `MODEL_DEVELOPER_1`): Used for policy evaluation (`clients` section).
+- `HDT_ENABLE_POLICY_TOOLS` (default `0` in config/mcp.json; recommended `1` locally): Enables policy-aware envelopes and the `policy.evaluate@v1` tool.
+- `HDT_CACHE_TTL` (seconds, default `15`): In-process GET cache TTL.
+- `HDT_RETRY_MAX` (default `2`): Retries for API GETs.
+
+---
+
+## MCP Tools and Resources
+
+All tools return a policy envelope when allowed: 
+```json
+{
+  "allowed": true,
+  "purpose": "analytics",
+  "tool": "hdt.get_walk_data@v1",
+  "data": { "example": "redacted payload from API" },
+  "redactions_applied": ["records[].user_id"]
+}
+```
+When a call is blocked by policy, you receive:
+```json
+{ "allowed": false, "purpose": "analytics", "tool": "hdt.get_walk_data@v1", "error": "Blocked by policy" }
+```
+
+### Tools
+- `hdt.get_trivia_data@v1(user_id: str)`
+  - Wraps `/get_trivia_data`. Example args:
+    ```json
+    { "user_id": "1" }
+    ```
+- `hdt.get_sugarvita_data@v1(user_id: str)`
+  - Wraps `/get_sugarvita_data`. Example:
+    ```json
+    { "user_id": "1" }
+    ```
+- `hdt.get_walk_data@v1(user_id: str, purpose: "analytics"|"modeling"|"coaching" = "analytics")`
+  - Wraps `/get_walk_data`. Example:
+    ```json
+    { "user_id": "1", "purpose": "analytics" }
+    ```
+- `hdt.get_sugarvita_player_types@v1(user_id: str, purpose = "analytics")`
+  - Wraps `/get_sugarvita_player_types`. Example:
+    ```json
+    { "user_id": "1" }
+    ```
+- `hdt.get_health_literacy_diabetes@v1(user_id: str, purpose = "analytics")`
+  - Wraps `/get_health_literacy_diabetes`. Example:
+    ```json
+    { "user_id": "1" }
+    ```
+- `policy.evaluate@v1(purpose = "analytics")`
+  - Simple toggle to confirm if policy tools are enabled. Returns `{ purpose, allow, redact_fields, ... }`.
+- `intervention_time@v1(local_tz = "Europe/Amsterdam", preferred_hours = [18,21], min_gap_hours = 6, last_prompt_iso = null)`
+  - Returns a basic suggestion for next intervention window.
+
+### Resources
+- `vault://{user_id}/integrated`
+  - Minimal integrated view combining walk records and rollups for a user.
+- `hdt://{user_id}/sources`
+  - Lists connected data sources for the user (from `config/users.json`).
+- `registry://tools`
+  - Returns a compact list of available tools.
+- `telemetry://recent/{n}`
+  - Returns the last `n` telemetry events recorded locally by the MCP façade.
+
+---
+
+## Policy file contract (`config/policy.json`)
+
+The policy controls which tools are allowed and which fields are redacted in tool outputs. It supports three levels, with the following precedence:
+1) Tool-specific overrides (`tools`)
+2) Client-specific defaults (`clients`, keyed by `MCP_CLIENT_ID`)
+3) Global defaults (`defaults`)
+
+Each level maps a `purpose` to a rule object:
+```json
+{
+  "allow": true,
+  "redact": ["records[].user_id", "records[].steps"]
+}
+```
+- `allow` (boolean): If false, the call returns `{ allowed: false, error: "Blocked by policy" }`.
+- `redact` (array of dot-paths): Fields to replace with `***redacted***`. Works through objects and arrays (use `[]` to indicate array elements).
+
+### Full example
+```json
+{
+  "defaults": {
+    "analytics": { "allow": true,  "redact": [] },
+    "modeling":  { "allow": true,  "redact": ["records[].user_id"] },
+    "coaching":  { "allow": false, "redact": [] }
+  },
+  "clients": {
+    "MODEL_DEVELOPER_1": {
+      "analytics": { "allow": true, "redact": [] },
+      "coaching":  { "allow": true, "redact": ["records[].user_id", "records[].steps"] }
+    }
+  },
+  "tools": {
+    "hdt.get_walk_data@v1": {
+      "analytics": { "allow": true, "redact": ["records[].user_id"] }
+    },
+    "hdt.get_trivia_data@v1": {
+      "analytics": { "allow": true, "redact": ["data[].player_name"] }
+    }
+  }
+}
+```
+In the example above:
+- For `hdt.get_walk_data@v1` at purpose `analytics`, the `tools` rule applies and redacts `records[].user_id`.
+- If no tool rule exists, the system falls back to the `clients` rule for the current `MCP_CLIENT_ID`, then to `defaults`.
+
+### Enabling/Disabling policy features
+- Set `HDT_ENABLE_POLICY_TOOLS=1` to enable policy-aware behavior and the `policy.evaluate@v1` tool.
+- If disabled, `policy.evaluate@v1` returns `disabled: true`, and tools may bypass policy envelopes depending on configuration.
+
+---
+
+## End-to-end example (Windows)
+1) Start API:
+```powershell
+python -m HDT_CORE_INFRASTRUCTURE.HDT_API
+```
+2) Start MCP (stdio):
+```powershell
+$env:HDT_API_BASE = "http://localhost:5000"
+$env:HDT_API_KEY  = "YOUR_API_KEY"
+$env:HDT_ENABLE_POLICY_TOOLS = "1"
+python -m HDT_MCP.server
+```
+3) Launch Inspector:
+```powershell
+npx @modelcontextprotocol/inspector --config .\config\mcp.json --server hdt-mcp
+```
+4) In the Inspector, call the tool `hdt.get_walk_data@v1` with arguments:
+```json
+{ "user_id": "1", "purpose": "analytics" }
+```
