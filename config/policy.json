@@ -1,17 +1,17 @@
 {
   "defaults": {
-    "analytics":  { "allow": true,  "redact": ["user.email", "user.name"] },
-    "modeling":   { "allow": true,  "redact": ["user.email", "user.name"] },
-    "coaching":   { "allow": true,  "redact": [] }
+    "analytics": { "allow": true, "redact": [] },
+    "modeling":  { "allow": true, "redact": ["user.email","user.name"] },
+    "coaching":  { "allow": true, "redact": [] }
   },
   "clients": {
     "MODEL_DEVELOPER_1": {
-      "analytics": { "allow": true, "redact": ["user.email"] }
+      "analytics": { "allow": true, "redact": ["user.email"] },
+      "modeling":  { "allow": false }
     }
   },
   "tools": {
-	  "hdt.get_walk_data@v1": {
-		"analytics": { "allow": true, "redact": ["records[*].kcalories", "records[*].distance_meters"] }
-	  }
+    "hdt.get_walk_data@v1": { "analytics": { "allow": true, "redact": [] } },
+    "vault.integrated@v1":  { "analytics": { "allow": true, "redact": [] } }
   }
 }

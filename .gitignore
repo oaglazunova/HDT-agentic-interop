@@ -25,7 +25,7 @@ htmlcov/
 
 # Environment/secrets
 .env
-secrets.csv
+/config/users.secrets.json
 
 # Local data/results
 .csv
@@ -33,3 +33,4 @@ digital_twin_results.csv
 trivia.json
 engagement.json
 playthrough.json
+

@@ -1,11 +1,34 @@
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, request, send_from_directory, make_response
 import json
 import sys
 import os, logging
 from datetime import date, timedelta
 
+from HDT_MCP.server import policy_reload
+
 # Add the project root to the Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+def json_with_headers(payload, *, policy: str | None = None, status: int = 200):
+    """Return a JSON response with standard governance headers."""
+    resp = jsonify(payload)
+    resp.status_code = status
+    # request.client is set by your authenticate_and_authorize decorator
+    cid = (getattr(request, "client", {}) or {}).get("client_id", "unknown")
+
+    # Count users if the payload is a list-of-user-envelopes, else 1
+    users_count = len(payload) if isinstance(payload, list) else 1
+
+    resp.headers["X-Client-Id"] = str(cid)
+    resp.headers["X-Users-Count"] = str(users_count)
+    if policy is not None:
+        resp.headers["X-Policy"] = policy
+
+    # If you call from a browser and want to read these headers in JS:
+    resp.headers["Access-Control-Allow-Origin"] = request.headers.get("Origin", "*")
+    resp.headers["Vary"] = "Origin"
+    resp.headers["Access-Control-Expose-Headers"] = "X-Client-Id, X-Users-Count, X-Policy"
+    return resp
 
 # Try both import styles to support running as a module or directly
 try:
@@ -42,27 +65,84 @@ app.logger.info("Loaded %d user-permission entries", len(user_permissions))
 # Define the path to the static directory
 static_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'static'))
 
-# Load users from config/users.json
-# Use absolute path for users.json
+# ---- Users loader (public + secrets overlay) --------------------------------
 config_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'config'))
-users_file = os.path.join(config_dir, 'users.json')
+USERS_PUBLIC_FILE = os.path.join(config_dir, 'users.json')
+USERS_SECRETS_FILE = os.path.join(config_dir, 'users.secrets.json')
+
+def _load_users_file(path: str) -> list[dict]:
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    if not isinstance(data, dict) or "users" not in data or not isinstance(data["users"], list):
+        raise ValueError(f"Invalid users file format: {path}")
+    return data["users"]
+
+def _merge_lists_by_identity(pub_list: list[dict], sec_list: list[dict], identity_keys=("connected_application","player_id")) -> list[dict]:
+    """
+    Merge two lists of connector entries:
+    - Match items by identity_keys (connected_application + player_id).
+    - If match found, overlay secret fields (e.g., auth_bearer) onto the public item.
+    - If no secret match, keep the public item as-is.
+    """
+    merged = []
+    # Build fast lookup for secrets
+    sec_index = {}
+    for s in sec_list or []:
+        key = tuple((s.get(k) or "") for k in identity_keys)
+        sec_index.setdefault(key, []).append(s)
+
+    for p in pub_list or []:
+        key = tuple((p.get(k) or "") for k in identity_keys)
+        s = (sec_index.get(key) or [None])[0]
+        if s:
+            # Overlay – but do not let secrets change identity fields
+            over = {**p, **{k: v for k, v in s.items() if k not in {"connected_application","player_id"}}}
+            merged.append(over)
+        else:
+            merged.append(p)
+    return merged
+
+def _merge_users(public_users: list[dict], secret_users: list[dict]) -> dict[int, dict]:
+    # Build secret lookup by user_id
+    sec_by_uid = {int(u.get("user_id")): u for u in secret_users or [] if "user_id" in u}
+
+    merged_by_uid: dict[int, dict] = {}
+    for pu in public_users:
+        uid = int(pu["user_id"])
+        su = sec_by_uid.get(uid, {})
+        merged_entry = dict(pu)  # shallow copy
+
+        # Merge all known connector arrays you use in code
+        for key in ("connected_apps_diabetes_data", "connected_apps_walk_data", "connected_apps_nutrition_data"):
+            merged_entry[key] = _merge_lists_by_identity(
+                pu.get(key, []),
+                (su or {}).get(key, [])
+            )
+        merged_by_uid[uid] = merged_entry
+
+    return merged_by_uid
 
 try:
-    with open(users_file) as f:
-        users_data = json.load(f)
-        if "users" not in users_data:
-            raise ValueError("Invalid users.json format: missing 'users' key")
-        users = {user["user_id"]: user for user in users_data["users"]}
-    app.logger.info("Loaded %d users", len(users))
+    public = _load_users_file(USERS_PUBLIC_FILE)
 except FileNotFoundError:
-    app.logger.error(f"Users file not found: {users_file}")
-    users = {}
-except json.JSONDecodeError as e:
-    app.logger.error(f"Invalid JSON in users file: {e}")
-    users = {}
-except (KeyError, ValueError) as e:
-    app.logger.error(f"Error loading users: {e}")
-    users = {}
+    app.logger.error("Users public file not found: %s", USERS_PUBLIC_FILE)
+    public = []
+except Exception as e:
+    app.logger.error("Error loading users.json: %s", e)
+    public = []
+
+try:
+    secrets = _load_users_file(USERS_SECRETS_FILE)
+    app.logger.info("Loaded users.secrets.json (overlay)")
+except FileNotFoundError:
+    secrets = []
+    app.logger.warning("users.secrets.json not found; proceeding without secrets overlay")
+except Exception as e:
+    secrets = []
+    app.logger.error("Error loading users.secrets.json: %s", e)
+
+users = _merge_users(public, secrets)
+app.logger.info("Loaded %d users (merged)", len(users))
 
 def get_users_by_permission(client_id, required_permission):
     """
@@ -82,26 +162,24 @@ def get_users_by_permission(client_id, required_permission):
 
 def get_connected_app_info(user_id, app_type):
     """
-    Retrieve the connected application, player ID, and auth bearer token for a specific type of data.
-
-    Args:
-        user_id (int): The ID of the user.
-        app_type (str): The type of connected app data (e.g., "diabetes_data", "walk_data").
-
-    Returns:
-        tuple: (connected_application, player_id, auth_bearer) or ("Unknown", None, None) if not found.
+    Return (connected_application, player_id, auth_bearer) or ("Unknown", None, None).
+    Reads from the merged in-memory 'users' dict.
     """
     user = users.get(user_id)
     if not user:
         return "Unknown", None, None
 
     connected_apps_key = f"connected_apps_{app_type}"
-    if connected_apps_key in user and user[connected_apps_key]:
-        app_data = user[connected_apps_key][0]  # Assuming the first app is primary
-        return app_data["connected_application"], app_data["player_id"], app_data["auth_bearer"]
+    entries = user.get(connected_apps_key) or []
+    if not entries:
+        return "Unknown", None, None
 
-    return "Unknown", None, None
-
+    app_data = entries[0]  # first connector is primary
+    return (
+        app_data.get("connected_application", "Unknown"),
+        app_data.get("player_id"),
+        app_data.get("auth_bearer")  # may be None if secrets missing—fetchers should handle that
+    )
 
 # Metadata Endpoint for Model Developer APIs
 @app.route("/metadata/model_developer_apis", methods=["GET"])
@@ -179,7 +257,7 @@ def metadata_model_developer_apis():
         ]
     }
 
-    return jsonify(metadata), 200
+    return json_with_headers(metadata, policy="info"), 200
 
 
 # Metadata Endpoint for App Developer APIs
@@ -248,7 +326,7 @@ def metadata_app_developer_apis():
         ]
     }
 
-    return jsonify(metadata), 200
+    return json_with_headers(metadata, policy="info"), 200
 
 
 
@@ -304,10 +382,10 @@ def get_trivia_data():
             else:
                 response_data.append({"user_id": user_id, "error": f"User {user_id} does not have a connected diabetes application."})
 
-        return jsonify(response_data), 200
+        return json_with_headers(response_data, policy="passthrough")
     except Exception as e:
         logging.error(f"Error in get_trivia_data endpoint: {e}")
-        return jsonify({"error": "Internal server error"}), 500
+        return json_with_headers({"error": "Internal server error"}, status=500, policy="error")
 
 
 # SugarVita endpoint
@@ -339,10 +417,10 @@ def get_sugarvita_data():
             else:
                 response_data.append({"user_id": user_id, "error": f"User {user_id} does not have a connected diabetes application."})
 
-        return jsonify(response_data), 200
+        return json_with_headers(response_data, policy="passthrough")
     except Exception as e:
         logging.error(f"Error in get_sugarvita_data endpoint: {e}")
-        return jsonify({"error": "Internal server error"}), 500
+        return json_with_headers({"error": "Internal server error"}, status=500, policy="error")
 
 
 # Walk endpoint
@@ -364,9 +442,9 @@ def get_walk():
             try:
                 uid = int(user_id_param)
             except ValueError:
-                return jsonify({"error": "user_id must be an integer"}), 400
+                return json_with_headers({"error": "user_id must be an integer"}, status=400, policy="error")
             if uid not in target_ids:
-                return jsonify({"error": f"user {uid} not permitted"}), 403
+                return json_with_headers({"error": f"user {uid} not permitted"}, status=403, policy="deny")
             target_ids = [uid]
 
         # 3) Fetch per user based on connected provider
@@ -379,7 +457,7 @@ def get_walk():
             if app_norm == "gamebus":
                 data = fetch_walk_data(player_id, auth_bearer=auth_bearer)
             elif app_norm in ("google fit", "googlefit", "google_fit"):
-                data = fetch_google_fit_walk_data(player_id, auth_bearer)
+                data = fetch_google_fit_walk_data(player_id, auth_bearer=auth_bearer)
             elif app_norm.startswith("placeholder"):
                 # 4) Optional mock for demos (enable with HDT_ALLOW_PLACEHOLDER_MOCKS=1)
                 if os.getenv("HDT_ALLOW_PLACEHOLDER_MOCKS", "0").lower() in ("1", "true", "yes"):
@@ -401,11 +479,11 @@ def get_walk():
             else:
                 response_data.append({"user_id": uid, "error": f"No data found for user {uid}"})
 
-        return jsonify(response_data), 200
+        return json_with_headers(response_data, policy="passthrough")
 
     except Exception as e:
         logging.exception("Error in get_walk endpoint")  # full traceback
-        return jsonify({"error": "Internal server error"}), 500
+        return json_with_headers({"error": "Internal server error"}, status=500, policy="error")
 
 
 
@@ -421,7 +499,7 @@ def get_sugarvita_player_types():
 
         if user_id not in request.accessible_user_ids:
             logging.debug(f"Unauthorized access attempt to player types for user {user_id}.")
-            return jsonify({"error": "Unauthorized access to this user's data"}), 403
+            return json_with_headers({"error": "Unauthorized access to this user's data"}, status=403, policy="deny")
 
         # Load diabetes_pt_hl_storage.json
         try:
@@ -457,10 +535,12 @@ def get_sugarvita_player_types():
             "player_types": player_types_labels
         }
 
-        return jsonify(response), 200
+        return json_with_headers(response, policy="passthrough")
     except Exception as e:
         logging.error(f"Error in get_sugarvita_player_types endpoint: {e}")
-        return jsonify({"error": "Internal server error"}), 500
+        return json_with_headers({"error": "Internal server error"}, status=500, policy="error")
+        #return json_with_headers({"error": f"No data found for user {user_id}"}, status=404, policy="error")
+        #return json_with_headers({"error": "Unauthorized access to this user's data"}, status=403, policy="deny")
 
 
 # Endpoint for app developers to retrieve the diabetes related health literacy scores of a user
@@ -473,7 +553,7 @@ def get_health_literacy_diabetes():
 
         if user_id not in request.accessible_user_ids:
             logging.debug(f"Unauthorized access attempt to health literacy for user {user_id}.")
-            return jsonify({"error": "Unauthorized access to this user's data"}), 403
+            return json_with_headers({"error": "Unauthorized access to this user's data"}, status=403, policy="deny")
 
         # Load diabetes_pt_hl_storage.json
         try:
@@ -509,11 +589,12 @@ def get_health_literacy_diabetes():
             "health_literacy_score": health_literacy_score
         }
 
-        return jsonify(response), 200
+        return json_with_headers(response, policy="passthrough")
     except Exception as e:
         logging.error(f"Error in get_health_literacy_diabetes endpoint: {e}")
-        return jsonify({"error": "Internal server error"}), 500
-
+        return json_with_headers({"error": "Internal server error"}, status=500, policy="error")
+        #return json_with_headers({"error": f"No data found for user {user_id}"}, status=404, policy="error")
+        #return json_with_headers({"error": "Unauthorized access to this user's data"}, status=403, policy="deny")
 
 
 # Root endpoint to serve the index.html file
@@ -524,12 +605,35 @@ def index():
     """
     return send_from_directory(static_dir, 'index.html')
 
+@app.get("/healthz")
+def healthz():
+    return json_with_headers({"status": "ok"}, policy="info")
+
+# tiny dev-only debug endpoint
+@app.get("/__debug/effective_user/<int:user_id>")
+def debug_effective_user(user_id: int):
+    if os.getenv("DEBUG_USERS", "0") not in ("1","true","yes"):
+        return json_with_headers({"error": "disabled"}, status=404, policy="info")
+    u = users.get(user_id)
+    return json_with_headers(u or {}, policy="info")
+
+#If run from a browser
+@app.after_request
+def add_cors_headers(resp):
+    resp.headers.setdefault("Access-Control-Allow-Methods", "GET,OPTIONS")
+    resp.headers.setdefault("Access-Control-Allow-Headers", "Authorization, Content-Type")
+    return resp
+
+#If run from a browser
+@app.route("/<path:_any>", methods=["OPTIONS"])
+def any_options(_any):
+    # Minimal OK for preflight
+    return ("", 204)
+
 if __name__ == "__main__":
     print("Starting the HDT API server on http://localhost:5000")
     print("Press Ctrl+C to stop the server")
     app.run(debug=True, host='0.0.0.0')
 
 
-@app.get("/healthz")
-def healthz():
-    return jsonify({"status": "ok"}), 200
+

@@ -1,7 +1,5 @@
-from typing import Literal, TypedDict, Any
-import os
-import json
-import requests
+from typing import Literal, TypedDict
+import os, json, threading, requests
 from mcp.server.fastmcp import FastMCP
 import time as _time
 import datetime as _dt
@@ -12,6 +10,9 @@ from dotenv import load_dotenv
 # Load .env from repo root (…/HDT-agentic-interop/.env)
 ENV_PATH = Path(__file__).resolve().parents[1] / ".env"
 load_dotenv(ENV_PATH)  # replaces your plain load_dotenv()
+
+CONFIG_DIR = Path(__file__).resolve().parents[1] / "config"
+_POLICY_PATH = CONFIG_DIR / "policy.json"
 
 MCP_CLIENT_ID = os.getenv("MCP_CLIENT_ID", "MODEL_DEVELOPER_1")
 
@@ -28,12 +29,23 @@ _TELEMETRY_DIR = Path(__file__).parent / "telemetry"
 _TELEMETRY_DIR.mkdir(exist_ok=True)
 
 _cache: dict[tuple[str, tuple], tuple[float, dict]] = {}
-_CACHE_TTL = 15.0  # seconds
-
-_POLICY_PATH = Path(__file__).resolve().parents[1] / "config" / "policy.json"
-
 _CACHE_TTL = int(os.getenv("HDT_CACHE_TTL", "15"))
 _RETRY_MAX = int(os.getenv("HDT_RETRY_MAX", "2"))
+
+_INTEGRATED_TOOL_NAME = "vault.integrated@v1"
+
+# --- policy file location & cache signature ---
+CONFIG_DIR = Path(__file__).resolve().parents[1] / "config"
+_POLICY_PATH: Path = Path(os.getenv("HDT_POLICY_PATH", str(CONFIG_DIR / "policy.json")))
+_POLICY_CACHE: dict | None = None
+_POLICY_SIG: tuple[int, int] | None = None  # (st_mtime_ns, st_size)
+_POLICIES_LOCK = threading.Lock()
+_POLICY_OVERRIDE: dict | None = None  # test fixture can set this
+REDACT_TOKEN = "***redacted***"
+
+# Where user -> allowed_clients lives (keep in config/)
+_USER_PERMS_PATH = CONFIG_DIR / "user_permissions.json"
+
 
 # Create the MCP server façade (B0: MCP Core / Orchestrator)
 mcp = FastMCP(
@@ -58,23 +70,33 @@ def _api_url(path: str) -> str:
     """Robust join of base + path (no double/missing slashes)."""
     return f"{HDT_API_BASE.rstrip('/')}/{path.lstrip('/')}"
 
-def _hdt_get(path: str, params: dict | None=None) -> dict:
-    url = _api_url(path)
-    r = requests.get(url, headers=_headers(), params=params or {}, timeout=60)
-    r.raise_for_status()
-    return r.json()
+def _log_event(
+    kind: str,
+    name: str,
+    args: dict | None = None,
+    ok: bool = True,
+    ms: int = 0,
+    *,
+    client_id: str | None = None,
+) -> None:
+    cid = client_id or MCP_CLIENT_ID
+    payload = {"client_id": cid}
+    if args:
+        # caller-supplied fields can override if they pass client_id explicitly
+        payload.update(args)
 
-def _log_event(kind: str, name: str, args: dict, ok: bool, ms: int) -> None:
     rec = {
         "ts": _dt.datetime.utcnow().isoformat() + "Z",
-        "kind": kind,  # "tool" | "resource"
-        "name": name,
-        "args": args,
-        "ok": ok,
-        "ms": ms,
+        "kind": kind,          # "tool" | "resource"
+        "name": name,          # tool/resource identifier
+        "client_id": cid,      # top-level for easy grep
+        "args": payload,       # includes client_id too for convenience
+        "ok": bool(ok),
+        "ms": int(ms),
     }
     with open(_TELEMETRY_DIR / "mcp-telemetry.jsonl", "a", encoding="utf-8") as f:
         f.write(json.dumps(rec) + "\n")
+
 
 def _cached_get(path: str, params: dict | None=None) -> dict:
     key = (path, tuple(sorted((params or {}).items())))
@@ -85,61 +107,6 @@ def _cached_get(path: str, params: dict | None=None) -> dict:
     data = _hdt_get(path, params)
     _cache[key] = (now, data)
     return data
-
-def _load_policy() -> dict:
-    try:
-        with open(_POLICY_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except FileNotFoundError:
-        return {"defaults": {"analytics": {"allow": True, "redact": []}}}
-
-def _get_policy_decision(tool_name: str, purpose: str, client_id: str | None) -> dict:
-    p = _load_policy()
-    # precedence: tools > clients > defaults
-    node = (p.get("tools", {}).get(tool_name, {}).get(purpose)
-            or (p.get("clients", {}).get(client_id or "", {}).get(purpose))
-            or p.get("defaults", {}).get(purpose)
-            or {"allow": True, "redact": []})
-    return {"allow": bool(node.get("allow", True)),
-            "redact": list(node.get("redact", []))}
-
-def _redact_inplace(obj: Any, paths: list[str]) -> Any:
-    for path in paths:
-        parts = path.split(".")
-        _redact_path(obj, parts)
-    return obj
-
-def _redact_path(curr: Any, parts: list[str]):
-    if not parts:
-        return
-    key = parts[0]
-    rest = parts[1:]
-    # lists: apply to every element
-    if isinstance(curr, list):
-        for item in curr:
-            _redact_path(item, parts)
-        return
-    # dicts
-    if isinstance(curr, dict):
-        if not rest and key in curr:
-            curr[key] = "***redacted***"
-            return
-        nxt = curr.get(key)
-        if nxt is not None:
-            _redact_path(nxt, rest)
-
-def _with_policy(tool_name: str, payload: dict, purpose: str = "analytics") -> dict:
-    decision = _get_policy_decision(tool_name, purpose, MCP_CLIENT_ID)
-    out = {"allowed": decision["allow"], "purpose": purpose, "tool": tool_name}
-    if not decision["allow"]:
-        out["error"] = "Blocked by policy"
-        return out
-    # redact in a copy
-    data = json.loads(json.dumps(payload))
-    _redact_inplace(data, decision["redact"])
-    out["data"] = data
-    out["redactions_applied"] = decision["redact"]
-    return out
 
 def _hdt_get(path: str, params: dict | None=None) -> dict:
     url = _api_url(path)
@@ -157,42 +124,180 @@ def _hdt_get(path: str, params: dict | None=None) -> dict:
                 raise last
 
 
+# --- policy/redaction helpers ------------------------------------------------
+def _load_policy_file() -> dict:
+    try:
+        with _POLICY_PATH.open("r", encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
+
+def _redact_inplace(doc: object, paths: list[str]) -> None:
+    """
+    In-place redaction by dotted paths. Supports lists in the path:
+      e.g. "user.email", "list.user.email" (applied to every element of list).
+    """
+    for p in paths or []:
+        parts = p.split(".") if isinstance(p, str) else list(p)
+        _redact_path(doc, parts)
+
+def _redact_path(node: object, parts: list[str]) -> None:
+    if not parts:
+        return
+    key, rest = parts[0], parts[1:]
+
+    # If the current node is a list, apply the same path to each element.
+    if isinstance(node, list):
+        for item in node:
+            _redact_path(item, parts)
+        return
+
+    # We only descend through dicts; otherwise nothing to redact.
+    if not isinstance(node, dict) or key not in node:
+        return
+
+    if not rest:
+        # Terminal segment => redact
+        node[key] = REDACT_TOKEN
+        return
+
+    _redact_path(node[key], rest)
+
+def _policy() -> dict:
+    global _POLICY_CACHE, _POLICY_SIG
+    if _POLICY_OVERRIDE is not None:
+        return _POLICY_OVERRIDE
+
+    try:
+        st = _POLICY_PATH.stat()
+    except FileNotFoundError:
+        with _POLICIES_LOCK:
+            _POLICY_CACHE, _POLICY_SIG = {}, None
+        return {}
+
+    sig = (st.st_mtime_ns, st.st_size)  # nanosecond resolution + size
+    with _POLICIES_LOCK:
+        if _POLICY_CACHE is None or _POLICY_SIG != sig:
+            _POLICY_CACHE = _load_policy_file()
+            _POLICY_SIG = sig
+        return _POLICY_CACHE or {}
+
+def _merge_rule(base: dict, override: dict | None) -> dict:
+    out = dict(base or {})
+    if override:
+        out.update(override)
+    # always normalize keys
+    out.setdefault("allow", True)
+    out.setdefault("redact", [])
+    return out
+
+def _resolve_rule(purpose: str, tool_name: str, client_id: str | None) -> dict:
+    pol = _policy()
+    rule = _merge_rule({}, pol.get("defaults", {}).get(purpose))
+    if client_id:
+        rule = _merge_rule(rule, pol.get("clients", {}).get(client_id, {}).get(purpose))
+    rule = _merge_rule(rule, pol.get("tools", {}).get(tool_name, {}).get(purpose))
+    return rule
+
+def _apply_policy(purpose: str, tool_name: str, payload: dict, *, client_id: str | None = None):
+    """
+    Mutates payload in place when allowed (redaction) and returns the payload.
+    If denied, returns an error dict and does NOT mutate payload.
+    """
+    rule = _resolve_rule(purpose, tool_name, client_id)
+    if not rule.get("allow", True):
+        return {"error": "denied_by_policy", "purpose": purpose, "tool": tool_name}
+    redact_paths = rule.get("redact") or []
+    if redact_paths:
+        _redact_inplace(payload, redact_paths)
+    return payload
+
+#To force reload (e.g., after having edited the file very quickly, or in tests)
+def _policy_reset_cache() -> None:
+    global _POLICY_CACHE, _POLICY_SIG, _POLICY_OVERRIDE
+    with _POLICIES_LOCK:
+        _POLICY_CACHE = None
+        _POLICY_SIG = None
+        # leave _POLICY_OVERRIDE as-is unless the tests need to toggle it
+
+def _load_user_permissions() -> dict:
+    try:
+        with _USER_PERMS_PATH.open("r", encoding="utf-8") as f:
+            return json.load(f) or {}
+    except FileNotFoundError:
+        return {}
+
 # ---------- RESOURCES (context / “read-only”) ----------
 # Resources are things the agent can "open" for context, like files/URIs.
 
 @mcp.resource("vault://user/{user_id}/integrated")
 def get_integrated_view(user_id: str) -> dict:
     """
-    Minimal integrated view: pulls walk data from the API and returns
-    raw records + tiny rollups. Extend with trivia/sugarvita later.
+    Minimal integrated view with policy + telemetry:
+    - pulls walk data via the façade tool
+    - computes tiny rollups
+    - applies policy.redaction/allow for the whole integrated payload
+    - logs a resource telemetry line
     """
-    # walk
-    walk = tool_get_walk_data(user_id)  # reuse our tool
-    records = []
-    if isinstance(walk, list):
-        # API may already return a list of user envelopes
-        # normalize to just this user's records
-        leaf = next((r for r in walk if str(r.get("user_id")) == str(user_id)), None)
-        records = (leaf or {}).get("data", []) or (leaf or {}).get("records", [])
-    elif isinstance(walk, dict):
-        # façade might already return {'records': [...]}
-        records = walk.get("records", walk.get("data", [])) or []
+    t0 = _time.time()
+    purpose = "analytics"  # default; change if you want a different policy lane
 
-    # primitive rollups
-    days = len(records)
-    total_steps = sum(int(r.get("steps", 0) or 0) for r in records)
-    avg_steps = int(total_steps / days) if days else 0
+    try:
+        # 1) fetch via tool (keeps domain logic in one place)
+        #    (call without 'purpose' to remain compatible with older tool signature)
+        walk = tool_get_walk_data(user_id=user_id)
 
-    return {
-        "user_id": user_id,
-        "streams": {
-            "walk": {
-                "records": records,
-                "stats": {"days": days, "total_steps": total_steps, "avg_steps": avg_steps}
-            }
-        },
-        "generated_at": int(_time.time())
-    }
+        # 2) normalize to just this user's records
+        records: list[dict] = []
+        if isinstance(walk, list):
+            leaf = next((r for r in walk if str(r.get("user_id")) == str(user_id)), None)
+            records = (leaf or {}).get("data", []) or (leaf or {}).get("records", [])
+        elif isinstance(walk, dict):
+            records = walk.get("records", walk.get("data", [])) or []
+
+        # 3) primitive rollups
+        days = len(records)
+        total_steps = sum(int(r.get("steps", 0) or 0) for r in records)
+        avg_steps = int(total_steps / days) if days else 0
+
+        integrated = {
+            "user_id": user_id,
+            "streams": {
+                "walk": {
+                    "records": records,
+                    "stats": {"days": days, "total_steps": total_steps, "avg_steps": avg_steps},
+                }
+            },
+            "generated_at": int(_time.time()),
+        }
+
+        # 4) apply policy at the *resource* level (even if tools already redacted)
+        #    This lets you have resource-specific rules (e.g., extra PII minimization).
+        try:
+            # If you added _apply_policy earlier:
+            integrated = _apply_policy(purpose, _INTEGRATED_TOOL_NAME, integrated, client_id=MCP_CLIENT_ID)
+        except NameError:
+            # If _apply_policy isn’t in this file yet, just return as-is.
+            pass
+
+        _log_event(
+            "resource",
+            f"vault://user/{user_id}/integrated",
+            {"user_id": user_id, "purpose": purpose},
+            True,
+            int((_time.time() - t0) * 1000),
+        )
+        return integrated
+
+    except Exception as e:
+        _log_event(
+            "resource",
+            f"vault://user/{user_id}/integrated",
+            {"user_id": user_id, "purpose": purpose, "error": str(e)},
+            False,
+            int((_time.time() - t0) * 1000),
+        )
+        return {"error": str(e), "user_id": user_id}
 
 
 @mcp.resource("hdt://{user_id}/sources")
@@ -216,6 +321,10 @@ def registry_tools() -> dict:
             {"name": "hdt.get_walk_data@v1", "args": ["user_id"]},
             {"name": "hdt.get_trivia_data@v1", "args": ["user_id"]},
             {"name": "hdt.get_sugarvita_data@v1", "args": ["user_id"]},
+            {"name": "hdt.get_sugarvita_player_types@v1", "args": ["user_id"]},
+            {"name": "hdt.get_health_literacy_diabetes@v1", "args": ["user_id"]},
+            {"name": "intervention_time@v1", "args": []},
+            {"name": "policy.evaluate@v1", "args": ["purpose","client_id","tool"]},
         ]
     }
 
@@ -228,43 +337,42 @@ def telemetry_recent(n: int = 50) -> dict:
     return {"records": [json.loads(x) for x in lines]}
 
 
+
 # --- 2) TOOLS (actions / compute) -------------------------------------------
 # Tools are callables with typed params; MCP auto-generates JSON Schemas (B1).
 
 @mcp.tool(name="hdt.get_trivia_data@v1")
 def tool_get_trivia_data(user_id: str) -> dict:
-    """Wraps /get_trivia_data endpoint."""
     t0 = _time.time()
     try:
-        raw = _cached_get("/get_trivia_data", {"user_id": user_id})
-        wrapped = _with_policy("hdt.get_trivia_data@v1", raw)
-        _log_event("tool", "hdt.get_trivia_data@v1", {"user_id": user_id}, True, int((_time.time()-t0)*1000))
-        return wrapped
+        out = _cached_get("/get_trivia_data", {"user_id": user_id})
+        out = _apply_policy("analytics", "hdt.get_trivia_data@v1", out)
+        _log_event("tool", "hdt.get_trivia_data@v1", {"user_id": user_id, "purpose": "analytics"}, True, int((_time.time()-t0)*1000))
+        return out
     except Exception as e:
         _log_event("tool", "hdt.get_trivia_data@v1", {"user_id": user_id, "error": str(e)}, False, int((_time.time()-t0)*1000))
         return {"error": str(e), "user_id": user_id}
 
 @mcp.tool(name="hdt.get_sugarvita_data@v1")
 def tool_get_sugarvita_data(user_id: str) -> dict:
-    """Wraps /get_sugarvita_data endpoint."""
     t0 = _time.time()
     try:
-        raw = _cached_get("/get_sugarvita_data", {"user_id": user_id})
-        wrapped = _with_policy("hdt.get_sugarvita_data@v1", raw)
-        _log_event("tool", "hdt.get_sugarvita_data@v1", {"user_id": user_id}, True, int((_time.time()-t0)*1000))
-        return wrapped
+        out = _cached_get("/get_sugarvita_data", {"user_id": user_id})
+        out = _apply_policy("analytics", "hdt.get_sugarvita_data@v1", out, client_id=MCP_CLIENT_ID)
+        _log_event("tool", "hdt.get_sugarvita_data@v1", {"user_id": user_id, "purpose": "analytics"}, True, int((_time.time()-t0)*1000))
+        return out
     except Exception as e:
         _log_event("tool", "hdt.get_sugarvita_data@v1", {"user_id": user_id, "error": str(e)}, False, int((_time.time()-t0)*1000))
         return {"error": str(e), "user_id": user_id}
 
 @mcp.tool(name="hdt.get_walk_data@v1")
-def tool_get_walk_data(user_id: str, purpose: Literal["analytics","modeling","coaching"]="analytics") -> dict:
+def tool_get_walk_data(user_id: str, purpose: str = "analytics") -> dict:
     t0 = _time.time()
     try:
-        raw = _cached_get("/get_walk_data", {"user_id": user_id})
-        wrapped = _with_policy("hdt.get_walk_data@v1", raw, purpose=purpose)
+        out = _cached_get("/get_walk_data", {"user_id": user_id})
+        out = _apply_policy(purpose, "hdt.get_walk_data@v1", out)
         _log_event("tool", "hdt.get_walk_data@v1", {"user_id": user_id, "purpose": purpose}, True, int((_time.time()-t0)*1000))
-        return wrapped
+        return out
     except Exception as e:
         _log_event("tool", "hdt.get_walk_data@v1", {"user_id": user_id, "purpose": purpose, "error": str(e)}, False, int((_time.time()-t0)*1000))
         return {"error": str(e), "user_id": user_id}
@@ -274,7 +382,7 @@ def tool_get_sugarvita_player_types(user_id: str, purpose: Literal["analytics","
     t0 = _time.time()
     try:
         raw = _cached_get("/get_sugarvita_player_types", {"user_id": user_id})
-        out = _with_policy("hdt.get_sugarvita_player_types@v1", raw, purpose)
+        out = _apply_policy(purpose, "hdt.get_sugarvita_player_types@v1", raw, client_id=MCP_CLIENT_ID)
         _log_event("tool", "hdt.get_sugarvita_player_types@v1", {"user_id": user_id, "purpose": purpose}, True, int((_time.time()-t0)*1000))
         return out
     except Exception as e:
@@ -286,7 +394,7 @@ def tool_get_health_literacy_diabetes(user_id: str, purpose: Literal["analytics"
     t0 = _time.time()
     try:
         raw = _cached_get("/get_health_literacy_diabetes", {"user_id": user_id})
-        out = _with_policy("hdt.get_health_literacy_diabetes@v1", raw, purpose)
+        out = _apply_policy(purpose, "hdt.get_health_literacy_diabetes@v1", raw, client_id=MCP_CLIENT_ID)
         _log_event("tool", "hdt.get_health_literacy_diabetes@v1", {"user_id": user_id, "purpose": purpose}, True, int((_time.time()-t0)*1000))
         return out
     except Exception as e:
@@ -294,17 +402,44 @@ def tool_get_health_literacy_diabetes(user_id: str, purpose: Literal["analytics"
         return {"error": str(e), "user_id": user_id}
 
 @mcp.tool(name="policy.evaluate@v1")
-def policy_evaluate(purpose: Literal["analytics", "modeling", "coaching"] = "analytics") -> dict:
-    enabled = (os.getenv("HDT_ENABLE_POLICY_TOOLS", "1").strip().lower() in {"1","true","yes","on"})
-    if not enabled:
-        return {
-            "purpose": purpose,
-            "allow": False,
-            "redact_fields": [],
-            "disabled": True,
-            "reason": "HDT_ENABLE_POLICY_TOOLS=0"
-        }
-    return {"purpose": purpose, "allow": True, "redact_fields": []}
+def policy_evaluate(purpose: Literal["analytics","modeling","coaching"]="analytics",
+                    client_id: str | None = None,
+                    tool: str | None = None) -> dict:
+    pol = _policy()  # ← not _load_policy()
+    eff = pol.get("defaults", {}).get(purpose, {"allow": True, "redact": []})
+    if client_id and (c := pol.get("clients", {}).get(client_id, {}).get(purpose)):
+        eff = {**eff, **c}
+    if tool and (t := pol.get("tools", {}).get(tool, {}).get(purpose)):
+        eff = {**eff, **t}
+    return {"purpose": purpose, "allow": eff.get("allow", True), "redact": eff.get("redact", [])}
+
+@mcp.tool(name="consent.status@v1")
+def consent_status(client_id: str | None = None) -> dict:
+    """
+    Return which users and permissions the given client_id is allowed to access.
+    Falls back to MCP_CLIENT_ID from env if not provided.
+    """
+    cid = client_id or MCP_CLIENT_ID
+    perms = _load_user_permissions()
+    users = []
+    for uid, p in (perms or {}).items():
+        allowed = (p.get("allowed_clients") or {}).get(cid, [])
+        try:
+            users.append({"user_id": int(uid), "allowed_permissions": sorted(set(allowed))})
+        except Exception:
+            users.append({"user_id": uid, "allowed_permissions": sorted(set(allowed))})
+    return {"client_id": cid, "users": users}
+
+@mcp.tool(name="policy.reload@v1")
+def policy_reload() -> dict:
+    """
+    Clear policy cache and reload from disk (config/policy.json).
+    Useful during tests or live editing.
+    """
+    _policy_reset_cache()
+    # Touch it once so subsequent calls are hot
+    _ = _policy()
+    return {"reloaded": True}
 
 
 # --- 3) “Model Hub” placeholders (M1/M2) ------------------------------------
