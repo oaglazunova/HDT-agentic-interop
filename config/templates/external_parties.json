@@ -1,0 +1,15 @@
+{
+  "external_parties": [
+    {
+      "client_id": "MODEL_DEVELOPER_1",
+      "api_key": "MODEL_DEVELOPER_1",
+      "permissions": [
+        "get_walk_data",
+        "get_trivia_data",
+        "get_sugarvita_data",
+        "get_sugarvita_player_types",
+        "get_health_literacy_diabetes"
+      ]
+    }
+  ]
+}

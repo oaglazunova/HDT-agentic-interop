@@ -4,8 +4,6 @@ import sys
 import os, logging
 from datetime import date, timedelta
 
-from HDT_MCP.server import policy_reload
-
 # Add the project root to the Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 

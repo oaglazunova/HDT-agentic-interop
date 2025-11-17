@@ -1,15 +1,26 @@
 # HDT Prototype with Agentic Interoperability 
 
-This project provides a prototype of an interoperable and modular **Human Digital Twins (HDT)** system architecture.
+## HDT Agentic Interop — Quickstart
 
-Interoperability refers to the system's ability to access, synthesize, and standardize health data from diverse applications and platforms such as GameBus and Google Fit. These capabilities allow external model developers to efficiently locate and utilize the exact data they need for building models.
+This repo exposes:
+- **HDT API (Flask)** with governance headers + placeholder/mock data.
+- **MCP façade** that calls the API, applies policy/redaction, and (optionally) caches to a vault.
+- **Vault** (optional) for write-through + read caching.
 
-Modularity refers to the system's capacity to support the open development, testing, and integration of various virtual twin models. This flexibility encourages collaboration and facilitates the extension of the system with new functionalities.
+### Prerequisites
+- Python 3.10–3.12
+- pip / venv
+- (Optional) DuckDB/SQLite is handled by Python stdlib for the sample vault
 
-This prototype establishes a solid foundation for future expansion and improvement. To foster further development, this public repository is intended to serve as a collaborative resource for researchers and developers interested in advancing such systems.
-
-
-The remainder of this README provides detailed information about the system components and instructions for deployment.
+### 1) Setup
+```bash
+python -m venv .venv
+# Windows PowerShell: .\.venv\Scripts\Activate.ps1
+source .venv/bin/activate
+pip install -r requirements.txt  # if present
+pip install flask requests python-dotenv mcp
+cp .env.example .env             # then edit values as needed
+```
 
 ## Table of Contents
 - [System Architecture](#system-architecture)

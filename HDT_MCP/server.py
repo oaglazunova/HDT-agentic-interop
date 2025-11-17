@@ -5,14 +5,28 @@ import time as _time
 import datetime as _dt
 from pathlib import Path
 from dotenv import load_dotenv
-
+import tempfile
 
 # Load .env from repo root (…/HDT-agentic-interop/.env)
 ENV_PATH = Path(__file__).resolve().parents[1] / ".env"
 load_dotenv(ENV_PATH)  # replaces your plain load_dotenv()
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+DATA_DIR  = REPO_ROOT / "data"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+HDT_VAULT_DB = Path(os.getenv("HDT_VAULT_DB", str(DATA_DIR / "lifepod.duckdb")))
+
+# Optional vault support (HDT_VAULT/*.py or a local HDT_MCP/vault.py)
+# import the vault module and init it with the path
+try:
+    from HDT_VAULT import vault as _vault
+except Exception:
+    try:
+        from HDT_MCP import vault as _vault
+    except Exception:
+        _vault = None
+
 CONFIG_DIR = Path(__file__).resolve().parents[1] / "config"
-_POLICY_PATH = CONFIG_DIR / "policy.json"
 
 MCP_CLIENT_ID = os.getenv("MCP_CLIENT_ID", "MODEL_DEVELOPER_1")
 
@@ -25,8 +39,12 @@ print(f"[HDT-MCP] HDT_API_BASE={HDT_API_BASE}  HDT_API_KEY={'<set>' if HDT_API_K
 _ENABLE_POLICY = (os.getenv("HDT_ENABLE_POLICY_TOOLS", "0") or "").strip().lower() in {"1","true","yes","on"}
 print(f"[HDT-MCP] POLICY_TOOLS={_ENABLE_POLICY} (HDT_ENABLE_POLICY_TOOLS={os.getenv('HDT_ENABLE_POLICY_TOOLS')})")
 
-_TELEMETRY_DIR = Path(__file__).parent / "telemetry"
+#_TELEMETRY_DIR = Path(__file__).parent / "telemetry"
+_TELEMETRY_DIR = Path(
+    os.getenv("HDT_TELEMETRY_DIR", str(Path(__file__).parent / "telemetry"))
+)
 _TELEMETRY_DIR.mkdir(exist_ok=True)
+_DISABLE_TELEMETRY = (os.getenv("HDT_DISABLE_TELEMETRY","0").lower() in ("1","true","yes"))
 
 _cache: dict[tuple[str, tuple], tuple[float, dict]] = {}
 _CACHE_TTL = int(os.getenv("HDT_CACHE_TTL", "15"))
@@ -35,7 +53,6 @@ _RETRY_MAX = int(os.getenv("HDT_RETRY_MAX", "2"))
 _INTEGRATED_TOOL_NAME = "vault.integrated@v1"
 
 # --- policy file location & cache signature ---
-CONFIG_DIR = Path(__file__).resolve().parents[1] / "config"
 _POLICY_PATH: Path = Path(os.getenv("HDT_POLICY_PATH", str(CONFIG_DIR / "policy.json")))
 _POLICY_CACHE: dict | None = None
 _POLICY_SIG: tuple[int, int] | None = None  # (st_mtime_ns, st_size)
@@ -46,6 +63,18 @@ REDACT_TOKEN = "***redacted***"
 # Where user -> allowed_clients lives (keep in config/)
 _USER_PERMS_PATH = CONFIG_DIR / "user_permissions.json"
 
+HDT_VAULT_ENABLE = os.getenv("HDT_VAULT_ENABLE", "0").lower() in ("1", "true", "yes")
+
+if HDT_VAULT_ENABLE and _vault is not None:
+    try:
+        _vault.init(db_path=str(HDT_VAULT_DB))
+        print(f"[HDT-MCP] Vault initialized at {HDT_VAULT_DB}")
+    except Exception as e:
+        print(f"[HDT-MCP] Vault init failed, disabling vault: {e}")
+        _vault = None
+else:
+    print("[HDT-MCP] Vault disabled or not available")
+
 
 # Create the MCP server façade (B0: MCP Core / Orchestrator)
 mcp = FastMCP(
@@ -53,7 +82,6 @@ mcp = FastMCP(
     instructions="Façade exposing HDT data & decisions as MCP tools/resources.",
     website_url="https://github.com/oaglazunova/Interoperable-and-modular-HDT-system-prototype",
 )
-
 
 # --- helpers ----------------------------------------------------------------
 
@@ -81,6 +109,10 @@ def _log_event(
 ) -> None:
     cid = client_id or MCP_CLIENT_ID
     payload = {"client_id": cid}
+
+    if _DISABLE_TELEMETRY:
+        return
+
     if args:
         # caller-supplied fields can override if they pass client_id explicitly
         payload.update(args)
@@ -233,27 +265,47 @@ def _load_user_permissions() -> dict:
 @mcp.resource("vault://user/{user_id}/integrated")
 def get_integrated_view(user_id: str) -> dict:
     """
-    Minimal integrated view with policy + telemetry:
-    - pulls walk data via the façade tool
-    - computes tiny rollups
-    - applies policy.redaction/allow for the whole integrated payload
-    - logs a resource telemetry line
+    Integrated HDT View (read-mostly):
+    1) If vault is enabled, try reading walk records from vault.
+    2) If empty, fetch live via tool and (if enabled) write-through to vault.
+    3) Compute tiny rollups; apply resource-level policy; log telemetry.
     """
     t0 = _time.time()
-    purpose = "analytics"  # default; change if you want a different policy lane
+    purpose = "analytics"
+    src = "vault"  # default; will change to 'live' if we need to fetch
 
     try:
-        # 1) fetch via tool (keeps domain logic in one place)
-        #    (call without 'purpose' to remain compatible with older tool signature)
-        walk = tool_get_walk_data(user_id=user_id)
-
-        # 2) normalize to just this user's records
+        # 1) read from vault if available
         records: list[dict] = []
-        if isinstance(walk, list):
-            leaf = next((r for r in walk if str(r.get("user_id")) == str(user_id)), None)
-            records = (leaf or {}).get("data", []) or (leaf or {}).get("records", [])
-        elif isinstance(walk, dict):
-            records = walk.get("records", walk.get("data", [])) or []
+        if HDT_VAULT_ENABLE and _vault is not None:
+            try:
+                records = _vault.read_walk_records(int(user_id))
+            except Exception:
+                # non-fatal; fall back to live
+                records = []
+
+        # 2) fallback to live fetch (and optional write-through)
+        if not records:
+            src = "live"
+            # call without purpose to stay compatible with older signatures
+            walk = tool_get_walk_data(user_id=user_id)
+
+            # normalize to just this user's records
+            if isinstance(walk, list):
+                leaf = next((r for r in walk if str(r.get("user_id")) == str(user_id)), None)
+                records = (leaf or {}).get("data", []) or (leaf or {}).get("records", [])
+            elif isinstance(walk, dict):
+                records = walk.get("records", walk.get("data", [])) or []
+
+            # write-through to vault for future reads
+            if HDT_VAULT_ENABLE and _vault is not None and records:
+                try:
+                    if hasattr(_vault, "upsert_walk_records"):
+                        _vault.upsert_walk_records(int(user_id), records)
+                    elif hasattr(_vault, "write_walk"):
+                        _vault.write_walk(int(user_id), records, source="api.walk", fetched_at=int(_time.time()))
+                except Exception:
+                    pass
 
         # 3) primitive rollups
         days = len(records)
@@ -264,26 +316,30 @@ def get_integrated_view(user_id: str) -> dict:
             "user_id": user_id,
             "streams": {
                 "walk": {
+                    "source": src,                 # "vault" or "live"
+                    "count": days,
                     "records": records,
-                    "stats": {"days": days, "total_steps": total_steps, "avg_steps": avg_steps},
+                    "stats": {
+                        "days": days,
+                        "total_steps": total_steps,
+                        "avg_steps": avg_steps
+                    },
                 }
             },
             "generated_at": int(_time.time()),
         }
 
-        # 4) apply policy at the *resource* level (even if tools already redacted)
-        #    This lets you have resource-specific rules (e.g., extra PII minimization).
+        # 4) resource-level policy
         try:
-            # If you added _apply_policy earlier:
             integrated = _apply_policy(purpose, _INTEGRATED_TOOL_NAME, integrated, client_id=MCP_CLIENT_ID)
         except NameError:
-            # If _apply_policy isn’t in this file yet, just return as-is.
             pass
 
+        # 5) telemetry
         _log_event(
             "resource",
             f"vault://user/{user_id}/integrated",
-            {"user_id": user_id, "purpose": purpose},
+            {"user_id": user_id, "purpose": purpose, "source": src, "records": days},
             True,
             int((_time.time() - t0) * 1000),
         )
@@ -298,7 +354,6 @@ def get_integrated_view(user_id: str) -> dict:
             int((_time.time() - t0) * 1000),
         )
         return {"error": str(e), "user_id": user_id}
-
 
 @mcp.resource("hdt://{user_id}/sources")
 def list_sources(user_id: str) -> dict:
@@ -368,14 +423,64 @@ def tool_get_sugarvita_data(user_id: str) -> dict:
 @mcp.tool(name="hdt.get_walk_data@v1")
 def tool_get_walk_data(user_id: str, purpose: str = "analytics") -> dict:
     t0 = _time.time()
+    persisted = 0
     try:
         out = _cached_get("/get_walk_data", {"user_id": user_id})
-        out = _apply_policy(purpose, "hdt.get_walk_data@v1", out)
-        _log_event("tool", "hdt.get_walk_data@v1", {"user_id": user_id, "purpose": purpose}, True, int((_time.time()-t0)*1000))
+
+        # Normalize to envelopes for initial write (best-effort)
+        envelopes = out if isinstance(out, list) else [out]
+        if HDT_VAULT_ENABLE and _vault is not None and hasattr(_vault, "write_walk"):
+            for env in envelopes:
+                uid = int(env.get("user_id", user_id))
+                recs = env.get("data") or env.get("records") or []
+                if recs:
+                    try:
+                        _vault.write_walk(uid, recs, source="api.walk", fetched_at=int(_time.time()))
+                        persisted += len(recs)
+                    except Exception:
+                        pass  # non-fatal
+
+        # Apply policy (with client context)
+        out = _apply_policy(purpose, "hdt.get_walk_data@v1", out, client_id=MCP_CLIENT_ID)
+
+        # Optional: upsert consolidated records for faster future reads
+        if HDT_VAULT_ENABLE and _vault is not None and hasattr(_vault, "upsert_walk_records"):
+            if isinstance(out, dict):
+                recs = out.get("records", out.get("data", [])) or []
+                if recs:
+                    try:
+                        _vault.upsert_walk_records(int(user_id), recs)
+                    except Exception:
+                        pass
+            elif isinstance(out, list):
+                for env in out:
+                    uid = int(env.get("user_id", user_id))
+                    recs = env.get("records", env.get("data", [])) or []
+                    if recs:
+                        try:
+                            _vault.upsert_walk_records(uid, recs)
+                        except Exception:
+                            pass
+
+        _log_event(
+            "tool",
+            "hdt.get_walk_data@v1",
+            {"user_id": user_id, "purpose": purpose, "persisted": persisted},
+            True,
+            int((_time.time() - t0) * 1000),
+        )
         return out
+
     except Exception as e:
-        _log_event("tool", "hdt.get_walk_data@v1", {"user_id": user_id, "purpose": purpose, "error": str(e)}, False, int((_time.time()-t0)*1000))
+        _log_event(
+            "tool",
+            "hdt.get_walk_data@v1",
+            {"user_id": user_id, "purpose": purpose, "error": str(e)},
+            False,
+            int((_time.time() - t0) * 1000),
+        )
         return {"error": str(e), "user_id": user_id}
+
 
 @mcp.tool(name="hdt.get_sugarvita_player_types@v1")
 def tool_get_sugarvita_player_types(user_id: str, purpose: Literal["analytics","modeling","coaching"]="analytics") -> dict:

@@ -1,0 +1,15 @@
+repos:
+  - repo: local
+    hooks:
+      - id: pytest-quick
+        name: pytest (quick)
+        entry: python scripts/pytest_quick.py
+        language: system
+        pass_filenames: false
+
+      - id: smoke-mcp
+        name: smoke_mcp (manual)
+        entry: python scripts/smoke_mcp.py
+        language: system
+        pass_filenames: false
+        stages: [manual]   # run explicitly: pre-commit run smoke-mcp

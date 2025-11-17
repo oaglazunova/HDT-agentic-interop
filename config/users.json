@@ -3,17 +3,19 @@
     {
       "user_id": 1,
       "connected_apps_walk_data": [
-        { "connected_application": "GameBus", "player_id": 123 }
+        { "connected_application": "Placeholder Walk App", "player_id": "demo-1" }
       ]
     },
     {
       "user_id": 2,
-      "connected_apps_walk_data": []
+      "connected_apps_walk_data": [
+        { "connected_application": "Placeholder Walk App", "player_id": "demo-2" }
+      ]
     },
     {
       "user_id": 3,
       "connected_apps_walk_data": [
-        { "connected_application": "Placeholder walk app", "player_id": "demo" }
+        { "connected_application": "Placeholder Walk App", "player_id": "demo-3" }
       ]
     }
   ]

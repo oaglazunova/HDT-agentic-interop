@@ -1,0 +1,9 @@
+{
+  "defaults": {
+    "analytics": { "allow": true, "redact": [] },
+    "modeling":  { "allow": true, "redact": [] },
+    "coaching":  { "allow": true, "redact": [] }
+  },
+  "clients": {},
+  "tools": {}
+}
