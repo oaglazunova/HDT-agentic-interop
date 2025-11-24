@@ -21,16 +21,29 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          pip install flask requests python-dotenv mcp
+          pip install flask requests python-dotenv mcp fastmcp==2.13.0.2
 
       - name: Install dev dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
 
-      - name: Create .env
+      - name: Create .env (if needed)
         run: |
-          cp config/templates/.env .env
+          if [ -f config/templates/.env ]; then
+            cp config/templates/.env .env
+          else
+            echo "# Auto-generated for CI" > .env
+            echo "MODEL_DEVELOPER_1_API_KEY=MODEL_DEVELOPER_1" >> .env
+            echo "HDT_API_KEY=MODEL_DEVELOPER_1" >> .env
+            echo "MCP_CLIENT_ID=MODEL_DEVELOPER_1" >> .env
+            echo "HDT_ALLOW_PLACEHOLDER_MOCKS=1" >> .env
+            echo "HDT_VAULT_ENABLE=1" >> .env
+          fi
+
+      - name: Bootstrap sample config files
+        run: |
+          python scripts/init_sample_config.py
 
       - name: Run pytest
         run: pytest -q
