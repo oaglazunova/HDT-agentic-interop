@@ -23,6 +23,11 @@ jobs:
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           pip install flask requests python-dotenv mcp
 
+      - name: Install dev dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
       - name: Create .env
         run: |
           cp config/templates/.env .env
@@ -40,3 +45,9 @@ jobs:
           HDT_VAULT_ENABLE: "1"
         run: |
           python scripts/smoke_mcp.py
+
+      - name: Run tests with coverage guard
+        run: |
+          pytest --maxfail=1 --disable-warnings -q \
+            --cov=HDT_MCP --cov=HDT_CORE_INFRASTRUCTURE --cov-report=term \
+            --cov-fail-under=85

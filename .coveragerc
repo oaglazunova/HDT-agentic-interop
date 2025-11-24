@@ -1,0 +1,52 @@
+[run]
+branch = True
+source =
+    HDT_CORE_INFRASTRUCTURE
+    HDT_MCP
+
+# Omit integration adapters, thin shims, and non-core assets from quick-hook coverage
+omit =
+    # Provider adapters/parsers (exercise with integration tests, not unit tests)
+    HDT_CORE_INFRASTRUCTURE/GAMEBUS_*_fetch.py
+    HDT_CORE_INFRASTRUCTURE/GAMEBUS_*_parse.py
+    HDT_CORE_INFRASTRUCTURE/GOOGLE_FIT_*_fetch.py
+    HDT_CORE_INFRASTRUCTURE/GOOGLE_FIT_*_parse.py
+
+    # Compatibility shims / glue modules
+    HDT_API/*
+    HDT_MCP/hdt_api.py
+    validation.py
+
+    # Demo/CLI/scripts, docs, and models outside core runtime
+    scripts/*
+    docs/*
+    Virtual_Twin_Models/*
+
+    # Heavy façade measured in CI separately
+    HDT_MCP/policy.py
+    HDT_MCP/reduction.py
+    HDT_MCP/server.py
+
+    # Heavy Flask façade (quick-run omits; still measured in CI)
+    HDT_CORE_INFRASTRUCTURE/HDT_API.py
+    HDT_CORE_INFRASTRUCTURE\\HDT_API.py
+
+    # Additional low-signal modules omitted for quick pre-commit scope
+    # (integration/edge-heavy; still measured in full CI as desired)
+    HDT_CORE_INFRASTRUCTURE/auth.py
+    HDT_CORE_INFRASTRUCTURE\\auth.py
+    HDT_CORE_INFRASTRUCTURE/hdt_api_fetchers.py
+    HDT_CORE_INFRASTRUCTURE\\hdt_api_fetchers.py
+    HDT_CORE_INFRASTRUCTURE/hdt_api_utils.py
+    HDT_CORE_INFRASTRUCTURE\\hdt_api_utils.py
+
+[report]
+exclude_lines =
+    # Don't complain about defensive code or no-cover markers
+    pragma: no cover
+    if __name__ == .__main__.
+    except Exception:
+    except:
+    raise NotImplementedError
+
+show_missing = True

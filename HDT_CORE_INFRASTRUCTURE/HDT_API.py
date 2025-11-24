@@ -2,44 +2,170 @@ from flask import Flask, jsonify, request, send_from_directory, make_response
 import json
 import sys
 import os, logging
-from datetime import date, timedelta
+from pathlib import Path
+import hashlib
+import uuid
+from flask import g  # optional
+try:
+    # When running as a script with project root on sys.path
+    from validation import sanitize_walk_records, ValidationError
+except ImportError:
+    # When running as a package module: python -m HDT_CORE_INFRASTRUCTURE.HDT_API
+    from .validation import sanitize_walk_records, ValidationError
 
-# Add the project root to the Python path
+# Add the project root to the Python path (so absolute imports work when run as a script)
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-def json_with_headers(payload, *, policy: str | None = None, status: int = 200):
-    """Return a JSON response with standard governance headers."""
+try:
+    from hdt_api_utils import parse_pagination_args, paginate, set_next_link
+except ImportError:
+    from .hdt_api_utils import parse_pagination_args, paginate, set_next_link
+
+try:
+    # Prefer absolute when run as a script
+    from hdt_api_fetchers import FetcherResult, fetch_walk_batch
+except ImportError:
+    # Fallback to relative when run as a module
+    from .hdt_api_fetchers import FetcherResult, fetch_walk_batch
+
+# ===== helper functions ==========
+def _stable_json_dumps(obj) -> str:
+    # Compact + deterministic JSON (no spaces, sorted keys)
+    return json.dumps(obj, separators=(",", ":"), sort_keys=True, ensure_ascii=False)
+
+def _compute_etag(payload, *, variant: dict | None = None) -> str:
+    """
+    Compute a strong ETag based on the response body and a 'variant' dict.
+    The variant makes the ETag safe across different clients/queries.
+    """
+    h = hashlib.sha256()
+
+    # Body
+    h.update(_stable_json_dumps(payload).encode("utf-8"))
+
+    # Variant (e.g., path, query, client id, policy)
+    cid = (getattr(request, "client", {}) or {}).get("client_id", "unknown")
+    var = {
+        "path": request.path,
+        "qs": request.query_string.decode("utf-8", "ignore"),
+        "client_id": cid,
+    }
+    if variant:
+        var.update(variant)
+    h.update(_stable_json_dumps(var).encode("utf-8"))
+
+    # Strong ETag (quoted per RFC 7232)
+    return f"\"{h.hexdigest()[:16]}\""
+
+# ============================
+
+def json_with_headers(
+        payload,
+        *,
+        policy: str | None = None,
+        redactions: int | None = None,
+        status: int = 200,
+        etag_variant: dict | None = None,
+        extra_headers: dict[str, str] | None = None,
+    ):
+    """
+    Return a JSON response with governance headers, plus conditional ETag/304.
+    - Computes a stable ETag for 200 OK responses (optionally varied by 'etag_variant').
+    - If If-None-Match matches, returns 304 with no body (still sets headers).
+    - 'extra_headers' lets callers add Link / X-Limit / X-Offset / X-Total, etc.
+    """
+    cid = (getattr(request, "client", {}) or {}).get("client_id", "unknown")
+    users_count = len(payload) if isinstance(payload, list) else 1
+    req_id = getattr(request, "request_id", None)
+
+    # Compute ETag only for cacheable 200 responses
+    etag = None
+    if status == 200:
+        etag = _compute_etag(payload, variant=etag_variant)
+
+        # Conditional GET handling
+        inm = request.headers.get("If-None-Match")
+        if inm:
+            candidates = [x.strip() for x in inm.split(",")]
+            if etag in candidates:
+                resp = make_response("", 304)
+                # Standard headers
+                resp.headers["ETag"] = etag
+                resp.headers["X-Client-Id"] = str(cid)
+                resp.headers["X-Users-Count"] = str(users_count)
+                if policy is not None:
+                    resp.headers["X-Policy"] = policy
+                resp.headers["X-Request-Id"] = req_id or ""
+                # CORS + expose
+                resp.headers["Access-Control-Allow-Origin"] = request.headers.get("Origin", "*")
+                resp.headers["Vary"] = "Origin"
+                resp.headers["Access-Control-Expose-Headers"] = (
+                    "ETag, X-Client-Id, X-Users-Count, X-Policy, X-Request-Id, Link, X-Limit, X-Offset, X-Total"
+                )
+
+                # pagination headers (if any): carry any extra headers (e.g., pagination) on 304 too
+                for k, v in (extra_headers or {}).items():
+                    resp.headers[k] = v
+                # cacheable 304
+                resp.headers.setdefault("Cache-Control", "private, must-revalidate")
+                return resp
+
+    # Normal JSON response
     resp = jsonify(payload)
     resp.status_code = status
-    # request.client is set by your authenticate_and_authorize decorator
-    cid = (getattr(request, "client", {}) or {}).get("client_id", "unknown")
-
-    # Count users if the payload is a list-of-user-envelopes, else 1
-    users_count = len(payload) if isinstance(payload, list) else 1
-
     resp.headers["X-Client-Id"] = str(cid)
     resp.headers["X-Users-Count"] = str(users_count)
     if policy is not None:
         resp.headers["X-Policy"] = policy
+    if redactions is not None:
+        resp.headers["X-Policy-Redactions"] = str(int(redactions))
+    if etag:
+        resp.headers["ETag"] = etag
+    if req_id:
+        resp.headers["X-Request-Id"] = req_id
 
-    # If you call from a browser and want to read these headers in JS:
+    # CORS + expose (include Link + paging headers)
     resp.headers["Access-Control-Allow-Origin"] = request.headers.get("Origin", "*")
     resp.headers["Vary"] = "Origin"
-    resp.headers["Access-Control-Expose-Headers"] = "X-Client-Id, X-Users-Count, X-Policy"
+    resp.headers["Access-Control-Expose-Headers"] = (
+        "ETag, X-Client-Id, X-Users-Count, X-Policy, X-Request-Id, Link, X-Limit, X-Offset, X-Total"
+    )
+
+    # Caller-supplied headers (Link, X-Limit/Offset/Total, etc.)
+    for k, v in (extra_headers or {}).items():
+        resp.headers[k] = v
+    # in json_with_headers(...) for 200s only
+    if status == 200:
+        resp.headers.setdefault("Cache-Control", "private, must-revalidate")
     return resp
+
+
+def api_error(code: str,
+              message: str,
+              *,
+              status: int = 400,
+              details: dict | None = None,
+              policy: str = "error"):
+    """
+    Return a consistent error envelope:
+    {
+      "error": {"code": "<code>", "message": "<message>", "details": {...}}
+    }
+    …plus the same governance headers via json_with_headers().
+    """
+    payload = {"error": {"code": code, "message": message}}
+    if details:
+        payload["error"]["details"] = details
+    return json_with_headers(payload, status=status, policy=policy)
 
 # Try both import styles to support running as a module or directly
 try:
     # When run as a module
     from HDT_CORE_INFRASTRUCTURE.GAMEBUS_DIABETES_fetch import fetch_trivia_data, fetch_sugarvita_data
-    from HDT_CORE_INFRASTRUCTURE.GAMEBUS_WALK_fetch import fetch_walk_data
-    from HDT_CORE_INFRASTRUCTURE.GOOGLE_FIT_WALK_fetch import fetch_google_fit_walk_data
     from HDT_CORE_INFRASTRUCTURE.auth import authenticate_and_authorize
     from config.config import load_external_parties, load_user_permissions
 except ImportError:
     from GAMEBUS_DIABETES_fetch import fetch_trivia_data, fetch_sugarvita_data
-    from GAMEBUS_WALK_fetch import fetch_walk_data
-    from GOOGLE_FIT_WALK_fetch import fetch_google_fit_walk_data
     from auth import authenticate_and_authorize
     from config.config import load_external_parties, load_user_permissions
 
@@ -242,7 +368,7 @@ def metadata_model_developer_apis():
                     "user_id": "integer",
                     "data": [
                         {
-                            "date": "string (YYYY-MM-DD HH:MM:SS)",
+                            "date": "string (YYYY-MM-DD)",
                             "steps": "integer",
                             "distance_meters": "float or None",
                             "duration": "string (HH:MM:SS) or None",
@@ -255,7 +381,7 @@ def metadata_model_developer_apis():
         ]
     }
 
-    return json_with_headers(metadata, policy="info"), 200
+    return json_with_headers(metadata, policy="info")
 
 
 # Metadata Endpoint for App Developer APIs
@@ -324,8 +450,107 @@ def metadata_app_developer_apis():
         ]
     }
 
-    return json_with_headers(metadata, policy="info"), 200
+    return json_with_headers(metadata, policy="info")
 
+@app.route("/openapi.json", methods=["GET"])
+def openapi():
+    """
+    Serve the OpenAPI specification. Prefer the repository file at `openapi/openapi.json`
+    to ensure it stays in sync with docs, and fallback to a minimal in-code spec if the
+    file isn't available.
+    """
+    try:
+        repo_root = Path(__file__).resolve().parents[1]
+        spec_path = repo_root / "openapi" / "openapi.json"
+        with spec_path.open("r", encoding="utf-8") as f:
+            spec = json.load(f)
+        return json_with_headers(spec, policy="info")
+    except Exception:
+        # Minimal fallback spec that still contains the headers/components expected by tests
+        spec = {
+            "openapi": "3.0.3",
+            "info": {"title": "HDT API", "version": "0.1.0"},
+            "paths": {
+                "/get_walk_data": {
+                    "get": {
+                        "summary": "Walk data (paginated for single-user)",
+                        "parameters": [
+                            {"name": "user_id", "in": "query", "schema": {"type": "integer"}},
+                            {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 1000}},
+                            {"name": "offset", "in": "query", "schema": {"type": "integer", "minimum": 0}},
+                        ],
+                        "responses": {
+                            "200": {
+                                "description": "OK",
+                                "headers": {
+                                    "ETag": {"schema": {"type": "string"}},
+                                    "X-Request-Id": {"schema": {"type": "string"}},
+                                    "Link": {"schema": {"type": "string"}},
+                                    "X-Limit": {"schema": {"type": "integer"}},
+                                    "X-Offset": {"schema": {"type": "integer"}},
+                                    "X-Total": {"schema": {"type": "integer"}},
+                                },
+                                "content": {
+                                    "application/json": {
+                                        "schema": {
+                                            "oneOf": [
+                                                {"$ref": "#/components/schemas/UserStreamEnvelope"},
+                                                {"type": "array", "items": {"$ref": "#/components/schemas/UserStreamEnvelope"}},
+                                            ]
+                                        }
+                                    }
+                                },
+                            },
+                            "304": {"description": "Not Modified (ETag match)."},
+                        },
+                    }
+                }
+            },
+            "components": {
+                "headers": {
+                    "ETag": {"schema": {"type": "string"}},
+                    "X-Request-Id": {"schema": {"type": "string"}},
+                    "X-Client-Id": {"schema": {"type": "string"}},
+                    "X-Users-Count": {"schema": {"type": "integer"}},
+                    "X-Policy": {"schema": {"type": "string"}},
+                    "Link": {"schema": {"type": "string"}},
+                    "X-Limit": {"schema": {"type": "integer"}},
+                    "X-Offset": {"schema": {"type": "integer"}},
+                    "X-Total": {"schema": {"type": "integer"}},
+                },
+                "schemas": {
+                    "WalkRecord": {
+                        "type": "object",
+                        "properties": {
+                            "date": {"type": "string", "format": "date"},
+                            "steps": {"type": "integer"},
+                            "distance_meters": {"type": ["number", "null"]},
+                            "duration": {"type": ["string", "null"]},
+                            "kcalories": {"type": ["number", "null"]},
+                        },
+                    },
+                    "Page": {
+                        "type": "object",
+                        "properties": {
+                            "total": {"type": "integer"},
+                            "limit": {"type": "integer"},
+                            "offset": {"type": "integer"},
+                        },
+                        "required": ["total", "limit", "offset"],
+                    },
+                    "UserStreamEnvelope": {
+                        "type": "object",
+                        "properties": {
+                            "user_id": {"type": "integer"},
+                            "data": {"type": "array", "items": {"$ref": "#/components/schemas/WalkRecord"}},
+                            "page": {"$ref": "#/components/schemas/Page"},
+                        },
+                        "required": ["user_id", "data"],
+                    },
+                },
+            },
+        }
+        return json_with_headers(spec, policy="info")
 
 
 # Below are the API endpoints that virtual twin model developers can call to retrieve user data for specific domains (e.g., trivia, SugarVita, walking).
@@ -382,8 +607,8 @@ def get_trivia_data():
 
         return json_with_headers(response_data, policy="passthrough")
     except Exception as e:
-        logging.error(f"Error in get_trivia_data endpoint: {e}")
-        return json_with_headers({"error": "Internal server error"}, status=500, policy="error")
+        logging.error(f"[rid={getattr(request, 'request_id', '-')}] Error in get_trivia_data: {e}")
+        return api_error("internal", "Internal server error", status=500)
 
 
 # SugarVita endpoint
@@ -417,8 +642,8 @@ def get_sugarvita_data():
 
         return json_with_headers(response_data, policy="passthrough")
     except Exception as e:
-        logging.error(f"Error in get_sugarvita_data endpoint: {e}")
-        return json_with_headers({"error": "Internal server error"}, status=500, policy="error")
+        logging.error(f"[rid={getattr(request, 'request_id', '-')}] Error in get_sugarvita_data: {e}")
+        return api_error("internal", "Internal server error", status=500)
 
 
 # Walk endpoint
@@ -426,62 +651,73 @@ def get_sugarvita_data():
 @authenticate_and_authorize(external_parties, user_permissions, "get_walk_data")
 def get_walk():
     try:
-        # 1) Use IDs computed by the auth decorator; fall back to helper if needed
-        client = getattr(request, "client", {}) or {}
-        accessible_user_ids = getattr(request, "accessible_user_ids", None)
-        if accessible_user_ids is None:
-            client_id = client.get("client_id")
-            accessible_user_ids = get_users_by_permission(client_id, "get_walk_data")
+        # decorator computes request.accessible_user_ids
+        accessible_user_ids = getattr(request, "accessible_user_ids", [])
+        user_id = request.args.get("user_id", type=int)
 
-        # 2) Optional ?user_id= filter (and permission check)
-        target_ids = list(accessible_user_ids)  # copy
-        user_id_param = request.args.get("user_id")
-        if user_id_param:
+        # Common pagination once (applies to single- and multi-user paths)
+        limit, offset, err = parse_pagination_args()
+        if err:
+            msg, code = err
+            return json_with_headers({"error": msg}, status=code, policy="error")
+
+        # -------- Single-user (explicit ?user_id=...) ----------
+        if user_id is not None:
+            if user_id not in accessible_user_ids:
+                return api_error("forbidden", f"User {user_id} not permitted", status=403, policy="deny")
+
+            res = fetch_walk_batch(user_id, limit, offset)  # -> {"records": [...], "total": int|None}
             try:
-                uid = int(user_id_param)
-            except ValueError:
-                return json_with_headers({"error": "user_id must be an integer"}, status=400, policy="error")
-            if uid not in target_ids:
-                return json_with_headers({"error": f"user {uid} not permitted"}, status=403, policy="deny")
-            target_ids = [uid]
+                cleaned = sanitize_walk_records(res.get("records", []))  # strict validation
+            except ValidationError as e:
+                return api_error("bad_input", str(e), status=400)
 
-        # 3) Fetch per user based on connected provider
-        response_data = []
-        for uid in target_ids:
-            app_name, player_id, auth_bearer = get_connected_app_info(uid, "walk_data")
-            app_norm = (app_name or "").strip().lower()
+            page, has_next = paginate(res.get("total"), limit, offset)
 
-            data = None
-            if app_norm == "gamebus":
-                data = fetch_walk_data(player_id, auth_bearer=auth_bearer)
-            elif app_norm in ("google fit", "googlefit", "google_fit"):
-                data = fetch_google_fit_walk_data(player_id, auth_bearer=auth_bearer)
-            elif app_norm.startswith("placeholder"):
-                # 4) Optional mock for demos (enable with HDT_ALLOW_PLACEHOLDER_MOCKS=1)
-                if os.getenv("HDT_ALLOW_PLACEHOLDER_MOCKS", "0").lower() in ("1", "true", "yes"):
-                    today = date.today()
-                    data = [
-                        {"date": (today - timedelta(days=2)).isoformat(), "steps": 4231},
-                        {"date": (today - timedelta(days=1)).isoformat(), "steps": 6120},
-                        {"date": today.isoformat(),                        "steps": 3580},
-                    ]
-                else:
-                    response_data.append({"user_id": uid, "error": f"Support for '{app_name}' is not yet implemented."})
-                    continue
-            else:
-                response_data.append({"user_id": uid, "error": f"User {uid} does not have a connected walk application."})
+            payload = {"user_id": user_id, "data": cleaned, "page": page}
+            extra = {"X-Limit": str(page.get("limit", "")), "X-Offset": str(page.get("offset", ""))}
+            if page.get("total") is not None:
+                extra["X-Total"] = str(page["total"])
+
+            resp = json_with_headers(
+                payload,
+                policy="passthrough",
+                extra_headers=extra,
+                etag_variant={"policy": "passthrough", "user_id": user_id, "limit": limit, "offset": offset},
+            )
+            if has_next:
+                resp = set_next_link(resp, request.base_url, limit, offset + limit)
+            return resp
+
+        # -------- Multi-user (no ?user_id=... provided) ----------
+        envelopes = []
+        any_has_next = False
+
+        for uid in accessible_user_ids:
+            res = fetch_walk_batch(uid, limit, offset)
+            try:
+                cleaned = sanitize_walk_records(res.get("records", []))
+            except ValidationError as e:
+                # Keep the envelope, but mark as error for that uid
+                envelopes.append({"user_id": uid, "error": f"bad_input: {e}"})
                 continue
 
-            if data:
-                response_data.append({"user_id": uid, "data": data})
-            else:
-                response_data.append({"user_id": uid, "error": f"No data found for user {uid}"})
+            page, has_next = paginate(res.get("total"), limit, offset)
+            any_has_next = any_has_next or has_next
+            envelopes.append({"user_id": uid, "data": cleaned, "page": page})
 
-        return json_with_headers(response_data, policy="passthrough")
+        resp = json_with_headers(
+            envelopes,
+            policy="passthrough",
+            etag_variant={"policy": "passthrough", "limit": limit, "offset": offset},
+        )
+        if any_has_next:
+            resp = set_next_link(resp, request.base_url, limit, offset + limit)
+        return resp
 
-    except Exception as e:
-        logging.exception("Error in get_walk endpoint")  # full traceback
-        return json_with_headers({"error": "Internal server error"}, status=500, policy="error")
+    except Exception:
+        logging.exception(f"[rid={getattr(request, 'request_id', '-')}] Error in get_walk_data")
+        return api_error("internal", "Internal server error", status=500)
 
 
 
@@ -497,7 +733,7 @@ def get_sugarvita_player_types():
 
         if user_id not in request.accessible_user_ids:
             logging.debug(f"Unauthorized access attempt to player types for user {user_id}.")
-            return json_with_headers({"error": "Unauthorized access to this user's data"}, status=403, policy="deny")
+            return api_error("forbidden", "Unauthorized access to this user's data", status=403, policy="deny")
 
         # Load diabetes_pt_hl_storage.json
         try:
@@ -505,21 +741,21 @@ def get_sugarvita_player_types():
             with open(storage_file, "r") as f:
                 storage_data = json.load(f)
         except (FileNotFoundError, json.JSONDecodeError) as e:
-            logging.error(f"Error loading diabetes_pt_hl_storage.json: {e}")
-            return jsonify({"error": "Internal server error"}), 500
+            logging.error(f"[rid={getattr(request, 'request_id', '-')}] Error loading diabetes_pt_hl_storage.json: {e}")
+            return api_error("internal", "Internal server error", status=500)
 
         # Retrieve the user data
         user_data = storage_data.get("users", {}).get(str(user_id), {})
         if not user_data:
-            return jsonify({"error": f"No data found for user {user_id}"}), 404
+            return api_error("not_found", f"No data found for user {user_id}", status=404)
 
         # Check if entries exist
         if not user_data.get("entries"):
-            return jsonify({
+            return json_with_headers({
                 "user_id": user_id,
                 "latest_update": None,
                 "player_types": {}
-            }), 200
+            }, policy="passthrough")
 
         # Get the latest entry
         latest_entry = user_data["entries"][-1]
@@ -535,7 +771,7 @@ def get_sugarvita_player_types():
 
         return json_with_headers(response, policy="passthrough")
     except Exception as e:
-        logging.error(f"Error in get_sugarvita_player_types endpoint: {e}")
+        logging.error(f"[rid={getattr(request, 'request_id', '-')}] Error in get_sugarvita_player_types: {e}")
         return json_with_headers({"error": "Internal server error"}, status=500, policy="error")
         #return json_with_headers({"error": f"No data found for user {user_id}"}, status=404, policy="error")
         #return json_with_headers({"error": "Unauthorized access to this user's data"}, status=403, policy="deny")
@@ -551,7 +787,7 @@ def get_health_literacy_diabetes():
 
         if user_id not in request.accessible_user_ids:
             logging.debug(f"Unauthorized access attempt to health literacy for user {user_id}.")
-            return json_with_headers({"error": "Unauthorized access to this user's data"}, status=403, policy="deny")
+            return api_error("forbidden", "Unauthorized access to this user's data", status=403, policy="deny")
 
         # Load diabetes_pt_hl_storage.json
         try:
@@ -559,21 +795,21 @@ def get_health_literacy_diabetes():
             with open(storage_file, "r") as f:
                 storage_data = json.load(f)
         except (FileNotFoundError, json.JSONDecodeError) as e:
-            logging.error(f"Error loading diabetes_pt_hl_storage.json: {e}")
-            return jsonify({"error": "Internal server error"}), 500
+            logging.error(f"[rid={getattr(request, 'request_id', '-')}] Error loading diabetes_pt_hl_storage.json: {e}")
+            return api_error("internal", "Internal server error", status=500)
 
         # Retrieve the user data
         user_data = storage_data.get("users", {}).get(str(user_id), {})
         if not user_data:
-            return jsonify({"error": f"No data found for user {user_id}"}), 404
+            return api_error("not_found", f"No data found for user {user_id}", status=404)
 
         # Check if entries exist
         if not user_data.get("entries"):
-            return jsonify({
+            return json_with_headers({
                 "user_id": user_id,
                 "latest_update": None,
                 "health_literacy_score": None
-            }), 200
+            }, policy="passthrough")
 
         # Get the latest entry
         latest_entry = user_data["entries"][-1]
@@ -589,10 +825,43 @@ def get_health_literacy_diabetes():
 
         return json_with_headers(response, policy="passthrough")
     except Exception as e:
-        logging.error(f"Error in get_health_literacy_diabetes endpoint: {e}")
+        logging.error(f"[rid={getattr(request, 'request_id', '-')}] Error in get_health_literacy_diabetes: {e}")
         return json_with_headers({"error": "Internal server error"}, status=500, policy="error")
         #return json_with_headers({"error": f"No data found for user {user_id}"}, status=404, policy="error")
         #return json_with_headers({"error": "Unauthorized access to this user's data"}, status=403, policy="deny")
+
+def serve_stream_single_user(*, user_id: int, fetch_batch, policy_label: str):
+    limit, offset, err = parse_pagination_args()
+    if err:
+        msg, code = err
+        return json_with_headers({"error": msg}, status=code, policy="error")
+
+    res = fetch_batch(user_id, limit, offset)  # {"records": [...], "total": int|None}
+    try:
+        cleaned = sanitize_walk_records(res.get("records", []))  # strict by default
+    except ValidationError as e:
+        return api_error("bad_input", str(e), status=400)
+
+    page, has_next = paginate(
+        res.get("total"), limit, offset,
+        returned_count=len(cleaned)  # helps the has_next heuristic when total=None
+    )
+
+    payload = {"user_id": user_id, "data": cleaned, "page": page}
+    extra = {"X-Limit": str(page.get("limit","")), "X-Offset": str(page.get("offset",""))}
+    if page.get("total") is not None:
+        extra["X-Total"] = str(page["total"])  # keep as string for headers
+
+    resp = json_with_headers(
+        payload,
+        policy=policy_label,
+        extra_headers=extra,
+        etag_variant={"policy": policy_label}
+    )
+    if has_next:
+        base = request.base_url
+        resp = set_next_link(resp, base, limit, offset + limit)
+    return resp
 
 
 # Root endpoint to serve the index.html file
@@ -611,15 +880,39 @@ def healthz():
 @app.get("/__debug/effective_user/<int:user_id>")
 def debug_effective_user(user_id: int):
     if os.getenv("DEBUG_USERS", "0") not in ("1","true","yes"):
-        return json_with_headers({"error": "disabled"}, status=404, policy="info")
+        return api_error("disabled", "Debug endpoint is disabled", status=404, policy="info")
     u = users.get(user_id)
     return json_with_headers(u or {}, policy="info")
+
+# Correlation IDs: accept incoming or generate a new one
+@app.before_request
+def ensure_request_id():
+    rid = (
+        request.headers.get("X-Request-Id")
+        or request.headers.get("X-Correlation-Id")
+        or uuid.uuid4().hex
+    )
+    setattr(request, "request_id", rid)
+    g.request_id = rid  # optional
 
 #If run from a browser
 @app.after_request
 def add_cors_headers(resp):
+    # CORS headers for all responses
     resp.headers.setdefault("Access-Control-Allow-Methods", "GET,OPTIONS")
-    resp.headers.setdefault("Access-Control-Allow-Headers", "Authorization, Content-Type")
+    resp.headers.setdefault(
+        "Access-Control-Allow-Headers",
+        "Authorization, X-API-KEY, Content-Type, If-None-Match, X-Request-Id, X-Correlation-Id"
+    )
+    # Ensure X-Request-Id is always present (even for OPTIONS or non-JSON responses)
+    rid = getattr(request, "request_id", None)
+    if rid and "X-Request-Id" not in resp.headers:
+        resp.headers["X-Request-Id"] = rid
+    # Also expose it if a handler forgot
+    resp.headers.setdefault(
+        "Access-Control-Expose-Headers",
+        "ETag, X-Client-Id, X-Users-Count, X-Policy, X-Request-Id, Link, X-Limit, X-Offset, X-Total"
+    )
     return resp
 
 #If run from a browser

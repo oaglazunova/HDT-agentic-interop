@@ -5,7 +5,8 @@ import time as _time
 import datetime as _dt
 from pathlib import Path
 from dotenv import load_dotenv
-import tempfile
+import uuid
+from contextvars import ContextVar
 
 # Load .env from repo root (…/HDT-agentic-interop/.env)
 ENV_PATH = Path(__file__).resolve().parents[1] / ".env"
@@ -43,7 +44,7 @@ print(f"[HDT-MCP] POLICY_TOOLS={_ENABLE_POLICY} (HDT_ENABLE_POLICY_TOOLS={os.get
 _TELEMETRY_DIR = Path(
     os.getenv("HDT_TELEMETRY_DIR", str(Path(__file__).parent / "telemetry"))
 )
-_TELEMETRY_DIR.mkdir(exist_ok=True)
+_TELEMETRY_DIR.mkdir(parents=True, exist_ok=True)
 _DISABLE_TELEMETRY = (os.getenv("HDT_DISABLE_TELEMETRY","0").lower() in ("1","true","yes"))
 
 _cache: dict[tuple[str, tuple], tuple[float, dict]] = {}
@@ -58,6 +59,12 @@ _POLICY_CACHE: dict | None = None
 _POLICY_SIG: tuple[int, int] | None = None  # (st_mtime_ns, st_size)
 _POLICIES_LOCK = threading.Lock()
 _POLICY_OVERRIDE: dict | None = None  # test fixture can set this
+# last policy meta for the *current* call (thread/async-safe)
+_POLICY_LAST = ContextVar(
+    "policy_last",
+    default={"redactions": 0, "allowed": True, "purpose": "", "tool": ""},
+)
+
 REDACT_TOKEN = "***redacted***"
 
 # Where user -> allowed_clients lives (keep in config/)
@@ -75,6 +82,7 @@ if HDT_VAULT_ENABLE and _vault is not None:
 else:
     print("[HDT-MCP] Vault disabled or not available")
 
+_request_id_ctx: ContextVar[str | None] = ContextVar("request_id", default=None)
 
 # Create the MCP server façade (B0: MCP Core / Orchestrator)
 mcp = FastMCP(
@@ -84,15 +92,27 @@ mcp = FastMCP(
 )
 
 # --- helpers ----------------------------------------------------------------
+def _new_request_id() -> str:
+    return uuid.uuid4().hex
+
+def _get_request_id() -> str:
+    rid = _request_id_ctx.get()
+    if not rid:
+        rid = _new_request_id()
+        _request_id_ctx.set(rid)
+    return rid
+
+def _set_request_id(rid: str | None):
+    if rid:
+        _request_id_ctx.set(rid)
 
 def _headers() -> dict[str, str]:
-    """Send the key in both header styles (your Flask accepts either)."""
     if not HDT_API_KEY:
-        return {}
-    return {
-        "X-API-KEY": HDT_API_KEY,
-        "Authorization": f"Bearer {HDT_API_KEY}",
-    }
+        base = {}
+    else:
+        base = {"X-API-KEY": HDT_API_KEY, "Authorization": f"Bearer {HDT_API_KEY}"}
+    base["X-Request-Id"] = _get_request_id()
+    return base
 
 def _api_url(path: str) -> str:
     """Robust join of base + path (no double/missing slashes)."""
@@ -107,11 +127,12 @@ def _log_event(
     *,
     client_id: str | None = None,
 ) -> None:
-    cid = client_id or MCP_CLIENT_ID
-    payload = {"client_id": cid}
 
     if _DISABLE_TELEMETRY:
         return
+    cid = client_id or MCP_CLIENT_ID
+    rid = _get_request_id()
+    payload = {"client_id": cid, "request_id": rid}
 
     if args:
         # caller-supplied fields can override if they pass client_id explicitly
@@ -122,6 +143,7 @@ def _log_event(
         "kind": kind,          # "tool" | "resource"
         "name": name,          # tool/resource identifier
         "client_id": cid,      # top-level for easy grep
+        "request_id": rid,
         "args": payload,       # includes client_id too for convenience
         "ok": bool(ok),
         "ms": int(ms),
@@ -143,10 +165,20 @@ def _cached_get(path: str, params: dict | None=None) -> dict:
 def _hdt_get(path: str, params: dict | None=None) -> dict:
     url = _api_url(path)
     last = None
+    rid = _get_request_id()                         # stable across retries
     for attempt in range(1, _RETRY_MAX + 2):
         try:
-            r = requests.get(url, headers=_headers(), params=params or {}, timeout=30)
+            hdrs = _headers()
+            hdrs["X-Request-Id"] = rid  # force same id on each retry
+            r = requests.get(
+                url, headers=hdrs, params=params or {}, timeout=30
+            )
             r.raise_for_status()
+            # prefer server-issued id if present (keeps your logs consistent end-to-end)
+            server_rid = r.headers.get("X-Request-Id")
+            if server_rid:
+                _set_request_id(server_rid)
+                rid = server_rid
             return r.json()
         except Exception as e:
             last = e
@@ -154,7 +186,6 @@ def _hdt_get(path: str, params: dict | None=None) -> dict:
                 _time.sleep(0.5 * attempt)  # simple backoff
             else:
                 raise last
-
 
 # --- policy/redaction helpers ------------------------------------------------
 def _load_policy_file() -> dict:
@@ -164,36 +195,40 @@ def _load_policy_file() -> dict:
     except FileNotFoundError:
         return {}
 
-def _redact_inplace(doc: object, paths: list[str]) -> None:
+def _redact_inplace(doc: object, paths: list[str]) -> int:
     """
-    In-place redaction by dotted paths. Supports lists in the path:
-      e.g. "user.email", "list.user.email" (applied to every element of list).
+    In-place redaction by dotted paths. Returns number of fields redacted.
+    Supports lists, e.g. "users.email" will redact every element's "email".
     """
+    total = 0
     for p in paths or []:
         parts = p.split(".") if isinstance(p, str) else list(p)
-        _redact_path(doc, parts)
+        total += _redact_path(doc, parts)
+    return total
 
-def _redact_path(node: object, parts: list[str]) -> None:
+def _redact_path(node: object, parts: list[str]) -> int:
     if not parts:
-        return
+        return 0
     key, rest = parts[0], parts[1:]
 
     # If the current node is a list, apply the same path to each element.
     if isinstance(node, list):
+        c = 0
         for item in node:
-            _redact_path(item, parts)
-        return
+            c += _redact_path(item, parts)
+        return c
 
-    # We only descend through dicts; otherwise nothing to redact.
+    # Only descend through dicts
     if not isinstance(node, dict) or key not in node:
-        return
+        return 0
 
     if not rest:
         # Terminal segment => redact
+        # Count this as 1 redaction even if already the token
         node[key] = REDACT_TOKEN
-        return
+        return 1
 
-    _redact_path(node[key], rest)
+    return _redact_path(node[key], rest)
 
 def _policy() -> dict:
     global _POLICY_CACHE, _POLICY_SIG
@@ -235,13 +270,16 @@ def _apply_policy(purpose: str, tool_name: str, payload: dict, *, client_id: str
     """
     Mutates payload in place when allowed (redaction) and returns the payload.
     If denied, returns an error dict and does NOT mutate payload.
+    Also records meta (allowed/redactions) in a contextvar for logging/tests.
     """
     rule = _resolve_rule(purpose, tool_name, client_id)
     if not rule.get("allow", True):
+        _POLICY_LAST.set({"redactions": 0, "allowed": False, "purpose": purpose, "tool": tool_name})
         return {"error": "denied_by_policy", "purpose": purpose, "tool": tool_name}
+
     redact_paths = rule.get("redact") or []
-    if redact_paths:
-        _redact_inplace(payload, redact_paths)
+    redactions = _redact_inplace(payload, redact_paths) if redact_paths else 0
+    _POLICY_LAST.set({"redactions": redactions, "allowed": True, "purpose": purpose, "tool": tool_name})
     return payload
 
 #To force reload (e.g., after having edited the file very quickly, or in tests)
@@ -258,6 +296,10 @@ def _load_user_permissions() -> dict:
             return json.load(f) or {}
     except FileNotFoundError:
         return {}
+
+def _policy_last_meta() -> dict:
+    """For logging/tests: returns last policy meta (redactions, allowed, purpose, tool)."""
+    return _POLICY_LAST.get()
 
 # ---------- RESOURCES (context / “read-only”) ----------
 # Resources are things the agent can "open" for context, like files/URIs.
@@ -329,20 +371,21 @@ def get_integrated_view(user_id: str) -> dict:
             "generated_at": int(_time.time()),
         }
 
-        # 4) resource-level policy
+        # resource-level policy
         try:
             integrated = _apply_policy(purpose, _INTEGRATED_TOOL_NAME, integrated, client_id=MCP_CLIENT_ID)
+            policy_meta = _policy_last_meta()
+            _log_event(
+                "resource",
+                f"vault://user/{user_id}/integrated",
+                {"user_id": user_id, "purpose": purpose, "source": src, "records": days,
+                 "redactions": policy_meta.get("redactions", 0)},
+                True,
+                int((_time.time() - t0) * 1000),
+            )
         except NameError:
             pass
 
-        # 5) telemetry
-        _log_event(
-            "resource",
-            f"vault://user/{user_id}/integrated",
-            {"user_id": user_id, "purpose": purpose, "source": src, "records": days},
-            True,
-            int((_time.time() - t0) * 1000),
-        )
         return integrated
 
     except Exception as e:
@@ -402,7 +445,8 @@ def tool_get_trivia_data(user_id: str) -> dict:
     try:
         out = _cached_get("/get_trivia_data", {"user_id": user_id})
         out = _apply_policy("analytics", "hdt.get_trivia_data@v1", out)
-        _log_event("tool", "hdt.get_trivia_data@v1", {"user_id": user_id, "purpose": "analytics"}, True, int((_time.time()-t0)*1000))
+        policy_meta = _policy_last_meta()
+        _log_event("tool", "hdt.get_trivia_data@v1", {"user_id": user_id, "purpose": "analytics", "redactions": policy_meta.get("redactions", 0)}, True, int((_time.time()-t0)*1000))
         return out
     except Exception as e:
         _log_event("tool", "hdt.get_trivia_data@v1", {"user_id": user_id, "error": str(e)}, False, int((_time.time()-t0)*1000))
@@ -414,39 +458,93 @@ def tool_get_sugarvita_data(user_id: str) -> dict:
     try:
         out = _cached_get("/get_sugarvita_data", {"user_id": user_id})
         out = _apply_policy("analytics", "hdt.get_sugarvita_data@v1", out, client_id=MCP_CLIENT_ID)
-        _log_event("tool", "hdt.get_sugarvita_data@v1", {"user_id": user_id, "purpose": "analytics"}, True, int((_time.time()-t0)*1000))
+        policy_meta = _policy_last_meta()
+        _log_event("tool", "hdt.get_sugarvita_data@v1", {"user_id": user_id, "purpose": "analytics", "redactions": policy_meta.get("redactions", 0)}, True, int((_time.time()-t0)*1000))
         return out
     except Exception as e:
         _log_event("tool", "hdt.get_sugarvita_data@v1", {"user_id": user_id, "error": str(e)}, False, int((_time.time()-t0)*1000))
         return {"error": str(e), "user_id": user_id}
 
 @mcp.tool(name="hdt.get_walk_data@v1")
-def tool_get_walk_data(user_id: str, purpose: str = "analytics") -> dict:
+def tool_get_walk_data(
+    user_id: str,
+    purpose: str = "analytics",
+    # façade options
+    limit: int | None = None,
+    offset: int | None = None,
+    aggregate: bool = False,   # set True to auto-page and merge
+    page_limit: int = 200,     # used when aggregate=True
+    max_pages: int = 5,        # safety cap when aggregate=True
+) -> dict:
     t0 = _time.time()
     persisted = 0
     try:
-        out = _cached_get("/get_walk_data", {"user_id": user_id})
+        def _persist_batch(uid: int, recs: list[dict]) -> None:
+            nonlocal persisted
+            if HDT_VAULT_ENABLE and _vault is not None and hasattr(_vault, "write_walk") and recs:
+                try:
+                    _vault.write_walk(uid, recs, source="api.walk", fetched_at=int(_time.time()))
+                    persisted += len(recs)
+                except Exception:
+                    pass
 
-        # Normalize to envelopes for initial write (best-effort)
-        envelopes = out if isinstance(out, list) else [out]
-        if HDT_VAULT_ENABLE and _vault is not None and hasattr(_vault, "write_walk"):
+        if aggregate:
+            # Auto-paginate using body.page{total,limit,offset}
+            collected: list[dict] = []
+            cur_offset = 0 if offset is None else int(offset)
+            pg = 0
+            while True:
+                params = {"user_id": user_id, "limit": page_limit, "offset": cur_offset}
+                page = _cached_get("/get_walk_data", params)
+                envelopes = page if isinstance(page, list) else [page]
+                env = envelopes[0] if envelopes else {"user_id": int(user_id), "data": []}
+                batch = env.get("data") or env.get("records") or []
+                _persist_batch(int(user_id), batch)
+                collected.extend(batch)
+
+                meta = env.get("page") or {}
+                total = meta.get("total")
+                lim   = int(meta.get("limit", page_limit))
+                off   = int(meta.get("offset", cur_offset))
+
+                pg += 1
+                # stop if no pagination metadata, last page reached, or safety cap
+                if total is None or off + lim >= total or pg >= max_pages:
+                    break
+                cur_offset = off + lim
+
+            out: dict = {
+                "user_id": int(user_id),
+                "data": collected,
+                "page": {
+                    "total": len(collected),
+                    "limit": len(collected),
+                    "offset": 0,
+                    "aggregated": True
+                }
+            }
+
+        else:
+            # Simple pass-through (optionally forward limit/offset)
+            params = {"user_id": user_id}
+            if limit is not None:
+                params["limit"] = int(limit)
+            if offset is not None:
+                params["offset"] = int(offset)
+
+            out = _cached_get("/get_walk_data", params)
+
+            # Persist the batch(es)
+            envelopes = out if isinstance(out, list) else [out]
             for env in envelopes:
-                uid = int(env.get("user_id", user_id))
+                uid  = int(env.get("user_id", user_id))
                 recs = env.get("data") or env.get("records") or []
-                if recs:
-                    try:
-                        _vault.write_walk(uid, recs, source="api.walk", fetched_at=int(_time.time()))
-                        persisted += len(recs)
-                    except Exception:
-                        pass  # non-fatal
+                _persist_batch(uid, recs)
 
-        # Apply policy (with client context)
-        out = _apply_policy(purpose, "hdt.get_walk_data@v1", out, client_id=MCP_CLIENT_ID)
-
-        # Optional: upsert consolidated records for faster future reads
+        # Optional: upsert the consolidated result for faster future reads
         if HDT_VAULT_ENABLE and _vault is not None and hasattr(_vault, "upsert_walk_records"):
             if isinstance(out, dict):
-                recs = out.get("records", out.get("data", [])) or []
+                recs = out.get("data") or out.get("records") or []
                 if recs:
                     try:
                         _vault.upsert_walk_records(int(user_id), recs)
@@ -454,18 +552,21 @@ def tool_get_walk_data(user_id: str, purpose: str = "analytics") -> dict:
                         pass
             elif isinstance(out, list):
                 for env in out:
-                    uid = int(env.get("user_id", user_id))
-                    recs = env.get("records", env.get("data", [])) or []
+                    uid  = int(env.get("user_id", user_id))
+                    recs = env.get("data") or env.get("records") or []
                     if recs:
                         try:
                             _vault.upsert_walk_records(uid, recs)
                         except Exception:
                             pass
 
+        # Apply policy once, on the final out
+        out = _apply_policy(purpose, "hdt.get_walk_data@v1", out, client_id=MCP_CLIENT_ID)
+        policy_meta = _policy_last_meta()
         _log_event(
             "tool",
             "hdt.get_walk_data@v1",
-            {"user_id": user_id, "purpose": purpose, "persisted": persisted},
+            {"user_id": user_id, "purpose": purpose, "redactions": policy_meta.get("redactions", 0), "persisted": persisted, "aggregate": aggregate},
             True,
             int((_time.time() - t0) * 1000),
         )
@@ -488,7 +589,8 @@ def tool_get_sugarvita_player_types(user_id: str, purpose: Literal["analytics","
     try:
         raw = _cached_get("/get_sugarvita_player_types", {"user_id": user_id})
         out = _apply_policy(purpose, "hdt.get_sugarvita_player_types@v1", raw, client_id=MCP_CLIENT_ID)
-        _log_event("tool", "hdt.get_sugarvita_player_types@v1", {"user_id": user_id, "purpose": purpose}, True, int((_time.time()-t0)*1000))
+        policy_meta = _policy_last_meta()
+        _log_event("tool", "hdt.get_sugarvita_player_types@v1", {"user_id": user_id, "purpose": purpose, "redactions": policy_meta.get("redactions", 0)}, True, int((_time.time()-t0)*1000))
         return out
     except Exception as e:
         _log_event("tool", "hdt.get_sugarvita_player_types@v1", {"user_id": user_id, "purpose": purpose, "error": str(e)}, False, int((_time.time()-t0)*1000))
@@ -500,7 +602,8 @@ def tool_get_health_literacy_diabetes(user_id: str, purpose: Literal["analytics"
     try:
         raw = _cached_get("/get_health_literacy_diabetes", {"user_id": user_id})
         out = _apply_policy(purpose, "hdt.get_health_literacy_diabetes@v1", raw, client_id=MCP_CLIENT_ID)
-        _log_event("tool", "hdt.get_health_literacy_diabetes@v1", {"user_id": user_id, "purpose": purpose}, True, int((_time.time()-t0)*1000))
+        policy_meta = _policy_last_meta()
+        _log_event("tool", "hdt.get_health_literacy_diabetes@v1", {"user_id": user_id, "purpose": purpose, "redactions": policy_meta.get("redactions", 0)}, True, int((_time.time()-t0)*1000))
         return out
     except Exception as e:
         _log_event("tool", "hdt.get_health_literacy_diabetes@v1", {"user_id": user_id, "purpose": purpose, "error": str(e)}, False, int((_time.time()-t0)*1000))
@@ -545,6 +648,17 @@ def policy_reload() -> dict:
     # Touch it once so subsequent calls are hot
     _ = _policy()
     return {"reloaded": True}
+
+@mcp.tool(name="vault.maintain@v1")
+def vault_maintain(days: int = 60) -> dict:
+    if not (_vault and HDT_VAULT_ENABLE):
+        return {"error": "vault_disabled", "kept_last_days": days, "deleted_rows": 0}
+    deleted = 0
+    if hasattr(_vault, "retain_last_days"):
+        deleted = int(_vault.retain_last_days(days))
+    if hasattr(_vault, "compact"):
+        _vault.compact()
+    return {"kept_last_days": days, "deleted_rows": deleted}
 
 
 # --- 3) “Model Hub” placeholders (M1/M2) ------------------------------------

@@ -1,0 +1,14 @@
+components:
+  schemas:
+    Page:
+      type: object
+      properties:
+        total: { type: integer, nullable: true }
+        limit: { type: integer }
+        offset: { type: integer }
+    UserStreamEnvelope:
+      type: object
+      properties:
+        user_id: { type: integer }
+        data: { type: array, items: { type: object } }
+        page: { $ref: '#/components/schemas/Page' }

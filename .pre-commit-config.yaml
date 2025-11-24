@@ -3,9 +3,16 @@ repos:
     hooks:
       - id: pytest-quick
         name: pytest (quick)
-        entry: python scripts/pytest_quick.py
-        language: system
+        entry: python -m pytest --maxfail=1 --disable-warnings -q --cov-config=.coveragerc --cov=HDT_MCP --cov=HDT_CORE_INFRASTRUCTURE --cov-report=term --cov-fail-under=85
+        language: python
         pass_filenames: false
+        additional_dependencies:
+          - pytest
+          - pytest-cov
+          - flask
+          - requests
+          - python-dotenv
+          - fastmcp==2.13.0.2
 
       - id: smoke-mcp
         name: smoke_mcp (manual)
@@ -13,3 +20,15 @@ repos:
         language: system
         pass_filenames: false
         stages: [manual]   # run explicitly: pre-commit run smoke-mcp
+
+      - id: smoke-api
+        name: smoke API (cross-platform)
+        language: python
+        additional_dependencies: [ requests ]
+        entry: python scripts/smoke_api.py
+        pass_filenames: false
+        stages: [ pre-commit ]
+
+default_language_version:
+  # Use whatever Python is on PATH (your venv), instead of pinning 3.11 which may not be installed.
+  python: python

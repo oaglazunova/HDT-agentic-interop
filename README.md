@@ -1,27 +1,253 @@
-# HDT Prototype with Agentic Interoperability 
+# HDT-Agentic-Interop
 
-## HDT Agentic Interop — Quickstart
+Façade and developer API for an **agentic Human Digital Twin (HDT)** stack:
 
-This repo exposes:
-- **HDT API (Flask)** with governance headers + placeholder/mock data.
-- **MCP façade** that calls the API, applies policy/redaction, and (optionally) caches to a vault.
-- **Vault** (optional) for write-through + read caching.
+- **Flask API** exposing domain data (walk, SugarVita, trivia) with governance headers.
+- **MCP façade** adding policy redaction, telemetry, and a read-mostly **integrated view**.
+- Optional local **vault** (SQLite/DuckDB-ready) for caching records.
 
-### Prerequisites
-- Python 3.10–3.12
-- pip / venv
-- (Optional) DuckDB/SQLite is handled by Python stdlib for the sample vault
+> This README is a copy-pasteable Quickstart. It includes sample configs, a smoke test, and minimal CI hooks.
 
-### 1) Setup
+---
+
+## Prerequisites
+
+- **Python 3.11+**
+- **Git**
+- (Optional) `curl` (Bash) or `Invoke-RestMethod` (PowerShell)
+
+---
+
+## 1) Clone & create a virtualenv
+
+**Bash**
 ```bash
+git clone https://github.com/<your-gh-user>/HDT-agentic-interop.git
+cd HDT-agentic-interop
 python -m venv .venv
-# Windows PowerShell: .\.venv\Scripts\Activate.ps1
 source .venv/bin/activate
-pip install -r requirements.txt  # if present
-pip install flask requests python-dotenv mcp
-cp .env.example .env             # then edit values as needed
 ```
 
+**PowerShell**
+```
+git clone https://github.com/<your-gh-user>/HDT-agentic-interop.git
+cd HDT-agentic-interop
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+```
+
+## 2) Install dependencies
+```
+pip install -r requirements.txt
+# optional (tests, hooks, lint):
+pip install -r requirements-dev.txt
+```
+
+## 3) Create `.env` (from example)
+```
+cp .env.example .env
+# edit values as needed
+```
+
+### Common variables:
+```
+# Client & API
+MODEL_DEVELOPER_1_API_KEY=MODEL_DEVELOPER_1
+MCP_CLIENT_ID=MODEL_DEVELOPER_1
+
+# Flask API base (where MCP reads from)
+HDT_API_BASE=http://localhost:5000
+
+# Demo flags
+HDT_ALLOW_PLACEHOLDER_MOCKS=1
+HDT_ENABLE_POLICY_TOOLS=1
+
+# Vault (optional cache)
+HDT_VAULT_ENABLE=1
+HDT_VAULT_DB=./data/lifepod.sqlite       # or set HDT_VAULT_PATH instead
+
+# Policy file location
+HDT_POLICY_PATH=./config/policy.json
+
+```
+
+## 4) Seed minimal config (one-time)
+Creates tiny defaults so a clean clone works immediately.
+```
+python scripts/init_sample_config.py
+```
+
+It writes:
+`config/users.json` – test users (incl. one “Placeholder Walk” source).
+`config/user_permissions.json` – grants MODEL_DEVELOPER_1 the needed rights.
+`config/external_parties.json` – registers MODEL_DEVELOPER_1 + API key.
+`config/policy.json` – permissive analytics lane (allow + no redaction).
+
+Prefer running the script. If you’d rather create files manually, see Appendix: Sample config below.
+
+## 5) Run the API (terminal #1)
+```
+python HDT_CORE_INFRASTRUCTURE/HDT_API.py
+```
+You should see:
+```
+Starting the HDT API server on http://localhost:5000
+```
+## 6) Smoke the API
+
+### PowerShell
+```
+$apiKey = $env:MODEL_DEVELOPER_1_API_KEY
+if (-not $apiKey) { $apiKey = "MODEL_DEVELOPER_1" }  # local fallback
+$headers = @{ Authorization = "Bearer $apiKey"; "X-API-KEY" = $apiKey }
+
+Invoke-RestMethod -Uri "http://localhost:5000/healthz" -Headers $headers -Method GET
+Invoke-RestMethod -Uri "http://localhost:5000/get_walk_data?user_id=2" -Headers $headers -Method GET
+```
+
+### Bash
+```
+APIKEY="${MODEL_DEVELOPER_1_API_KEY:-MODEL_DEVELOPER_1}"
+curl -sf "http://localhost:5000/healthz" -H "Authorization: Bearer $APIKEY"
+curl -sf "http://localhost:5000/get_walk_data?user_id=2" \
+  -H "Authorization: Bearer $APIKEY" -H "X-API-KEY: $APIKEY"
+```
+
+If `HDT_ALLOW_PLACEHOLDER_MOCKS=1, user_id=2` returns a small list of fake step counts.
+Responses include governance headers:
+```
+X-Client-Id: MODEL_DEVELOPER_1
+X-Users-Count: 1
+X-Policy: passthrough|info|error
+```
+## 7) Run the MCP façade (terminal #2)
+```
+python -m HDT_MCP.server
+```
+Exposes MCP tools/resources (e.g., `hdt.get_walk_data@v1`, `policy.evaluate@v1`).
+`vault://user/{id}/integrated` returns the integrated HDT view (reads from vault first, falls back to live, applies policy).
+Telemetry is appended to `HDT_MCP/telemetry/mcp-telemetry.jsonl`.
+
+Optional single-file smoke:
+```
+python scripts/smoke_mcp.py
+```
+## 8) Tests & pre-commit (optional)
+```
+pytest -q
+pre-commit install
+pre-commit run -a
+```
+
+If your system default Python is older, ensure `language_version: python3.11` in `.pre-commit-config.yaml`.
+
+## Architecture at a glance:
+![Architecture-2025-11-20-102953.png](Architecture-2025-11-20-102953.png)
+
+Governance headers are attached at the API boundary.
+Policy (`config/policy.json`) can allow/deny and redact paths (e.g., `"user.email"`).
+Vault is a read-mostly cache; integrated view reads from vault first, then falls back to the API.
+Walk records are returned in `HDT_WALK_ORDER` (env; default `asc`, i.e., oldest→newest).
+
+## Troubleshooting
+
+- No module named 'HDT_MCP':
+Run from repo root and use module invocation: `python -m HDT_MCP.server`.
+- 401/403 or empty results:
+`.env` must define `MODEL_DEVELOPER_1_API_KEY`; configs in `config/*.json` must match your client id and permissions (the init script sets this).
+- Want data without real integrations?
+Set `HDT_ALLOW_PLACEHOLDER_MOCKS=1` and use `user_id=2` (Placeholder Walk).
+- Vault file not created:
+Ensure `HDT_VAULT_ENABLE=1` and `HDT_VAULT_DB` (or `HDT_VAULT_PATH`) points to a writable location. Parent directories are created automatically.
+- CORS / JS apps:
+The API exposes `Access-Control-Expose-Headers: X-Client-Id, X-Users-Count, X-Policy`. If calling from a browser, ensure your `Origin` is acceptable (dev defaults are permissive).
+
+## Appendix: Sample config (what the init script writes)
+`config/users.json`
+```
+{
+  "users": [
+    {
+      "user_id": 1,
+      "connected_apps_walk_data": [
+        { "connected_application": "GameBus", "player_id": "1" }
+      ]
+    },
+    {
+      "user_id": 2,
+      "connected_apps_walk_data": [
+        { "connected_application": "Placeholder Walk", "player_id": "demo-1" }
+      ]
+    },
+    {
+      "user_id": 3,
+      "connected_apps_walk_data": [
+        { "connected_application": "Placeholder walk app", "player_id": "demo" }
+      ]
+    }
+  ]
+}
+```
+`config/user_permissions.json`
+```
+{
+  "1": { "allowed_clients": { "MODEL_DEVELOPER_1": ["get_walk_data"] } },
+  "2": { "allowed_clients": { "MODEL_DEVELOPER_1": ["get_walk_data"] } },
+  "3": { "allowed_clients": { "MODEL_DEVELOPER_1": ["get_walk_data"] } }
+}
+```
+`config/external_parties.json`
+```
+{
+  "external_parties": [
+    {
+      "client_id": "MODEL_DEVELOPER_1",
+      "api_key": "MODEL_DEVELOPER_1",
+      "permissions": [
+        "get_walk_data",
+        "get_sugarvita_data",
+        "get_trivia_data",
+        "get_sugarvita_player_types",
+        "get_health_literacy_diabetes"
+      ]
+    }
+  ]
+}
+```
+`config/policy.json`
+```
+{
+  "defaults": {
+    "analytics": { "allow": true, "redact": [] },
+    "modeling":  { "allow": true, "redact": [] },
+    "coaching":  { "allow": true, "redact": [] }
+  },
+  "clients": {},
+  "tools": {}
+}
+```
+
+## Appendix: Example governance headers (API)
+
+Example Flask helper (already present):
+```
+def json_with_headers(payload, *, policy: str | None = None, status: int = 200):
+    resp = jsonify(payload)
+    resp.status_code = status
+    cid = (getattr(request, "client", {}) or {}).get("client_id", "unknown")
+    users_count = len(payload) if isinstance(payload, list) else 1
+    resp.headers["X-Client-Id"] = str(cid)
+    resp.headers["X-Users-Count"] = str(users_count)
+    if policy is not None:
+        resp.headers["X-Policy"] = policy
+    resp.headers["Access-Control-Allow-Origin"] = request.headers.get("Origin", "*")
+    resp.headers["Vary"] = "Origin"
+    resp.headers["Access-Control-Expose-Headers"] = "X-Client-Id, X-Users-Count, X-Policy"
+    return resp
+```
+
+
+====================Old ReadMe=========
 ## Table of Contents
 - [System Architecture](#system-architecture)
   - [Subfolder Dependencies and Functions](#subfolder-dependencies-and-functions)

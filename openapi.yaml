@@ -1,0 +1,56 @@
+paths:
+  /get_walk_data:
+    get:
+      summary: Retrieve walk data
+      parameters:
+        - in: query
+          name: user_id
+          schema: { type: integer }
+          description: If provided, returns only this user's data; enables pagination.
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 1000, default: 100 }
+          description: Page size (only effective when user_id is set).
+        - in: query
+          name: offset
+          schema: { type: integer, minimum: 0, default: 0 }
+          description: Page offset (only effective when user_id is set).
+      responses:
+        "200":
+          description: OK
+          headers:
+            X-Client-Id:   { schema: { type: string } }
+            X-Users-Count: { schema: { type: string } }
+            X-Policy:      { schema: { type: string } }
+            X-Limit:       { schema: { type: string }, description: Returned only in single-user mode }
+            X-Offset:      { schema: { type: string }, description: Returned only in single-user mode }
+            X-Total:       { schema: { type: string }, description: Returned only in single-user mode }
+            Link:
+              schema: { type: string }
+              description: 'RFC 5988 Web Linking; includes rel="next" when more pages exist (single-user mode).'
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required: [user_id]
+                  properties:
+                    user_id: { type: integer }
+                    data:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          date: { type: string }
+                          steps: { type: integer }
+                          distance_meters: { type: number, nullable: true }
+                          duration: { type: string, nullable: true }
+                          kcalories: { type: number, nullable: true }
+                    page:
+                      type: object
+                      description: Present only in single-user mode
+                      properties:
+                        total:  { type: integer }
+                        limit:  { type: integer }
+                        offset: { type: integer }

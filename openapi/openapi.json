@@ -1,0 +1,623 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "HDT API",
+    "version": "0.2.0",
+    "description": "Human Digital Twin (HDT) API exposing read-mostly data streams and lightweight insights. Supports ETag-based conditional GETs and correlation IDs via X-Request-Id / X-Correlation-Id."
+  },
+  "servers": [
+    { "url": "http://localhost:5000" }
+  ],
+  "security": [
+    { "HttpBearer": [] },
+    { "ApiKeyAuth": [] }
+  ],
+  "paths": {
+    "/healthz": {
+      "get": {
+        "operationId": "healthz",
+        "tags": ["Meta"],
+        "summary": "Liveness probe",
+        "description": "Returns OK for health checks. Public, no auth required.",
+        "security": [],
+        "parameters": [
+          { "$ref": "#/components/parameters/IfNoneMatch" },
+          { "$ref": "#/components/parameters/XRequestId" },
+          { "$ref": "#/components/parameters/XCorrelationId" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Service is healthy.",
+            "headers": {
+              "ETag": { "$ref": "#/components/headers/ETag" },
+              "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" },
+              "X-Client-Id": { "$ref": "#/components/headers/X-Client-Id" },
+              "X-Users-Count": { "$ref": "#/components/headers/X-Users-Count" },
+              "X-Policy": { "$ref": "#/components/headers/X-Policy" }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "status": { "type": "string", "example": "ok" } },
+                  "required": ["status"]
+                }
+              }
+            }
+          },
+          "304": { "description": "Not Modified (ETag matched).",
+            "headers": {
+              "ETag": { "$ref": "#/components/headers/ETag" },
+              "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" },
+              "X-Client-Id": { "$ref": "#/components/headers/X-Client-Id" },
+              "X-Users-Count": { "$ref": "#/components/headers/X-Users-Count" },
+              "X-Policy": { "$ref": "#/components/headers/X-Policy" },
+              "Link": { "$ref": "#/components/headers/Link" },
+              "X-Limit": { "$ref": "#/components/headers/X-Limit" },
+              "X-Offset": { "$ref": "#/components/headers/X-Offset" },
+              "X-Total": { "$ref": "#/components/headers/X-Total" }
+            }
+          }
+        }
+      }
+    },
+
+    "/metadata/model_developer_apis": {
+      "get": {
+        "operationId": "metadataModel",
+        "tags": ["Meta"],
+        "summary": "Metadata: model-developer endpoints",
+        "security": [],
+        "parameters": [
+          { "$ref": "#/components/parameters/IfNoneMatch" },
+          { "$ref": "#/components/parameters/XRequestId" },
+          { "$ref": "#/components/parameters/XCorrelationId" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Metadata document.",
+            "headers": {
+              "ETag": { "$ref": "#/components/headers/ETag" },
+              "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" },
+              "X-Policy": { "$ref": "#/components/headers/X-Policy" }
+            },
+            "content": { "application/json": { "schema": { "type": "object" } } }
+          },
+          "304": { "description": "Not Modified (ETag matched).",
+            "headers": {
+              "ETag": { "$ref": "#/components/headers/ETag" },
+              "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" },
+              "X-Client-Id": { "$ref": "#/components/headers/X-Client-Id" },
+              "X-Users-Count": { "$ref": "#/components/headers/X-Users-Count" },
+              "X-Policy": { "$ref": "#/components/headers/X-Policy" },
+              "Link": { "$ref": "#/components/headers/Link" },
+              "X-Limit": { "$ref": "#/components/headers/X-Limit" },
+              "X-Offset": { "$ref": "#/components/headers/X-Offset" },
+              "X-Total": { "$ref": "#/components/headers/X-Total" }
+            }
+          }
+        }
+      }
+    },
+
+    "/metadata/app_developer_apis": {
+      "get": {
+        "operationId": "metadataApp",
+        "tags": ["Meta"],
+        "summary": "Metadata: app-developer endpoints",
+        "security": [],
+        "parameters": [
+          { "$ref": "#/components/parameters/IfNoneMatch" },
+          { "$ref": "#/components/parameters/XRequestId" },
+          { "$ref": "#/components/parameters/XCorrelationId" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Metadata document.",
+            "headers": {
+              "ETag": { "$ref": "#/components/headers/ETag" },
+              "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" },
+              "X-Policy": { "$ref": "#/components/headers/X-Policy" }
+            },
+            "content": { "application/json": { "schema": { "type": "object" } } }
+          },
+          "304": { "description": "Not Modified (ETag matched).",
+            "headers": {
+              "ETag": { "$ref": "#/components/headers/ETag" },
+              "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" },
+              "X-Client-Id": { "$ref": "#/components/headers/X-Client-Id" },
+              "X-Users-Count": { "$ref": "#/components/headers/X-Users-Count" },
+              "X-Policy": { "$ref": "#/components/headers/X-Policy" },
+              "Link": { "$ref": "#/components/headers/Link" },
+              "X-Limit": { "$ref": "#/components/headers/X-Limit" },
+              "X-Offset": { "$ref": "#/components/headers/X-Offset" },
+              "X-Total": { "$ref": "#/components/headers/X-Total" }
+            }
+          }
+        }
+      }
+    },
+
+    "/get_walk_data": {
+      "get": {
+        "operationId": "getWalkData",
+        "tags": ["Model Developer APIs"],
+        "summary": "Walk data (single-user with pagination or multi-user aggregate)",
+        "description": "If `user_id` is provided, returns a single-user envelope with page metadata. Without `user_id`, returns an array of envelopes for all users the client is authorized to access.",
+        "parameters": [
+          { "name": "user_id", "in": "query", "schema": { "type": "integer" }, "required": false, "description": "User ID to query (single-user fast path)." },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 1000 }, "required": false, "description": "Page size (default from server)." },
+          { "name": "offset", "in": "query", "schema": { "type": "integer", "minimum": 0 }, "required": false, "description": "Offset into the stream." },
+          { "$ref": "#/components/parameters/IfNoneMatch" },
+          { "$ref": "#/components/parameters/XRequestId" },
+          { "$ref": "#/components/parameters/XCorrelationId" }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "headers": {
+              "ETag": { "$ref": "#/components/headers/ETag" },
+              "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" },
+              "X-Client-Id": { "$ref": "#/components/headers/X-Client-Id" },
+              "X-Users-Count": { "$ref": "#/components/headers/X-Users-Count" },
+              "X-Policy": { "$ref": "#/components/headers/X-Policy" },
+              "Link": { "$ref": "#/components/headers/Link" },
+              "X-Limit": { "$ref": "#/components/headers/X-Limit" },
+              "X-Offset": { "$ref": "#/components/headers/X-Offset" },
+              "X-Total": { "$ref": "#/components/headers/X-Total" }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    { "$ref": "#/components/schemas/UserStreamEnvelope" },
+                    {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/UserStreamEnvelope" }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "304": { "description": "Not Modified (ETag matched).",
+            "headers": {
+              "ETag": { "$ref": "#/components/headers/ETag" },
+              "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" },
+              "X-Client-Id": { "$ref": "#/components/headers/X-Client-Id" },
+              "X-Users-Count": { "$ref": "#/components/headers/X-Users-Count" },
+              "X-Policy": { "$ref": "#/components/headers/X-Policy" },
+              "Link": { "$ref": "#/components/headers/Link" },
+              "X-Limit": { "$ref": "#/components/headers/X-Limit" },
+              "X-Offset": { "$ref": "#/components/headers/X-Offset" },
+              "X-Total": { "$ref": "#/components/headers/X-Total" }
+            }
+          },
+          "400": {
+            "description": "Bad request (e.g., invalid pagination).",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } }
+          },
+          "403": {
+            "description": "Forbidden (no access).",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } }
+          },
+          "500": {
+            "description": "Internal server error.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } }
+          }
+        }
+      }
+    },
+
+    "/get_trivia_data": {
+      "get": {
+        "operationId": "getTriviaData",
+        "tags": ["Model Developer APIs"],
+        "summary": "Trivia data (multi-user aggregate)",
+        "parameters": [
+          { "$ref": "#/components/parameters/IfNoneMatch" },
+          { "$ref": "#/components/parameters/XRequestId" },
+          { "$ref": "#/components/parameters/XCorrelationId" }
+        ],
+        "responses": {
+           "403": {
+            "description": "Forbidden.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } }
+          },
+          "200": {
+            "description": "List of user envelopes with trivia data.",
+            "headers": {
+              "ETag": { "$ref": "#/components/headers/ETag" },
+              "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" },
+              "X-Client-Id": { "$ref": "#/components/headers/X-Client-Id" },
+              "X-Users-Count": { "$ref": "#/components/headers/X-Users-Count" },
+              "X-Policy": { "$ref": "#/components/headers/X-Policy" }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/TriviaEnvelope" }
+                }
+              }
+            }
+          },
+          "304": { "description": "Not Modified (ETag matched).",
+            "headers": {
+              "ETag": { "$ref": "#/components/headers/ETag" },
+              "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" },
+              "X-Client-Id": { "$ref": "#/components/headers/X-Client-Id" },
+              "X-Users-Count": { "$ref": "#/components/headers/X-Users-Count" },
+              "X-Policy": { "$ref": "#/components/headers/X-Policy" },
+              "Link": { "$ref": "#/components/headers/Link" },
+              "X-Limit": { "$ref": "#/components/headers/X-Limit" },
+              "X-Offset": { "$ref": "#/components/headers/X-Offset" },
+              "X-Total": { "$ref": "#/components/headers/X-Total" }
+            }
+          },
+          "500": {
+            "description": "Internal server error.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } }
+          }
+        }
+      }
+    },
+
+    "/get_sugarvita_data": {
+      "get": {
+        "operationId": "getSugarVitaData",
+        "tags": ["Model Developer APIs"],
+        "summary": "SugarVita data (multi-user aggregate)",
+        "parameters": [
+          { "$ref": "#/components/parameters/IfNoneMatch" },
+          { "$ref": "#/components/parameters/XRequestId" },
+          { "$ref": "#/components/parameters/XCorrelationId" }
+        ],
+        "responses": {
+           "403": {
+            "description": "Forbidden.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } }
+          },
+          "200": {
+            "description": "List of user envelopes with SugarVita data.",
+            "headers": {
+              "ETag": { "$ref": "#/components/headers/ETag" },
+              "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" },
+              "X-Client-Id": { "$ref": "#/components/headers/X-Client-Id" },
+              "X-Users-Count": { "$ref": "#/components/headers/X-Users-Count" },
+              "X-Policy": { "$ref": "#/components/headers/X-Policy" }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/SugarVitaEnvelope" }
+                }
+              }
+            }
+          },
+          "304": { "description": "Not Modified (ETag matched).",
+            "headers": {
+              "ETag": { "$ref": "#/components/headers/ETag" },
+              "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" },
+              "X-Client-Id": { "$ref": "#/components/headers/X-Client-Id" },
+              "X-Users-Count": { "$ref": "#/components/headers/X-Users-Count" },
+              "X-Policy": { "$ref": "#/components/headers/X-Policy" },
+              "Link": { "$ref": "#/components/headers/Link" },
+              "X-Limit": { "$ref": "#/components/headers/X-Limit" },
+              "X-Offset": { "$ref": "#/components/headers/X-Offset" },
+              "X-Total": { "$ref": "#/components/headers/X-Total" }
+            }
+          },
+          "500": {
+            "description": "Internal server error.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } }
+          }
+        }
+      }
+    },
+
+    "/get_sugarvita_player_types": {
+      "get": {
+        "operationId": "getSugarVitaPlayerTypes",
+        "tags": ["App Developer APIs"],
+        "summary": "Player type scores based on SugarVita",
+        "parameters": [
+          { "name": "user_id", "in": "query", "required": true, "schema": { "type": "integer" } },
+          { "$ref": "#/components/parameters/IfNoneMatch" },
+          { "$ref": "#/components/parameters/XRequestId" },
+          { "$ref": "#/components/parameters/XCorrelationId" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Player type scores for the user.",
+            "headers": {
+              "ETag": { "$ref": "#/components/headers/ETag" },
+              "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" },
+              "X-Client-Id": { "$ref": "#/components/headers/X-Client-Id" },
+              "X-Users-Count": { "$ref": "#/components/headers/X-Users-Count" },
+              "X-Policy": { "$ref": "#/components/headers/X-Policy" }
+            },
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PlayerTypesResponse" } } }
+          },
+          "304": { "description": "Not Modified (ETag matched).",
+            "headers": {
+              "ETag": { "$ref": "#/components/headers/ETag" },
+              "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" },
+              "X-Client-Id": { "$ref": "#/components/headers/X-Client-Id" },
+              "X-Users-Count": { "$ref": "#/components/headers/X-Users-Count" },
+              "X-Policy": { "$ref": "#/components/headers/X-Policy" },
+              "Link": { "$ref": "#/components/headers/Link" },
+              "X-Limit": { "$ref": "#/components/headers/X-Limit" },
+              "X-Offset": { "$ref": "#/components/headers/X-Offset" },
+              "X-Total": { "$ref": "#/components/headers/X-Total" }
+            }
+          },
+          "403": { "description": "Forbidden.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
+          "404": { "description": "Not found.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
+          "500": { "description": "Internal server error.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
+        }
+      }
+    },
+
+    "/get_health_literacy_diabetes": {
+      "get": {
+        "operationId": "getHealthLiteracyDiabetes",
+        "tags": ["App Developer APIs"],
+        "summary": "Health literacy (diabetes) score for a user",
+        "parameters": [
+          { "name": "user_id", "in": "query", "required": true, "schema": { "type": "integer" } },
+          { "$ref": "#/components/parameters/IfNoneMatch" },
+          { "$ref": "#/components/parameters/XRequestId" },
+          { "$ref": "#/components/parameters/XCorrelationId" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Health literacy score (may be null if no entries).",
+            "headers": {
+              "ETag": { "$ref": "#/components/headers/ETag" },
+              "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" },
+              "X-Client-Id": { "$ref": "#/components/headers/X-Client-Id" },
+              "X-Users-Count": { "$ref": "#/components/headers/X-Users-Count" },
+              "X-Policy": { "$ref": "#/components/headers/X-Policy" }
+            },
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HealthLiteracyResponse" } } }
+          },
+          "304": { "description": "Not Modified (ETag matched).",
+            "headers": {
+              "ETag": { "$ref": "#/components/headers/ETag" },
+              "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" },
+              "X-Client-Id": { "$ref": "#/components/headers/X-Client-Id" },
+              "X-Users-Count": { "$ref": "#/components/headers/X-Users-Count" },
+              "X-Policy": { "$ref": "#/components/headers/X-Policy" },
+              "Link": { "$ref": "#/components/headers/Link" },
+              "X-Limit": { "$ref": "#/components/headers/X-Limit" },
+              "X-Offset": { "$ref": "#/components/headers/X-Offset" },
+              "X-Total": { "$ref": "#/components/headers/X-Total" }
+            }
+          },
+          "403": { "description": "Forbidden.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
+          "404": { "description": "Not found.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
+          "500": { "description": "Internal server error.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
+        }
+      }
+    },
+
+    "/__debug/effective_user/{user_id}": {
+      "get": {
+        "operationId": "debugEffectiveUser",
+        "tags": ["Internal"],
+        "summary": "Debug: effective merged user config (dev only)",
+        "parameters": [
+          { "name": "user_id", "in": "path", "required": true, "schema": { "type": "integer" } },
+          { "$ref": "#/components/parameters/IfNoneMatch" },
+          { "$ref": "#/components/parameters/XRequestId" },
+          { "$ref": "#/components/parameters/XCorrelationId" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Effective user entry.",
+            "headers": {
+              "ETag": { "$ref": "#/components/headers/ETag" },
+              "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" },
+              "X-Policy": { "$ref": "#/components/headers/X-Policy" }
+            },
+            "content": { "application/json": { "schema": { "type": "object", "additionalProperties": true } } }
+          },
+          "304": { "description": "Not Modified (ETag matched).",
+            "headers": {
+              "ETag": { "$ref": "#/components/headers/ETag" },
+              "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" },
+              "X-Client-Id": { "$ref": "#/components/headers/X-Client-Id" },
+              "X-Users-Count": { "$ref": "#/components/headers/X-Users-Count" },
+              "X-Policy": { "$ref": "#/components/headers/X-Policy" },
+              "Link": { "$ref": "#/components/headers/Link" },
+              "X-Limit": { "$ref": "#/components/headers/X-Limit" },
+              "X-Offset": { "$ref": "#/components/headers/X-Offset" },
+              "X-Total": { "$ref": "#/components/headers/X-Total" }
+            }
+          },
+          "404": { "description": "Disabled or not found.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
+        }
+      }
+    }
+  },
+
+  "components": {
+    "securitySchemes": {
+      "HttpBearer": { "type": "http", "scheme": "bearer", "bearerFormat": "JWT" },
+      "ApiKeyAuth": { "type": "apiKey", "in": "header", "name": "X-API-KEY" }
+    },
+
+    "parameters": {
+      "IfNoneMatch": {
+        "name": "If-None-Match",
+        "in": "header",
+        "required": false,
+        "schema": { "type": "string" },
+        "description": "Provide an ETag to enable conditional GET; server returns 304 if unchanged."
+      },
+      "XRequestId": {
+        "name": "X-Request-Id",
+        "in": "header",
+        "required": false,
+        "schema": { "type": "string" },
+        "description": "Client-supplied correlation ID. If omitted, the server generates one and echoes it back."
+      },
+      "XCorrelationId": {
+        "name": "X-Correlation-Id",
+        "in": "header",
+        "required": false,
+        "schema": { "type": "string" },
+        "description": "Alternative correlation header; server will use this if present."
+      }
+    },
+
+    "headers": {
+      "ETag": { "schema": { "type": "string" }, "description": "Strong ETag for response body + variant." },
+      "X-Request-Id": { "schema": { "type": "string" }, "description": "Correlation ID for tracing this response." },
+      "X-Client-Id": { "schema": { "type": "string" }, "description": "Effective client id computed by auth layer." },
+      "X-Users-Count": { "schema": { "type": "integer" }, "description": "Number of user envelopes in the response (1 for single-user)." },
+      "X-Policy": { "schema": { "type": "string" }, "description": "Effective policy label applied by the server." },
+      "Link": { "schema": { "type": "string" }, "description": "Pagination link header (rel=\"next\") when more pages exist." },
+      "X-Limit": { "schema": { "type": "integer" }, "description": "Page size returned." },
+      "X-Offset": { "schema": { "type": "integer" }, "description": "Offset used." },
+      "X-Total": { "schema": { "type": "integer", "nullable": true }, "description": "Total items if known; may be null." }
+    },
+
+    "schemas": {
+      "ErrorEnvelope": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": { "type": "string" },
+              "message": { "type": "string" },
+              "details": { "type": "object", "additionalProperties": true }
+            },
+            "required": ["code", "message"]
+          }
+        },
+        "required": ["error"]
+      },
+
+      "WalkRecord": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "oneOf": [
+              { "type": "string", "format": "date" },
+              { "type": "string", "format": "date-time" }
+            ],
+            "description": "Either date-only (YYYY-MM-DD) or date-time (YYYY-MM-DD HH:MM:SS)."
+          },
+          "steps": { "type": "integer" },
+          "distance_meters": { "type": "number", "nullable": true },
+          "duration": { "type": "string", "nullable": true, "description": "HH:MM:SS or null" },
+          "kcalories": { "type": "number", "nullable": true }
+        },
+        "required": ["date", "steps"]
+      },
+
+      "Page": {
+        "type": "object",
+        "properties": {
+          "total": { "type": "integer", "nullable": true },
+          "limit": { "type": "integer" },
+          "offset": { "type": "integer" }
+        },
+        "required": ["total", "limit", "offset"]
+      },
+
+      "UserStreamEnvelope": {
+        "type": "object",
+        "properties": {
+          "user_id": { "type": "integer" },
+          "data": { "type": "array", "items": { "$ref": "#/components/schemas/WalkRecord" } },
+          "page": { "$ref": "#/components/schemas/Page" }
+        },
+        "required": ["user_id", "data"]
+      },
+
+      "TriviaPayload": {
+        "type": "object",
+        "properties": {
+          "trivia_results": { "type": "array", "items": { "type": "object", "additionalProperties": true } },
+          "latest_activity_info": { "type": "string", "nullable": true }
+        },
+        "required": ["trivia_results"]
+      },
+
+      "TriviaEnvelope": {
+        "type": "object",
+        "properties": {
+          "user_id": { "type": "integer" },
+          "data": { "$ref": "#/components/schemas/TriviaPayload" },
+          "error": { "type": "string" }
+        },
+        "description": "Either `data` is present or an `error` string.",
+        "anyOf": [
+          { "required": ["user_id", "data"] },
+          { "required": ["user_id", "error"] }
+        ]
+      },
+
+      "SugarVitaPayload": {
+        "type": "object",
+        "properties": {
+          "sugarvita_results": { "type": "array", "items": { "type": "object", "additionalProperties": true } },
+          "latest_activity_info": { "type": "string", "nullable": true }
+        },
+        "required": ["sugarvita_results"]
+      },
+
+      "SugarVitaEnvelope": {
+        "type": "object",
+        "properties": {
+          "user_id": { "type": "integer" },
+          "data": { "$ref": "#/components/schemas/SugarVitaPayload" },
+          "error": { "type": "string" }
+        },
+        "description": "Either `data` is present or an `error` string.",
+        "anyOf": [
+          { "required": ["user_id", "data"] },
+          { "required": ["user_id", "error"] }
+        ]
+      },
+
+      "PlayerTypesResponse": {
+        "type": "object",
+        "properties": {
+          "user_id": { "type": "integer" },
+          "latest_update": { "type": "string", "nullable": true, "description": "ISO date/time or null" },
+          "player_types": {
+            "type": "object",
+            "description": "Key-value map of player type to score (0..1).",
+            "additionalProperties": { "type": "number" },
+            "example": { "Socializer": 0.62, "Competitive": 0.21, "Explorer": 0.17 }
+          }
+        },
+        "required": ["user_id", "player_types"]
+      },
+
+      "HealthLiteracyResponse": {
+        "type": "object",
+        "properties": {
+          "user_id": { "type": "integer" },
+          "latest_update": { "type": "string", "nullable": true, "description": "ISO date/time or null" },
+          "health_literacy_score": {
+            "description": "Shape depends on storage; may be null when no entries.",
+            "oneOf": [
+              { "type": "object", "additionalProperties": true },
+              { "type": "string" },
+              { "type": "number" },
+              { "type": "null" }
+            ]
+          }
+        },
+        "required": ["user_id"]
+      }
+    }
+  }
+}
