@@ -48,6 +48,31 @@ jobs:
       - name: Run pytest
         run: pytest -q
 
+      - name: Start API server (background)
+        env:
+          HDT_ALLOW_PLACEHOLDER_MOCKS: "1"
+          MCP_CLIENT_ID: "MODEL_DEVELOPER_1"
+          HDT_API_KEY: "MODEL_DEVELOPER_1"
+          MODEL_DEVELOPER_1_API_KEY: "MODEL_DEVELOPER_1"
+          HDT_VAULT_ENABLE: "1"
+        run: |
+          nohup python -c "from HDT_CORE_INFRASTRUCTURE.HDT_API import app; app.run(host='127.0.0.1', port=5000, debug=False, use_reloader=False)" \
+            > /tmp/api.log 2>&1 & echo $! > /tmp/api.pid
+
+      - name: Wait for API readiness
+        run: |
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:5000/healthz >/dev/null; then
+              echo "API is up"; break
+            fi
+            sleep 1
+            if [ "$i" -eq 30 ]; then
+              echo "API failed to start; last 200 lines of /tmp/api.log:" >&2
+              (tail -n 200 /tmp/api.log || true) >&2
+              exit 1
+            fi
+          done
+
       - name: Smoke test (API+MCP)
         env:
           HDT_ALLOW_PLACEHOLDER_MOCKS: "1"
@@ -58,6 +83,20 @@ jobs:
           HDT_VAULT_ENABLE: "1"
         run: |
           python scripts/smoke_mcp.py
+
+      - name: Stop API server
+        if: always()
+        run: |
+          if [ -f /tmp/api.pid ]; then
+            kill $(cat /tmp/api.pid) 2>/dev/null || true
+            rm -f /tmp/api.pid || true
+          fi
+
+      - name: Dump API logs on failure
+        if: failure()
+        run: |
+          echo "--- API log (tail) ---"
+          tail -n 200 /tmp/api.log || true
 
       - name: Run tests with coverage guard
         run: |
