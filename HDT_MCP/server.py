@@ -7,6 +7,18 @@ from pathlib import Path
 from dotenv import load_dotenv
 import uuid
 from contextvars import ContextVar
+# Make imports robust whether this file is loaded as part of the HDT_MCP package
+# or executed directly by a tool that doesn't set the project root on sys.path.
+try:
+    from HDT_MCP.domain.services import sync_user_walk
+    from HDT_MCP.server_helpers import resolve_connected_app  # tiny helper you add
+except ModuleNotFoundError:
+    import sys as _sys
+    _ROOT = Path(__file__).resolve().parents[1]
+    if str(_ROOT) not in _sys.path:
+        _sys.path.insert(0, str(_ROOT))
+    from HDT_MCP.domain.services import sync_user_walk
+    from HDT_MCP.server_helpers import resolve_connected_app  # tiny helper you add
 
 # Load .env from repo root (…/HDT-agentic-interop/.env)
 ENV_PATH = Path(__file__).resolve().parents[1] / ".env"
@@ -66,6 +78,7 @@ _POLICY_LAST = ContextVar(
 )
 
 REDACT_TOKEN = "***redacted***"
+
 
 # Where user -> allowed_clients lives (keep in config/)
 _USER_PERMS_PATH = CONFIG_DIR / "user_permissions.json"
@@ -475,9 +488,13 @@ def tool_get_walk_data(
     aggregate: bool = False,   # set True to auto-page and merge
     page_limit: int = 200,     # used when aggregate=True
     max_pages: int = 5,        # safety cap when aggregate=True
-) -> dict:
+) -> dict | list[dict]:
+
     t0 = _time.time()
     persisted = 0
+    page_limit = max(1, min(int(page_limit), 1000))
+    max_pages = max(1, min(int(max_pages), 50))
+
     try:
         def _persist_batch(uid: int, recs: list[dict]) -> None:
             nonlocal persisted
@@ -502,26 +519,21 @@ def tool_get_walk_data(
                 _persist_batch(int(user_id), batch)
                 collected.extend(batch)
 
+                # if API has no pagination meta OR we got an empty batch, stop
                 meta = env.get("page") or {}
                 total = meta.get("total")
-                lim   = int(meta.get("limit", page_limit))
-                off   = int(meta.get("offset", cur_offset))
-
+                lim = int(meta.get("limit", page_limit))
+                off = int(meta.get("offset", cur_offset))
                 pg += 1
                 # stop if no pagination metadata, last page reached, or safety cap
-                if total is None or off + lim >= total or pg >= max_pages:
+                if not batch or total is None or off + lim >= total or pg >= max_pages:
                     break
                 cur_offset = off + lim
 
             out: dict = {
                 "user_id": int(user_id),
                 "data": collected,
-                "page": {
-                    "total": len(collected),
-                    "limit": len(collected),
-                    "offset": 0,
-                    "aggregated": True
-                }
+                "page": {"total": len(collected), "limit": len(collected), "offset": 0, "aggregated": True}
             }
 
         else:
@@ -537,7 +549,7 @@ def tool_get_walk_data(
             # Persist the batch(es)
             envelopes = out if isinstance(out, list) else [out]
             for env in envelopes:
-                uid  = int(env.get("user_id", user_id))
+                uid = int(env.get("user_id", user_id))
                 recs = env.get("data") or env.get("records") or []
                 _persist_batch(uid, recs)
 
@@ -552,7 +564,7 @@ def tool_get_walk_data(
                         pass
             elif isinstance(out, list):
                 for env in out:
-                    uid  = int(env.get("user_id", user_id))
+                    uid = int(env.get("user_id", user_id))
                     recs = env.get("data") or env.get("records") or []
                     if recs:
                         try:
@@ -566,7 +578,9 @@ def tool_get_walk_data(
         _log_event(
             "tool",
             "hdt.get_walk_data@v1",
-            {"user_id": user_id, "purpose": purpose, "redactions": policy_meta.get("redactions", 0), "persisted": persisted, "aggregate": aggregate},
+            {"user_id": user_id, "purpose": purpose,
+             "redactions": policy_meta.get("redactions", 0),
+             "persisted": persisted, "aggregate": aggregate},
             True,
             int((_time.time() - t0) * 1000),
         )
