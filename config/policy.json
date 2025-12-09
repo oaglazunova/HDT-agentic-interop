@@ -12,6 +12,8 @@
   },
   "tools": {
     "hdt.get_walk_data@v1": { "analytics": { "allow": true, "redact": [] }, "modeling": { "allow": false } },
-    "vault.integrated@v1":  { "analytics": { "allow": true, "redact": [] } }
+    "vault.integrated@v1":  { "analytics": { "allow": true, "redact": [] } },
+    "behavior_strategy@v1": { "coaching": { "allow": true, "redact": [] }
+    }
   }
 }

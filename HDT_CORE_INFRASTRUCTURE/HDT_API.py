@@ -5,7 +5,9 @@ import os, logging
 from pathlib import Path
 import hashlib
 import uuid
-from flask import g  # optional
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
 try:
     # When running as a script with project root on sys.path
     from validation import sanitize_walk_records, ValidationError
@@ -28,7 +30,9 @@ except ImportError:
     # Fallback to relative when run as a module
     from .hdt_api_fetchers import FetcherResult, fetch_walk_batch
 
-# ===== helper functions ==========
+
+# ===== helpers ==========
+
 def _stable_json_dumps(obj) -> str:
     # Compact + deterministic JSON (no spaces, sorted keys)
     return json.dumps(obj, separators=(",", ":"), sort_keys=True, ensure_ascii=False)
@@ -121,8 +125,7 @@ def json_with_headers(
         resp.headers["X-Policy-Redactions"] = str(int(redactions))
     if etag:
         resp.headers["ETag"] = etag
-    if req_id:
-        resp.headers["X-Request-Id"] = req_id
+    resp.headers["X-Request-Id"] = req_id
 
     # CORS + expose (include Link + paging headers)
     resp.headers["Access-Control-Allow-Origin"] = request.headers.get("Origin", "*")
@@ -872,6 +875,16 @@ def index():
     """
     return send_from_directory(static_dir, 'index.html')
 
+@app.route("/openapi.yaml")
+def openapi_yaml():
+    # Serve the OpenAPI file from the repo root
+    return send_from_directory(str(REPO_ROOT), "openapi.yaml", mimetype="text/yaml")
+
+@app.route("/docs")
+def api_docs():
+    # Serve Redoc HTML that points at /openapi.yaml
+    return send_from_directory(static_dir, "docs/index.html")
+
 @app.get("/healthz")
 def healthz():
     return json_with_headers({"status": "ok"}, policy="info")
@@ -893,7 +906,6 @@ def ensure_request_id():
         or uuid.uuid4().hex
     )
     setattr(request, "request_id", rid)
-    g.request_id = rid  # optional
 
 #If run from a browser
 @app.after_request

@@ -19,38 +19,9 @@ def _default_db_path() -> str:
 def _exec(conn: sqlite3.Connection, sql: str) -> None:
     conn.execute(sql)
 
-def init(db_path: str | None = None):
-    """
-    Initialize the vault. If db_path is omitted, read env (HDT_VAULT_PATH/HDT_VAULT_DB)
-    or fallback to repo/data/lifepod.sqlite. Safe to call multiple times.
-    Enforces WAL mode, NORMAL sync, and a reasonable busy timeout.
-    """
-    global _conn, _DB_PATH
-    resolved = db_path or _default_db_path()
-
-    # If already initialized to same path, no-op
-    if _conn is not None and _DB_PATH == resolved:
-        return
-
-    # Re-init on path change
-    if _conn is not None and _DB_PATH != resolved:
-        try:
-            _conn.close()
-        except Exception:
-            pass
-        _conn = None
-
-    # Open + pragmas
-    _conn = sqlite3.connect(resolved, check_same_thread=False)
-    # Busy timeout to reduce "database is locked" errors under contention
-    _exec(_conn, "PRAGMA busy_timeout=5000")
-    # WAL journal; better concurrency for reads while writes happen
-    _exec(_conn, "PRAGMA journal_mode=WAL")
-    # Reasonable durability/perf tradeoff for app data
-    _exec(_conn, "PRAGMA synchronous=NORMAL")
-
-    # Schema
-    _exec(_conn, """
+def _ensure_schema(conn: sqlite3.Connection) -> None:
+    # Base table + index (idempotent)
+    _exec(conn, """
         CREATE TABLE IF NOT EXISTS walk_records (
             user_id     INTEGER NOT NULL,
             date        TEXT    NOT NULL,  -- ISO-8601 (YYYY-MM-DD or YYYY-MM-DD HH:MM:SS)
@@ -60,11 +31,35 @@ def init(db_path: str | None = None):
             PRIMARY KEY (user_id, date)
         )
     """)
+    _exec(conn, "CREATE INDEX IF NOT EXISTS idx_walk_user_date_desc ON walk_records(user_id, date DESC)")
 
-    # Optional helper index: speeds WHERE user_id=? ORDER BY date DESC
-    _exec(_conn, "CREATE INDEX IF NOT EXISTS idx_walk_user_date_desc ON walk_records(user_id, date DESC)")
+def init(db_path: str | None = None):
+    """
+    Initialize the vault. If db_path is omitted, read env (HDT_VAULT_PATH/HDT_VAULT_DB)
+    or fallback to repo/data/lifepod.sqlite. Safe to call multiple times.
+    Enforces WAL mode, NORMAL sync, FK, and a reasonable busy timeout.
+    """
+    global _conn, _DB_PATH
+    resolved = db_path or _default_db_path()
+
+    if _conn is not None and _DB_PATH == resolved:
+        return
+
+    if _conn is not None and _DB_PATH != resolved:
+        try: _conn.close()
+        except Exception: pass
+        _conn = None
+
+    _conn = sqlite3.connect(resolved, check_same_thread=False)
+    _exec(_conn, "PRAGMA busy_timeout=5000")
+    _exec(_conn, "PRAGMA journal_mode=WAL")
+    _exec(_conn, "PRAGMA synchronous=NORMAL")
+    _exec(_conn, "PRAGMA foreign_keys=ON")
+
+    _ensure_schema(_conn)
     _conn.commit()
     _DB_PATH = resolved
+
 
 def close():
     """Close the vault connection (handy for tests)."""
@@ -76,24 +71,25 @@ def close():
             _conn = None
 
 def upsert_walk_records(user_id: int, records: Iterable[dict]) -> int:
-    """Idempotent write-through; replaces same (user_id, date). Returns rows written."""
+    """Insert or update walk records for user in vault. Returns rows affected."""
     if _conn is None:
         return 0
-    n = 0
-    cur = _conn.cursor()
     now = int(time.time())
-    for r in records or []:
-        dt = r.get("date")
-        if not dt:
-            continue
-        steps = int(r.get("steps") or 0)
-        cur.execute(
-            "INSERT OR REPLACE INTO walk_records(user_id,date,steps,raw_json,inserted_at) VALUES (?,?,?,?,?)",
-            (int(user_id), str(dt), steps, json.dumps(r, ensure_ascii=False), now),
-        )
-        n += cur.rowcount
-    _conn.commit()
+    n = 0
+    with _conn:  # ensures a single transaction & commit
+        cur = _conn.cursor()
+        for r in records or []:
+            dt = r.get("date")
+            if not dt:
+                continue
+            steps = int(r.get("steps") or 0)
+            cur.execute(
+                "INSERT OR REPLACE INTO walk_records(user_id,date,steps,raw_json,inserted_at) VALUES (?,?,?,?,?)",
+                (int(user_id), str(dt), steps, json.dumps(r, ensure_ascii=False), now),
+            )
+            n += cur.rowcount
     return n
+
 
 def read_walk_records(user_id: int) -> list[dict]:
     """Return newest→oldest walk records for user from vault."""
@@ -109,18 +105,42 @@ def read_walk_records(user_id: int) -> list[dict]:
 def read_walk_latest(user_id: int, limit: int = 1) -> list[dict]:
     """
     Return the most recent `limit` walk records for the user (newest→oldest).
-    Defaults to 1 record. Shape matches `read_walk_records` (list of dicts).
+    """
+    if _conn is None:
+        return []
+    lim = max(1, int(limit))
+    cur = _conn.cursor()
+    cur.execute(
+        "SELECT raw_json FROM walk_records WHERE user_id=? ORDER BY date DESC LIMIT ?",
+        (int(user_id), lim),
+    )
+    return [json.loads(row[0]) for row in cur.fetchall()]
+
+
+def read_walk_between(user_id: int, start_date: str, end_date: str) -> list[dict]:
+    """
+    Inclusive range on ISO dates (YYYY-MM-DD[ HH:MM:SS]).
+    Returns oldest→newest within the range.
     """
     if _conn is None:
         return []
     cur = _conn.cursor()
     cur.execute(
-        f"SELECT raw_json FROM walk_records WHERE user_id=? ORDER BY date DESC LIMIT {int(limit)}",
-        (int(user_id),),
+        """
+        SELECT raw_json
+        FROM walk_records
+        WHERE user_id = ?
+          AND date >= ?
+          AND date <= ?
+        ORDER BY date ASC
+        """,
+        (int(user_id), str(start_date), str(end_date)),
     )
     return [json.loads(row[0]) for row in cur.fetchall()]
 
-# ---- Retention & compaction helpers ----------------------------------------
+
+
+# ---- Helpers ----------------------------------------
 
 def retain_last_days(days: int, user_id: Optional[int] = None) -> int:
     """
@@ -164,6 +184,30 @@ def compact():
     except Exception:
         # Best effort; safe to ignore during normal ops
         pass
+
+def count_walk_records(user_id: int | None = None) -> int:
+    if _conn is None:
+        return 0
+    cur = _conn.cursor()
+    if user_id is None:
+        cur.execute("SELECT COUNT(*) FROM walk_records")
+    else:
+        cur.execute("SELECT COUNT(*) FROM walk_records WHERE user_id=?", (int(user_id),))
+    return int(cur.fetchone()[0])
+
+def purge_user(user_id: int) -> int:
+    """Delete all rows for a user. Returns rows deleted."""
+    if _conn is None:
+        return 0
+    cur = _conn.cursor()
+    cur.execute("DELETE FROM walk_records WHERE user_id=?", (int(user_id),))
+    deleted = cur.rowcount or 0
+    _conn.commit()
+    return deleted
+
+def get_db_path() -> str | None:
+    return _DB_PATH
+
 
 # ---- optional: backward-compat shim ---------------------------------------
 

@@ -6,9 +6,9 @@ Façade and developer API for an **agentic Human Digital Twin (HDT)** stack:
 - **MCP façade** adding policy redaction, telemetry, and a read-mostly **integrated view**.
 - Optional local **vault** (SQLite/DuckDB-ready) for caching records.
 
-> This README is a copy-pasteable Quickstart. It includes sample configs, a smoke test, and minimal CI hooks.
+[![OpenAPI – View Docs](https://img.shields.io/badge/OpenAPI-View%20Docs-1f6feb?logo=openapiinitiative)](http://localhost:5000/docs)
+[![Spec](https://img.shields.io/badge/spec-openapi.yaml-lightgrey)](./openapi.yaml)
 
----
 
 ## Prerequisites
 
@@ -316,7 +316,14 @@ def json_with_headers(payload, *, policy: str | None = None, status: int = 200):
 Full documentation for the **HDT API endpoints** is available through Swagger:
 [Swagger Documentation](https://pimvanvroonhoven.github.io/Interoperable-and-modular-HDT-system-prototype/)
 
+- Human-friendly docs (Redoc): **http://localhost:5000/docs**  
+- Raw OpenAPI spec: [`openapi.yaml`](./openapi.yaml)
 
+Or preview without running Flask:
+```bash
+npm run openapi:preview   # Redoc live preview on 8088
+npm run openapi:ui        # Swagger UI live preview on 8089
+```
 ---
 
 ## Setup and Installation

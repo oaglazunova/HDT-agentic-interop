@@ -6,7 +6,7 @@
     "description": "Human Digital Twin (HDT) API exposing read-mostly data streams and lightweight insights. Supports ETag-based conditional GETs and correlation IDs via X-Request-Id / X-Correlation-Id."
   },
   "servers": [
-    { "url": "http://localhost:5000" }
+    { "url": "http://localhost:6000" }
   ],
   "security": [
     { "HttpBearer": [] },
@@ -33,7 +33,8 @@
               "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" },
               "X-Client-Id": { "$ref": "#/components/headers/X-Client-Id" },
               "X-Users-Count": { "$ref": "#/components/headers/X-Users-Count" },
-              "X-Policy": { "$ref": "#/components/headers/X-Policy" }
+              "X-Policy": { "$ref": "#/components/headers/X-Policy" },
+              "X-Policy-Redactions": {"schema": {"type": "integer"}}
             },
             "content": {
               "application/json": {
@@ -164,7 +165,8 @@
               "Link": { "$ref": "#/components/headers/Link" },
               "X-Limit": { "$ref": "#/components/headers/X-Limit" },
               "X-Offset": { "$ref": "#/components/headers/X-Offset" },
-              "X-Total": { "$ref": "#/components/headers/X-Total" }
+              "X-Total": { "$ref": "#/components/headers/X-Total" },
+              "X-Policy-Redactions": {"schema": {"type": "integer"}}
             },
             "content": {
               "application/json": {
@@ -448,7 +450,6 @@
       "HttpBearer": { "type": "http", "scheme": "bearer", "bearerFormat": "JWT" },
       "ApiKeyAuth": { "type": "apiKey", "in": "header", "name": "X-API-KEY" }
     },
-
     "parameters": {
       "IfNoneMatch": {
         "name": "If-None-Match",
@@ -472,7 +473,6 @@
         "description": "Alternative correlation header; server will use this if present."
       }
     },
-
     "headers": {
       "ETag": { "schema": { "type": "string" }, "description": "Strong ETag for response body + variant." },
       "X-Request-Id": { "schema": { "type": "string" }, "description": "Correlation ID for tracing this response." },
@@ -482,7 +482,8 @@
       "Link": { "schema": { "type": "string" }, "description": "Pagination link header (rel=\"next\") when more pages exist." },
       "X-Limit": { "schema": { "type": "integer" }, "description": "Page size returned." },
       "X-Offset": { "schema": { "type": "integer" }, "description": "Offset used." },
-      "X-Total": { "schema": { "type": "integer", "nullable": true }, "description": "Total items if known; may be null." }
+      "X-Total": { "schema": { "type": "integer", "nullable": true }, "description": "Total items if known; may be null." },
+      "X-Policy-Redactions": {"schema": {"type": "integer"}}
     },
 
     "schemas": {

@@ -1,12 +1,12 @@
 """Pytest configuration and shared fixtures."""
 import sys
-import pathlib
+import os
 import pytest
 
 # Ensure project root on sys.path for absolute imports
-ROOT = pathlib.Path(__file__).resolve().parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+ROOT = os.path.dirname(os.path.abspath(__file__))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
 
 # Expose a Flask app and client fixtures used across tests
 try:

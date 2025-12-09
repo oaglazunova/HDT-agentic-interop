@@ -7,18 +7,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 import uuid
 from contextvars import ContextVar
-# Make imports robust whether this file is loaded as part of the HDT_MCP package
-# or executed directly by a tool that doesn't set the project root on sys.path.
-try:
-    from HDT_MCP.domain.services import sync_user_walk
-    from HDT_MCP.server_helpers import resolve_connected_app  # tiny helper you add
-except ModuleNotFoundError:
-    import sys as _sys
-    _ROOT = Path(__file__).resolve().parents[1]
-    if str(_ROOT) not in _sys.path:
-        _sys.path.insert(0, str(_ROOT))
-    from HDT_MCP.domain.services import sync_user_walk
-    from HDT_MCP.server_helpers import resolve_connected_app  # tiny helper you add
+from HDT_MCP.models.behavior import behavior_strategy as _behavior_strategy
 
 # Load .env from repo root (…/HDT-agentic-interop/.env)
 ENV_PATH = Path(__file__).resolve().parents[1] / ".env"
@@ -28,6 +17,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR  = REPO_ROOT / "data"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 HDT_VAULT_DB = Path(os.getenv("HDT_VAULT_DB", str(DATA_DIR / "lifepod.duckdb")))
+HDT_VAULT = os.getenv("HDT_VAULT", "duckdb")
 
 # Optional vault support (HDT_VAULT/*.py or a local HDT_MCP/vault.py)
 # import the vault module and init it with the path
@@ -139,6 +129,7 @@ def _log_event(
     ms: int = 0,
     *,
     client_id: str | None = None,
+    corr_id: str | None = None,
 ) -> None:
 
     if _DISABLE_TELEMETRY:
@@ -157,6 +148,7 @@ def _log_event(
         "name": name,          # tool/resource identifier
         "client_id": cid,      # top-level for easy grep
         "request_id": rid,
+        "corr_id": corr_id or rid,
         "args": payload,       # includes client_id too for convenience
         "ok": bool(ok),
         "ms": int(ms),
@@ -294,6 +286,21 @@ def _apply_policy(purpose: str, tool_name: str, payload: dict, *, client_id: str
     redactions = _redact_inplace(payload, redact_paths) if redact_paths else 0
     _POLICY_LAST.set({"redactions": redactions, "allowed": True, "purpose": purpose, "tool": tool_name})
     return payload
+
+def _apply_policy_metrics(
+    purpose: str,
+    tool_name: str,
+    payload: dict,
+    *,
+    client_id: str | None = None,
+):
+    """
+    Convenience wrapper for tests/metrics: applies policy and returns a tuple
+    of (result_payload, redactions_count).
+    """
+    result = _apply_policy(purpose, tool_name, payload, client_id=client_id)
+    meta = _policy_last_meta() or {}
+    return result, int(meta.get("redactions", 0))
 
 #To force reload (e.g., after having edited the file very quickly, or in tests)
 def _policy_reset_cache() -> None:
@@ -436,6 +443,7 @@ def registry_tools() -> dict:
             {"name": "hdt.get_health_literacy_diabetes@v1", "args": ["user_id"]},
             {"name": "intervention_time@v1", "args": []},
             {"name": "policy.evaluate@v1", "args": ["purpose","client_id","tool"]},
+            {"name": "behavior_strategy@v1", "args": ["user_id"]}
         ]
     }
 
@@ -673,6 +681,23 @@ def vault_maintain(days: int = 60) -> dict:
     if hasattr(_vault, "compact"):
         _vault.compact()
     return {"kept_last_days": days, "deleted_rows": deleted}
+
+@mcp.tool(name="behavior_strategy@v1")
+def tool_behavior_strategy(user_id: str, purpose: str = "coaching") -> dict:
+    t0 = _time.time()
+    try:
+        plan = _behavior_strategy(int(user_id))
+        # Apply coaching-lane policy (lets you redact if needed)
+        plan = _apply_policy(purpose, "behavior_strategy@v1", plan, client_id=MCP_CLIENT_ID)
+        _log_event("tool", "behavior_strategy@v1",
+                   {"user_id": user_id, "purpose": purpose, "avg_steps": plan.get("avg_steps", 0)},
+                   True, int((_time.time()-t0)*1000))
+        return plan
+    except Exception as e:
+        _log_event("tool", "behavior_strategy@v1",
+                   {"user_id": user_id, "purpose": purpose, "error": str(e)},
+                   False, int((_time.time()-t0)*1000))
+        return {"error": str(e), "user_id": user_id}
 
 
 # --- 3) “Model Hub” placeholders (M1/M2) ------------------------------------
