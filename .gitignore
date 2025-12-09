@@ -10,6 +10,7 @@ __pycache__/
 .venv/
 venv/
 myenv/
+.venv39
 
 # Test/coverage caches
 .pytest_cache/
@@ -35,3 +36,11 @@ engagement.json
 playthrough.json
 HDT_MCP/telemetry/
 
+
+# DuckDB runtime files
+data/*.duckdb-wal
+data/*.duckdb-shm
+
+# Telemetry/logs
+HDT_MCP/telemetry/*.jsonl
+config/*.log
