@@ -1,12 +1,28 @@
 """Pytest configuration and shared fixtures."""
 import sys
+import os
 import pathlib
+import tempfile
+import json
 import pytest
 
 # Ensure project root on sys.path for absolute imports
 ROOT = pathlib.Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+
+# Prefer config-driven toggle for in-process Flask during tests.
+# If the caller hasn't set HDT_SETTINGS_PATH or HDT_API_INPROC explicitly,
+# create a temporary settings JSON that enables in-proc for the test run only.
+if ("HDT_SETTINGS_PATH" not in os.environ) and ("HDT_API_INPROC" not in os.environ):
+    try:
+        tmp = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8")
+        json.dump({"hdt_api_inproc": True}, tmp)
+        tmp.flush(); tmp.close()
+        os.environ["HDT_SETTINGS_PATH"] = tmp.name
+    except Exception:
+        # Fallback to env if temp file fails for any reason
+        os.environ["HDT_API_INPROC"] = "1"
 
 # Expose a Flask app and client fixtures used across tests
 try:

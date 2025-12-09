@@ -65,6 +65,22 @@ _RETRY_MAX = int(os.getenv("HDT_RETRY_MAX", "2"))
 
 _INTEGRATED_TOOL_NAME = "vault.integrated@v1"
 
+# --- settings (config-driven flags) -----------------------------------------
+# Optional JSON file with feature flags and settings.
+# Default location: config/settings.json. Can be overridden with HDT_SETTINGS_PATH.
+_SETTINGS_PATH: Path = Path(os.getenv("HDT_SETTINGS_PATH", str(CONFIG_DIR / "settings.json")))
+
+def _load_settings(path: Path) -> dict:
+    try:
+        if path.exists():
+            data = json.loads(path.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+    except Exception:
+        pass
+    return {}
+
+_SETTINGS: dict = _load_settings(_SETTINGS_PATH)
+
 # --- policy file location & cache signature ---
 _POLICY_PATH: Path = Path(os.getenv("HDT_POLICY_PATH", str(CONFIG_DIR / "policy.json")))
 _POLICY_CACHE: dict | None = None
@@ -175,17 +191,76 @@ def _cached_get(path: str, params: dict | None=None) -> dict:
     _cache[key] = (now, data)
     return data
 
+# --- optional in-process Flask fallback --------------------------------------
+# Allows calling the Flask app directly in-process, bypassing HTTP.
+# Controlled by config (`settings.json:hdt_api_inproc`) or env (`HDT_API_INPROC`).
+# Default OFF to avoid accidental prod usage.
+_LOCAL_FLASK_APP = None
+_LOCAL_FLASK_APP_TRIED = False
+
+def _get_local_flask_app():
+    """Try to import the Flask app so we can call it in-process (no HTTP)."""
+    global _LOCAL_FLASK_APP_TRIED, _LOCAL_FLASK_APP
+    if _LOCAL_FLASK_APP_TRIED:
+        return _LOCAL_FLASK_APP
+    _LOCAL_FLASK_APP_TRIED = True
+    try:
+        from HDT_CORE_INFRASTRUCTURE.HDT_API import app as flask_app  # type: ignore
+        _LOCAL_FLASK_APP = flask_app
+    except Exception:
+        try:
+            from HDT_API.hdt_api import app as flask_app  # secondary import path
+            _LOCAL_FLASK_APP = flask_app
+        except Exception:
+            _LOCAL_FLASK_APP = None
+    return _LOCAL_FLASK_APP
+
+def _inproc_get(path: str, params: dict | None = None) -> dict:
+    """Call the Flask app directly using its test client."""
+    app = _get_local_flask_app()
+    if app is None:
+        raise RuntimeError("In-proc mode enabled but Flask app could not be imported")
+    # Use headers and query params consistent with HTTP path
+    app.config.setdefault("TESTING", True)  # type: ignore[attr-defined]
+    with app.test_client() as c:  # type: ignore[attr-defined]
+        resp = c.get("/" + path.lstrip("/"), headers=_headers(), query_string=params or {})
+        if resp.status_code >= 400:
+            raise RuntimeError(
+                f"in-proc API error {resp.status_code}: {resp.get_data(as_text=True)}"
+            )
+        return resp.get_json()  # type: ignore[no-any-return]
+
 def _hdt_get(path: str, params: dict | None=None) -> dict:
     url = _api_url(path)
     last = None
-    rid = _get_request_id()                         # stable across retries
+    rid = _get_request_id()  # stable across retries
+
+    # Prefer in-process during tests/CI when configured.
+    # Precedence: explicit env (HDT_API_INPROC) > settings.json (hdt_api_inproc) > default OFF.
+    _env_inproc = os.getenv("HDT_API_INPROC")
+    src = "default"
+    if _env_inproc is not None:
+        use_inproc = (_env_inproc.lower() in ("1", "true", "yes"))
+        src = "env"
+    else:
+        cfg_val = _SETTINGS.get("hdt_api_inproc") if isinstance(_SETTINGS, dict) else None
+        use_inproc = bool(cfg_val) if cfg_val is not None else False
+        if cfg_val is not None:
+            src = "config"
+
+    if use_inproc:
+        try:
+            print(f"[HDT-MCP] in-proc enabled via {src} → GET {path}")
+            return _inproc_get(path, params)
+        except Exception as e:
+            last = e
+            print(f"[HDT-MCP] In-proc call failed ({e}); falling back to HTTP for {path}")
+
     for attempt in range(1, _RETRY_MAX + 2):
         try:
             hdrs = _headers()
             hdrs["X-Request-Id"] = rid  # force same id on each retry
-            r = requests.get(
-                url, headers=hdrs, params=params or {}, timeout=30
-            )
+            r = requests.get(url, headers=hdrs, params=params or {}, timeout=30)
             r.raise_for_status()
             # prefer server-issued id if present (keeps your logs consistent end-to-end)
             server_rid = r.headers.get("X-Request-Id")

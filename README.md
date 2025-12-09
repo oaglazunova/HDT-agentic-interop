@@ -139,6 +139,41 @@ pre-commit install
 pre-commit run -a
 ```
 
+### In-process Flask mode for tests (optional)
+
+By default, the MCP façade reaches the API over HTTP. For faster and more
+hermetic tests, you can enable an in-process Flask fallback so MCP calls the
+Flask app directly (no HTTP) using its test client.
+
+Preferred (config-based): add this to `config/settings.json`:
+```
+{
+  "hdt_api_inproc": true
+}
+```
+
+You can also point MCP to an alternate settings file via `HDT_SETTINGS_PATH`.
+
+Alternatively (env-based):
+
+PowerShell:
+```
+$env:HDT_API_INPROC = "1"
+pytest -q
+```
+
+Bash:
+```
+export HDT_API_INPROC=1
+pytest -q
+```
+
+Precedence and defaults:
+- Env var overrides config: `HDT_API_INPROC` > `config/settings.json`.
+- If neither is set, the default is OFF to keep production on HTTP.
+- When in-proc is enabled, MCP logs: `[HDT-MCP] in-proc enabled via <env|config> → GET <path>`
+  and falls back to HTTP if in-proc import fails.
+
 If your system default Python is older, ensure `language_version: python3.11` in `.pre-commit-config.yaml`.
 
 ## Architecture at a glance:
