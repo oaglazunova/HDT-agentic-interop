@@ -27,7 +27,9 @@ def test_policy_tool_deny_sets_meta(monkeypatch):
     out = srv._apply_policy("modeling", "hdt.get_walk_data@v1", payload)
 
     # Denied + payload must remain unchanged
-    assert isinstance(out, dict) and out.get("error") == "denied_by_policy"
+    assert isinstance(out, dict)
+    assert isinstance(out.get("error"), dict)
+    assert out["error"].get("code") == "denied_by_policy"
     assert payload["user"]["email"] == "pii@demo.io"
 
     meta = srv._policy_last_meta()

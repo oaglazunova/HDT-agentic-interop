@@ -78,7 +78,50 @@ def test_policy_modeling_denies_for_tool(set_policy):
     payload = {"user": {"email": "x@y.z"}, "steps": 10}
     out = srv._apply_policy("modeling", "hdt.get_walk_data@v1", payload)
     assert isinstance(out, dict)
-    assert "error" in out
-    assert "denied" in out["error"].lower()
+    assert "error" in out and isinstance(out["error"], dict)
+    assert out["error"].get("code") == "denied_by_policy"
+    assert "denied" in out["error"].get("message", "").lower()
     assert out.get("purpose") == "modeling"
     assert out.get("tool") == "hdt.get_walk_data@v1"
+    
+
+def test_policy_tool_twice_uses_unmutated_cache(set_policy, monkeypatch):
+    """Call a cached tool twice with different policies.
+    First call redacts and caches the payload; second call (no redaction)
+    must return the original value, proving the cache was not mutated by policy.
+    This guards against the cache-mutation bug where in-place redaction corrupts
+    the cached object.
+    """
+    # Ensure clean cache and deterministic backend
+    srv._cache.clear()
+    base = {"user": {"email": "pii@demo.io", "name": "Zoe"}, "steps": 111}
+
+    def fake_hdt_get(path, params=None):
+        # Return a fresh copy to simulate a backend response
+        return copy.deepcopy(base)
+
+    monkeypatch.setattr(srv, "_hdt_get", fake_hdt_get, raising=True)
+
+    # 1) Policy that redacts the email
+    set_policy({
+        "defaults": {
+            "analytics": {"allow": True, "redact": ["user.email"]}
+        }
+    })
+    out1 = srv.tool_get_sugarvita_data("101")
+    assert isinstance(out1, dict)
+    assert out1["user"]["email"] == srv.REDACT_TOKEN
+
+    # 2) Change policy to no redaction and force policy cache reload
+    set_policy({
+        "defaults": {
+            "analytics": {"allow": True, "redact": []}
+        }
+    })
+    srv._policy_reset_cache()
+
+    # Call again; should hit the response cache but with original (non-redacted) values
+    out2 = srv.tool_get_sugarvita_data("101")
+    assert out2["user"]["email"] == base["user"]["email"], "Second call should not return a doubly-redacted cached value"
+    assert out2["user"]["name"] == base["user"]["name"]
+    assert out2["steps"] == base["steps"]

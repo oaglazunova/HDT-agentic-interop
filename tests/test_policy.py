@@ -14,7 +14,8 @@ def test_policy_deny_tool(monkeypatch):
     payload = {"ok": True}
     out = srv._apply_policy("analytics", "hdt.get_walk_data@v1", payload, client_id="TEST")
     assert isinstance(out, dict)
-    assert out.get("error") == "denied_by_policy"
+    assert isinstance(out.get("error"), dict)
+    assert out["error"].get("code") == "denied_by_policy"
     assert out.get("tool") == "hdt.get_walk_data@v1"
 
 def test_policy_redact_nested_list(monkeypatch):

@@ -1,5 +1,5 @@
 from functools import wraps
-from flask import request, jsonify
+from flask import request
 import logging
 
 def authenticate_and_authorize(external_parties, user_permissions, required_permission):
@@ -36,7 +36,17 @@ def authenticate_and_authorize(external_parties, user_permissions, required_perm
 
             if not api_key:
                 logging.debug("API key is missing in the request.")
-                return jsonify({"error": "API key is missing"}), 401
+                # Use json_with_headers for consistent headers
+                try:
+                    from HDT_CORE_INFRASTRUCTURE.HDT_API import json_with_headers
+                except Exception:
+                    from .HDT_API import json_with_headers
+
+                return json_with_headers(
+                    {"error": {"code": "missing_api_key", "message": "API key is missing"}},
+                    status=401,
+                    policy="deny",
+                )
 
             # ---- 2) Verify key against api_key OR client_id (robust) ----
             client = next(
@@ -45,7 +55,16 @@ def authenticate_and_authorize(external_parties, user_permissions, required_perm
             )
             if not client:
                 logging.debug("Invalid API key provided.")
-                return jsonify({"error": "Invalid API key"}), 401
+                try:
+                    from HDT_CORE_INFRASTRUCTURE.HDT_API import json_with_headers
+                except Exception:
+                    from .HDT_API import json_with_headers
+
+                return json_with_headers(
+                    {"error": {"code": "invalid_api_key", "message": "Invalid API key"}},
+                    status=401,
+                    policy="deny",
+                )
 
             # ---- 3) Authorization: compute accessible user IDs ----
             accessible_user_ids = []
@@ -60,7 +79,16 @@ def authenticate_and_authorize(external_parties, user_permissions, required_perm
 
             if not accessible_user_ids:
                 logging.debug("No permissions set for this user/client/permission.")
-                return jsonify({"error": "No permissions set for this user"}), 403
+                try:
+                    from HDT_CORE_INFRASTRUCTURE.HDT_API import json_with_headers
+                except Exception:
+                    from .HDT_API import json_with_headers
+
+                return json_with_headers(
+                    {"error": {"code": "forbidden", "message": "No permissions set for this user"}},
+                    status=403,
+                    policy="deny",
+                )
 
             # Attach context
             request.client = client

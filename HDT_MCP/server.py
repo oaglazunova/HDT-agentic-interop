@@ -7,7 +7,39 @@ from pathlib import Path
 from dotenv import load_dotenv
 import uuid
 from contextvars import ContextVar
+import sys
+
+# Ensure project root is on sys.path when run via direct file path
+_THIS_FILE = Path(__file__).resolve()
+_PROJECT_ROOT = _THIS_FILE.parents[1]
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
 from HDT_MCP.models.behavior import behavior_strategy as _behavior_strategy
+from HDT_MCP.models.behavior import _headers as _base_headers
+from HDT_MCP.domain.services import HDTService
+from HDT_MCP.adapters.api_walk import ApiWalkAdapter
+from HDT_MCP.adapters.vault_repo import VaultRepo
+from HDT_MCP.constants import (
+    TOOL_WALK,
+    LANE_ANALYTICS,
+    LANE_MODELING,
+    LANE_COACHING,
+)
+import copy
+
+# --- unified error helper -----------------------------------------------------
+def _typed_error(code: str, message: str, *, details: dict | None = None, **extra: object) -> dict:
+    """Return a standardized error envelope used by MCP:
+    {"error": {"code": code, "message": message, "details": {...}}, ...extra}
+    """
+    err: dict = {"error": {"code": code, "message": message}}
+    if details:
+        err["error"]["details"] = details
+    if extra:
+        err.update(extra)
+    return err
+
 
 # Load .env from repo root (…/HDT-agentic-interop/.env)
 ENV_PATH = Path(__file__).resolve().parents[1] / ".env"
@@ -20,12 +52,14 @@ HDT_VAULT_DB = Path(os.getenv("HDT_VAULT_DB", str(DATA_DIR / "lifepod.duckdb")))
 HDT_VAULT = os.getenv("HDT_VAULT", "duckdb")
 
 # Optional vault support (HDT_VAULT/*.py or a local HDT_MCP/vault.py)
-# import the vault module and init it with the path
+# Resolve dynamically to avoid hard import errors when package is absent.
+import importlib
+_vault = None
 try:
-    from HDT_VAULT import vault as _vault
+    _vault = importlib.import_module("HDT_VAULT.vault")
 except Exception:
     try:
-        from HDT_MCP import vault as _vault
+        _vault = importlib.import_module("HDT_MCP.vault")
     except Exception:
         _vault = None
 
@@ -94,6 +128,8 @@ mcp = FastMCP(
     website_url="https://github.com/oaglazunova/Interoperable-and-modular-HDT-system-prototype",
 )
 
+# Adapters for domain will be initialized after helper definitions
+_cache_lock = threading.Lock()
 # --- helpers ----------------------------------------------------------------
 def _new_request_id() -> str:
     return uuid.uuid4().hex
@@ -110,16 +146,28 @@ def _set_request_id(rid: str | None):
         _request_id_ctx.set(rid)
 
 def _headers() -> dict[str, str]:
-    if not HDT_API_KEY:
-        base = {}
-    else:
-        base = {"X-API-KEY": HDT_API_KEY, "Authorization": f"Bearer {HDT_API_KEY}"}
+    """Build standard outbound HTTP headers once, adding request correlation.
+
+    Delegates base auth headers to the shared builder in models.behavior,
+    then adds the current X-Request-Id for traceability.
+    """
+    base = dict(_base_headers())  # copy to avoid mutating shared dict
     base["X-Request-Id"] = _get_request_id()
     return base
 
 def _api_url(path: str) -> str:
     """Robust join of base + path (no double/missing slashes)."""
     return f"{HDT_API_BASE.rstrip('/')}/{path.lstrip('/')}"
+
+# Recreate adapters and domain service now that helpers are defined
+walk_adapter = ApiWalkAdapter(
+    base_url=HDT_API_BASE,
+    headers_provider=_headers,
+)
+vault_repo = VaultRepo(_vault) if (HDT_VAULT_ENABLE and _vault is not None) else None
+
+# Domain service
+_domain = HDTService(walk_source=walk_adapter, vault=vault_repo)
 
 def _log_event(
     kind: str,
@@ -136,11 +184,9 @@ def _log_event(
         return
     cid = client_id or MCP_CLIENT_ID
     rid = _get_request_id()
-    payload = {"client_id": cid, "request_id": rid}
-
-    if args:
-        # caller-supplied fields can override if they pass client_id explicitly
-        payload.update(args)
+    # Copy only caller-supplied args. Avoid duplicating top-level fields
+    # like client_id or request_id inside the args payload to reduce log size.
+    payload = {} if args is None else dict(args)
 
     rec = {
         "ts": _dt.datetime.utcnow().isoformat() + "Z",
@@ -149,7 +195,7 @@ def _log_event(
         "client_id": cid,      # top-level for easy grep
         "request_id": rid,
         "corr_id": corr_id or rid,
-        "args": payload,       # includes client_id too for convenience
+        "args": payload,
         "ok": bool(ok),
         "ms": int(ms),
     }
@@ -191,6 +237,21 @@ def _hdt_get(path: str, params: dict | None=None) -> dict:
                 _time.sleep(0.5 * attempt)  # simple backoff
             else:
                 raise last
+
+
+
+def _cached_get(path: str, params: dict | None=None) -> dict:
+    key = (path, tuple(sorted((params or {}).items())))
+    now = _time.time()
+    with _cache_lock:
+        hit = _cache.get(key)
+        if hit and now - hit[0] < _CACHE_TTL:
+            return hit[1]
+    data = _hdt_get(path, params)
+    with _cache_lock:
+        _cache[key] = (now, data)
+    return data
+
 
 # --- policy/redaction helpers ------------------------------------------------
 def _load_policy_file() -> dict:
@@ -280,7 +341,12 @@ def _apply_policy(purpose: str, tool_name: str, payload: dict, *, client_id: str
     rule = _resolve_rule(purpose, tool_name, client_id)
     if not rule.get("allow", True):
         _POLICY_LAST.set({"redactions": 0, "allowed": False, "purpose": purpose, "tool": tool_name})
-        return {"error": "denied_by_policy", "purpose": purpose, "tool": tool_name}
+        return _typed_error(
+            "denied_by_policy",
+            "Access denied by policy",
+            purpose=purpose,
+            tool=tool_name,
+        )
 
     redact_paths = rule.get("redact") or []
     redactions = _redact_inplace(payload, redact_paths) if redact_paths else 0
@@ -321,93 +387,39 @@ def _policy_last_meta() -> dict:
     """For logging/tests: returns last policy meta (redactions, allowed, purpose, tool)."""
     return _POLICY_LAST.get()
 
+def _apply_policy_safe(purpose: str, tool_name: str, payload: dict, *, client_id: str | None = None):
+    """Apply policy to a deep copy to avoid mutating cached/shared objects."""
+    clone = copy.deepcopy(payload)
+    return _apply_policy(purpose, tool_name, clone, client_id=client_id)
+
+
 # ---------- RESOURCES (context / “read-only”) ----------
 # Resources are things the agent can "open" for context, like files/URIs.
 
 @mcp.resource("vault://user/{user_id}/integrated")
 def get_integrated_view(user_id: str) -> dict:
     """
-    Integrated HDT View (read-mostly):
-    1) If vault is enabled, try reading walk records from vault.
-    2) If empty, fetch live via tool and (if enabled) write-through to vault.
-    3) Compute tiny rollups; apply resource-level policy; log telemetry.
+    Integrated HDT View via domain service; policy + telemetry applied.
     """
     t0 = _time.time()
-    purpose = "analytics"
-    src = "vault"  # default; will change to 'live' if we need to fetch
+    purpose = LANE_ANALYTICS
 
     try:
-        # 1) read from vault if available
-        records: list[dict] = []
-        if HDT_VAULT_ENABLE and _vault is not None:
-            try:
-                records = _vault.read_walk_records(int(user_id))
-            except Exception:
-                # non-fatal; fall back to live
-                records = []
-
-        # 2) fallback to live fetch (and optional write-through)
-        if not records:
-            src = "live"
-            # call without purpose to stay compatible with older signatures
-            walk = tool_get_walk_data(user_id=user_id)
-
-            # normalize to just this user's records
-            if isinstance(walk, list):
-                leaf = next((r for r in walk if str(r.get("user_id")) == str(user_id)), None)
-                records = (leaf or {}).get("data", []) or (leaf or {}).get("records", [])
-            elif isinstance(walk, dict):
-                records = walk.get("records", walk.get("data", [])) or []
-
-            # write-through to vault for future reads
-            if HDT_VAULT_ENABLE and _vault is not None and records:
-                try:
-                    if hasattr(_vault, "upsert_walk_records"):
-                        _vault.upsert_walk_records(int(user_id), records)
-                    elif hasattr(_vault, "write_walk"):
-                        _vault.write_walk(int(user_id), records, source="api.walk", fetched_at=int(_time.time()))
-                except Exception:
-                    pass
-
-        # 3) primitive rollups
-        days = len(records)
-        total_steps = sum(int(r.get("steps", 0) or 0) for r in records)
-        avg_steps = int(total_steps / days) if days else 0
-
-        integrated = {
-            "user_id": user_id,
-            "streams": {
-                "walk": {
-                    "source": src,                 # "vault" or "live"
-                    "count": days,
-                    "records": records,
-                    "stats": {
-                        "days": days,
-                        "total_steps": total_steps,
-                        "avg_steps": avg_steps
-                    },
-                }
-            },
-            "generated_at": int(_time.time()),
-        }
+        view = _domain.integrated_view(int(user_id))
+        integrated = _apply_policy_safe(LANE_ANALYTICS, _INTEGRATED_TOOL_NAME, view.model_dump(), client_id=MCP_CLIENT_ID)
 
         # resource-level policy
-        try:
-            integrated = _apply_policy(purpose, _INTEGRATED_TOOL_NAME, integrated, client_id=MCP_CLIENT_ID)
-            policy_meta = _policy_last_meta()
-            _log_event(
-                "resource",
-                f"vault://user/{user_id}/integrated",
-                {"user_id": user_id, "purpose": purpose, "source": src, "records": days,
-                 "redactions": policy_meta.get("redactions", 0)},
-                True,
-                int((_time.time() - t0) * 1000),
-            )
-        except NameError:
-            pass
+        integrated = _apply_policy(purpose, _INTEGRATED_TOOL_NAME, integrated, client_id=MCP_CLIENT_ID)
 
+        _log_event(
+            "resource",
+            f"vault://user/{user_id}/integrated",
+            {"user_id": user_id, "purpose": purpose, "source": integrated["streams"]["walk"]["source"],
+             "records": integrated["streams"]["walk"]["count"]},
+            True,
+            int((_time.time() - t0) * 1000),
+        )
         return integrated
-
     except Exception as e:
         _log_event(
             "resource",
@@ -416,7 +428,7 @@ def get_integrated_view(user_id: str) -> dict:
             False,
             int((_time.time() - t0) * 1000),
         )
-        return {"error": str(e), "user_id": user_id}
+        return _typed_error("internal", str(e), user_id=user_id)
 
 @mcp.resource("hdt://{user_id}/sources")
 def list_sources(user_id: str) -> dict:
@@ -436,7 +448,7 @@ def registry_tools() -> dict:
     return {
         "server": "HDT-MCP",
         "tools": [
-            {"name": "hdt.get_walk_data@v1", "args": ["user_id"]},
+            {"name": TOOL_WALK, "args": ["user_id"]},
             {"name": "hdt.get_trivia_data@v1", "args": ["user_id"]},
             {"name": "hdt.get_sugarvita_data@v1", "args": ["user_id"]},
             {"name": "hdt.get_sugarvita_player_types@v1", "args": ["user_id"]},
@@ -465,130 +477,83 @@ def tool_get_trivia_data(user_id: str) -> dict:
     t0 = _time.time()
     try:
         out = _cached_get("/get_trivia_data", {"user_id": user_id})
-        out = _apply_policy("analytics", "hdt.get_trivia_data@v1", out)
+        out = _apply_policy(LANE_ANALYTICS, "hdt.get_trivia_data@v1", out)
         policy_meta = _policy_last_meta()
-        _log_event("tool", "hdt.get_trivia_data@v1", {"user_id": user_id, "purpose": "analytics", "redactions": policy_meta.get("redactions", 0)}, True, int((_time.time()-t0)*1000))
+        _log_event("tool", "hdt.get_trivia_data@v1", {"user_id": user_id, "purpose": LANE_ANALYTICS, "redactions": policy_meta.get("redactions", 0)}, True, int((_time.time()-t0)*1000))
         return out
     except Exception as e:
         _log_event("tool", "hdt.get_trivia_data@v1", {"user_id": user_id, "error": str(e)}, False, int((_time.time()-t0)*1000))
-        return {"error": str(e), "user_id": user_id}
+        return _typed_error("internal", str(e), user_id=user_id)
 
 @mcp.tool(name="hdt.get_sugarvita_data@v1")
 def tool_get_sugarvita_data(user_id: str) -> dict:
     t0 = _time.time()
     try:
         out = _cached_get("/get_sugarvita_data", {"user_id": user_id})
-        out = _apply_policy("analytics", "hdt.get_sugarvita_data@v1", out, client_id=MCP_CLIENT_ID)
+        out = _apply_policy(LANE_ANALYTICS, "hdt.get_sugarvita_data@v1", out, client_id=MCP_CLIENT_ID)
         policy_meta = _policy_last_meta()
-        _log_event("tool", "hdt.get_sugarvita_data@v1", {"user_id": user_id, "purpose": "analytics", "redactions": policy_meta.get("redactions", 0)}, True, int((_time.time()-t0)*1000))
+        _log_event("tool", "hdt.get_sugarvita_data@v1", {"user_id": user_id, "purpose": LANE_ANALYTICS, "redactions": policy_meta.get("redactions", 0)}, True, int((_time.time()-t0)*1000))
         return out
     except Exception as e:
         _log_event("tool", "hdt.get_sugarvita_data@v1", {"user_id": user_id, "error": str(e)}, False, int((_time.time()-t0)*1000))
-        return {"error": str(e), "user_id": user_id}
+        return _typed_error("internal", str(e), user_id=user_id)
 
-@mcp.tool(name="hdt.get_walk_data@v1")
+@mcp.tool(name=TOOL_WALK)
 def tool_get_walk_data(
     user_id: str,
-    purpose: str = "analytics",
+    purpose: str = LANE_ANALYTICS,
     # façade options
     limit: int | None = None,
     offset: int | None = None,
     aggregate: bool = False,   # set True to auto-page and merge
     page_limit: int = 200,     # used when aggregate=True
     max_pages: int = 5,        # safety cap when aggregate=True
+	# Note: domain returns full stream; paging args are handled locally
 ) -> dict | list[dict]:
 
     t0 = _time.time()
     persisted = 0
-    page_limit = max(1, min(int(page_limit), 1000))
-    max_pages = max(1, min(int(max_pages), 50))
-
     try:
-        def _persist_batch(uid: int, recs: list[dict]) -> None:
-            nonlocal persisted
-            if HDT_VAULT_ENABLE and _vault is not None and hasattr(_vault, "write_walk") and recs:
+        # Fetch from domain (vault-first, normalized)
+        view = _domain.walk_stream(int(user_id), prefer_vault=True)
+        records = [r.model_dump() for r in view.records]
+
+        if aggregate:
+            out: dict = {
+                "user_id": int(user_id),
+                "data": records,
+                "page": {"total": len(records), "limit": len(records), "offset": 0, "aggregated": True},
+            }
+        else:
+            start = int(offset or 0)
+            if start < 0:
+                start = 0
+            end = start + int(limit) if limit is not None else len(records)
+            slice_ = records[start:end]
+            out = {
+                "user_id": int(user_id),
+                "data": slice_,
+                "page": {"total": len(records), "limit": len(slice_), "offset": start},
+            }
+
+        # Optional: upsert the final data slice
+        if HDT_VAULT_ENABLE and _vault is not None:
+            recs = out.get("data") or []
+            if recs:
                 try:
-                    _vault.write_walk(uid, recs, source="api.walk", fetched_at=int(_time.time()))
-                    persisted += len(recs)
+                    persisted = int(_vault.upsert_walk_records(int(user_id), recs))
                 except Exception:
                     pass
 
-        if aggregate:
-            # Auto-paginate using body.page{total,limit,offset}
-            collected: list[dict] = []
-            cur_offset = 0 if offset is None else int(offset)
-            pg = 0
-            while True:
-                params = {"user_id": user_id, "limit": page_limit, "offset": cur_offset}
-                page = _cached_get("/get_walk_data", params)
-                envelopes = page if isinstance(page, list) else [page]
-                env = envelopes[0] if envelopes else {"user_id": int(user_id), "data": []}
-                batch = env.get("data") or env.get("records") or []
-                _persist_batch(int(user_id), batch)
-                collected.extend(batch)
-
-                # if API has no pagination meta OR we got an empty batch, stop
-                meta = env.get("page") or {}
-                total = meta.get("total")
-                lim = int(meta.get("limit", page_limit))
-                off = int(meta.get("offset", cur_offset))
-                pg += 1
-                # stop if no pagination metadata, last page reached, or safety cap
-                if not batch or total is None or off + lim >= total or pg >= max_pages:
-                    break
-                cur_offset = off + lim
-
-            out: dict = {
-                "user_id": int(user_id),
-                "data": collected,
-                "page": {"total": len(collected), "limit": len(collected), "offset": 0, "aggregated": True}
-            }
-
-        else:
-            # Simple pass-through (optionally forward limit/offset)
-            params = {"user_id": user_id}
-            if limit is not None:
-                params["limit"] = int(limit)
-            if offset is not None:
-                params["offset"] = int(offset)
-
-            out = _cached_get("/get_walk_data", params)
-
-            # Persist the batch(es)
-            envelopes = out if isinstance(out, list) else [out]
-            for env in envelopes:
-                uid = int(env.get("user_id", user_id))
-                recs = env.get("data") or env.get("records") or []
-                _persist_batch(uid, recs)
-
-        # Optional: upsert the consolidated result for faster future reads
-        if HDT_VAULT_ENABLE and _vault is not None and hasattr(_vault, "upsert_walk_records"):
-            if isinstance(out, dict):
-                recs = out.get("data") or out.get("records") or []
-                if recs:
-                    try:
-                        _vault.upsert_walk_records(int(user_id), recs)
-                    except Exception:
-                        pass
-            elif isinstance(out, list):
-                for env in out:
-                    uid = int(env.get("user_id", user_id))
-                    recs = env.get("data") or env.get("records") or []
-                    if recs:
-                        try:
-                            _vault.upsert_walk_records(uid, recs)
-                        except Exception:
-                            pass
-
         # Apply policy once, on the final out
-        out = _apply_policy(purpose, "hdt.get_walk_data@v1", out, client_id=MCP_CLIENT_ID)
+        out = _apply_policy(purpose, TOOL_WALK, out, client_id=MCP_CLIENT_ID)
         policy_meta = _policy_last_meta()
         _log_event(
             "tool",
-            "hdt.get_walk_data@v1",
+            TOOL_WALK,
             {"user_id": user_id, "purpose": purpose,
              "redactions": policy_meta.get("redactions", 0),
-             "persisted": persisted, "aggregate": aggregate},
+             "persisted": persisted, "aggregate": aggregate, "source": view.source},
             True,
             int((_time.time() - t0) * 1000),
         )
@@ -597,16 +562,16 @@ def tool_get_walk_data(
     except Exception as e:
         _log_event(
             "tool",
-            "hdt.get_walk_data@v1",
+            TOOL_WALK,
             {"user_id": user_id, "purpose": purpose, "error": str(e)},
             False,
             int((_time.time() - t0) * 1000),
         )
-        return {"error": str(e), "user_id": user_id}
+        return _typed_error("internal", str(e), user_id=user_id)
 
 
 @mcp.tool(name="hdt.get_sugarvita_player_types@v1")
-def tool_get_sugarvita_player_types(user_id: str, purpose: Literal["analytics","modeling","coaching"]="analytics") -> dict:
+def tool_get_sugarvita_player_types(user_id: str, purpose: Literal["analytics","modeling","coaching"]=LANE_ANALYTICS) -> dict:
     t0 = _time.time()
     try:
         raw = _cached_get("/get_sugarvita_player_types", {"user_id": user_id})
@@ -616,10 +581,10 @@ def tool_get_sugarvita_player_types(user_id: str, purpose: Literal["analytics","
         return out
     except Exception as e:
         _log_event("tool", "hdt.get_sugarvita_player_types@v1", {"user_id": user_id, "purpose": purpose, "error": str(e)}, False, int((_time.time()-t0)*1000))
-        return {"error": str(e), "user_id": user_id}
+        return _typed_error("internal", str(e), user_id=user_id)
 
 @mcp.tool(name="hdt.get_health_literacy_diabetes@v1")
-def tool_get_health_literacy_diabetes(user_id: str, purpose: Literal["analytics","modeling","coaching"]="analytics") -> dict:
+def tool_get_health_literacy_diabetes(user_id: str, purpose: Literal["analytics","modeling","coaching"]=LANE_ANALYTICS) -> dict:
     t0 = _time.time()
     try:
         raw = _cached_get("/get_health_literacy_diabetes", {"user_id": user_id})
@@ -629,10 +594,10 @@ def tool_get_health_literacy_diabetes(user_id: str, purpose: Literal["analytics"
         return out
     except Exception as e:
         _log_event("tool", "hdt.get_health_literacy_diabetes@v1", {"user_id": user_id, "purpose": purpose, "error": str(e)}, False, int((_time.time()-t0)*1000))
-        return {"error": str(e), "user_id": user_id}
+        return _typed_error("internal", str(e), user_id=user_id)
 
 @mcp.tool(name="policy.evaluate@v1")
-def policy_evaluate(purpose: Literal["analytics","modeling","coaching"]="analytics",
+def policy_evaluate(purpose: Literal["analytics","modeling","coaching"]=LANE_ANALYTICS,
                     client_id: str | None = None,
                     tool: str | None = None) -> dict:
     pol = _policy()  # ← not _load_policy()
@@ -674,7 +639,7 @@ def policy_reload() -> dict:
 @mcp.tool(name="vault.maintain@v1")
 def vault_maintain(days: int = 60) -> dict:
     if not (_vault and HDT_VAULT_ENABLE):
-        return {"error": "vault_disabled", "kept_last_days": days, "deleted_rows": 0}
+        return _typed_error("vault_disabled", "Vault is disabled", kept_last_days=days, deleted_rows=0)
     deleted = 0
     if hasattr(_vault, "retain_last_days"):
         deleted = int(_vault.retain_last_days(days))
@@ -683,7 +648,7 @@ def vault_maintain(days: int = 60) -> dict:
     return {"kept_last_days": days, "deleted_rows": deleted}
 
 @mcp.tool(name="behavior_strategy@v1")
-def tool_behavior_strategy(user_id: str, purpose: str = "coaching") -> dict:
+def tool_behavior_strategy(user_id: str, purpose: str = LANE_COACHING) -> dict:
     t0 = _time.time()
     try:
         plan = _behavior_strategy(int(user_id))
@@ -697,7 +662,18 @@ def tool_behavior_strategy(user_id: str, purpose: str = "coaching") -> dict:
         _log_event("tool", "behavior_strategy@v1",
                    {"user_id": user_id, "purpose": purpose, "error": str(e)},
                    False, int((_time.time()-t0)*1000))
-        return {"error": str(e), "user_id": user_id}
+        return _typed_error("internal", str(e), user_id=user_id)
+
+@mcp.tool(name="hdt.get_walk_stream@v1")
+def tool_get_walk_stream(user_id: str) -> dict:
+    view = _domain.walk_stream(int(user_id), prefer_vault=True)
+    return {
+        "source": view.source,
+        "stats": view.stats.model_dump(),
+        "records": [r.model_dump() for r in view.records],
+    }
+
+# (Removed duplicate older implementation of tool_get_walk_data that proxied HTTP)
 
 
 # --- 3) “Model Hub” placeholders (M1/M2) ------------------------------------

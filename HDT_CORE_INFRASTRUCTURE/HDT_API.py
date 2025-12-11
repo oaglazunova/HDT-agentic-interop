@@ -5,7 +5,9 @@ import os, logging
 from pathlib import Path
 import hashlib
 import uuid
+from typing import Optional, Dict, List, Tuple, Any
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 try:
@@ -37,7 +39,7 @@ def _stable_json_dumps(obj) -> str:
     # Compact + deterministic JSON (no spaces, sorted keys)
     return json.dumps(obj, separators=(",", ":"), sort_keys=True, ensure_ascii=False)
 
-def _compute_etag(payload, *, variant: dict | None = None) -> str:
+def _compute_etag(payload, *, variant: Optional[Dict[str, Any]] = None) -> str:
     """
     Compute a strong ETag based on the response body and a 'variant' dict.
     The variant makes the ETag safe across different clients/queries.
@@ -66,11 +68,11 @@ def _compute_etag(payload, *, variant: dict | None = None) -> str:
 def json_with_headers(
         payload,
         *,
-        policy: str | None = None,
-        redactions: int | None = None,
+        policy: Optional[str] = None,
+        redactions: Optional[int] = None,
         status: int = 200,
-        etag_variant: dict | None = None,
-        extra_headers: dict[str, str] | None = None,
+        etag_variant: Optional[Dict[str, Any]] = None,
+        extra_headers: Optional[Dict[str, str]] = None,
     ):
     """
     Return a JSON response with governance headers, plus conditional ETag/304.
@@ -197,14 +199,14 @@ config_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'conf
 USERS_PUBLIC_FILE = os.path.join(config_dir, 'users.json')
 USERS_SECRETS_FILE = os.path.join(config_dir, 'users.secrets.json')
 
-def _load_users_file(path: str) -> list[dict]:
+def _load_users_file(path: str) -> List[Dict[str, Any]]:
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
     if not isinstance(data, dict) or "users" not in data or not isinstance(data["users"], list):
         raise ValueError(f"Invalid users file format: {path}")
     return data["users"]
 
-def _merge_lists_by_identity(pub_list: list[dict], sec_list: list[dict], identity_keys=("connected_application","player_id")) -> list[dict]:
+def _merge_lists_by_identity(pub_list: List[Dict[str, Any]], sec_list: List[Dict[str, Any]], identity_keys=("connected_application","player_id")) -> List[Dict[str, Any]]:
     """
     Merge two lists of connector entries:
     - Match items by identity_keys (connected_application + player_id).
@@ -229,11 +231,11 @@ def _merge_lists_by_identity(pub_list: list[dict], sec_list: list[dict], identit
             merged.append(p)
     return merged
 
-def _merge_users(public_users: list[dict], secret_users: list[dict]) -> dict[int, dict]:
+def _merge_users(public_users: List[Dict[str, Any]], secret_users: List[Dict[str, Any]]) -> Dict[int, Dict[str, Any]]:
     # Build secret lookup by user_id
     sec_by_uid = {int(u.get("user_id")): u for u in secret_users or [] if "user_id" in u}
 
-    merged_by_uid: dict[int, dict] = {}
+    merged_by_uid: Dict[int, Dict[str, Any]] = {}
     for pu in public_users:
         uid = int(pu["user_id"])
         su = sec_by_uid.get(uid, {})
@@ -333,7 +335,7 @@ def metadata_model_developer_apis():
                         "trivia_results": "list of trivia metrics",
                         "latest_activity_info": "string containing recent activity details"
                     },
-                    "error": "Error message if something goes wrong."
+                    "error": {"code": "string", "message": "string"}
                 }
             },
             {
@@ -353,7 +355,7 @@ def metadata_model_developer_apis():
                         "sugarvita_results": "list of game metrics",
                         "latest_activity_info": "string containing recent activity details"
                     },
-                    "error": "Error message if something goes wrong."
+                    "error": {"code": "string", "message": "string"}
                 }
             },
             {
@@ -378,7 +380,7 @@ def metadata_model_developer_apis():
                             "kcalories": "float or None"
                         }
                     ],
-                    "error": "Error message if something goes wrong."
+                    "error": {"code": "string", "message": "string"}
                 }
             }
         ]
@@ -417,7 +419,7 @@ def metadata_app_developer_apis():
                         "Competitive": "float",
                         "Explorer": "float"
                     },
-                    "error": "Error message if something goes wrong."
+                    "error": {"code": "string", "message": "string"}
                 },
                 "potential_use": "Use these scores to personalize game mechanics or user experience based on player type."
             },
@@ -446,7 +448,7 @@ def metadata_app_developer_apis():
                             "sugarvita": "float"
                         }
                     },
-                    "error": "Error message if something goes wrong."
+                    "error": {"code": "string", "message": "string"}
                 },
                 "potential_use": "Use these scores to assess user education or recommend personalized educational content."
             }
@@ -476,7 +478,8 @@ def openapi():
             "paths": {
                 "/get_walk_data": {
                     "get": {
-                        "summary": "Walk data (paginated for single-user)",
+                        "summary": "Walk data (always array of user envelopes)",
+                        "description": "Always returns an array of per-user envelopes. If `user_id` is provided, the response is a 1-element array. Without `user_id`, returns envelopes for all users the client is authorized to access.",
                         "parameters": [
                             {"name": "user_id", "in": "query", "schema": {"type": "integer"}},
                             {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 1000}},
@@ -496,10 +499,8 @@ def openapi():
                                 "content": {
                                     "application/json": {
                                         "schema": {
-                                            "oneOf": [
-                                                {"$ref": "#/components/schemas/UserStreamEnvelope"},
-                                                {"type": "array", "items": {"$ref": "#/components/schemas/UserStreamEnvelope"}},
-                                            ]
+                                            "type": "array",
+                                            "items": {"$ref": "#/components/schemas/UserStreamEnvelope"}
                                         }
                                     }
                                 },
@@ -522,6 +523,15 @@ def openapi():
                     "X-Total": {"schema": {"type": "integer"}},
                 },
                 "schemas": {
+                    "ErrorObject": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "string"},
+                            "message": {"type": "string"},
+                            "details": {"type": "object", "additionalProperties": True}
+                        },
+                        "required": ["code", "message"]
+                    },
                     "WalkRecord": {
                         "type": "object",
                         "properties": {
@@ -547,8 +557,13 @@ def openapi():
                             "user_id": {"type": "integer"},
                             "data": {"type": "array", "items": {"$ref": "#/components/schemas/WalkRecord"}},
                             "page": {"$ref": "#/components/schemas/Page"},
+                            "error": {"anyOf": [{"$ref": "#/components/schemas/ErrorObject"}, {"type": "null"}]}
                         },
-                        "required": ["user_id", "data"],
+                        "description": "Either `data`+`page` are present or an `error` object.",
+                        "anyOf": [
+                            {"required": ["user_id", "data", "page"]},
+                            {"required": ["user_id", "error"]}
+                        ]
                     },
                 },
             },
@@ -599,14 +614,24 @@ def get_trivia_data():
                         "data": {
                             "trivia_results": data,
                             "latest_activity_info": latest_activity_info
-                        }
+                        },
+                        "error": None,
                     })
                 else:
-                    response_data.append({"user_id": user_id, "error": f"No data found for user {user_id}"})
+                    response_data.append({
+                        "user_id": user_id,
+                        "error": {"code": "not_found", "message": f"No data found for user {user_id}"}
+                    })
             elif app_name == "Placeholder diabetes app":
-                response_data.append({"user_id": user_id, "error": f"Support for '{app_name}' is not yet implemented."})
+                response_data.append({
+                    "user_id": user_id,
+                    "error": {"code": "unsupported_app", "message": f"Support for '{app_name}' is not yet implemented."}
+                })
             else:
-                response_data.append({"user_id": user_id, "error": f"User {user_id} does not have a connected diabetes application."})
+                response_data.append({
+                    "user_id": user_id,
+                    "error": {"code": "not_connected", "message": f"User {user_id} does not have a connected diabetes application."}
+                })
 
         return json_with_headers(response_data, policy="passthrough")
     except Exception as e:
@@ -634,14 +659,24 @@ def get_sugarvita_data():
                         "data": {
                             "sugarvita_results": data,
                             "latest_activity_info": latest_activity_info
-                        }
+                        },
+                        "error": None,
                     })
                 else:
-                    response_data.append({"user_id": user_id, "error": f"No data found for user {user_id}"})
+                    response_data.append({
+                        "user_id": user_id,
+                        "error": {"code": "not_found", "message": f"No data found for user {user_id}"}
+                    })
             elif app_name == "Placeholder diabetes app":
-                response_data.append({"user_id": user_id, "error": f"Support for '{app_name}' is not yet implemented."})
+                response_data.append({
+                    "user_id": user_id,
+                    "error": {"code": "unsupported_app", "message": f"Support for '{app_name}' is not yet implemented."}
+                })
             else:
-                response_data.append({"user_id": user_id, "error": f"User {user_id} does not have a connected diabetes application."})
+                response_data.append({
+                    "user_id": user_id,
+                    "error": {"code": "not_connected", "message": f"User {user_id} does not have a connected diabetes application."}
+                })
 
         return json_with_headers(response_data, policy="passthrough")
     except Exception as e:
@@ -662,7 +697,7 @@ def get_walk():
         limit, offset, err = parse_pagination_args()
         if err:
             msg, code = err
-            return json_with_headers({"error": msg}, status=code, policy="error")
+            return api_error("bad_input", msg, status=code)
 
         # -------- Single-user (explicit ?user_id=...) ----------
         if user_id is not None:
@@ -677,13 +712,13 @@ def get_walk():
 
             page, has_next = paginate(res.get("total"), limit, offset)
 
-            payload = {"user_id": user_id, "data": cleaned, "page": page}
+            payload = {"user_id": user_id, "data": cleaned, "page": page, "error": None}
             extra = {"X-Limit": str(page.get("limit", "")), "X-Offset": str(page.get("offset", ""))}
             if page.get("total") is not None:
                 extra["X-Total"] = str(page["total"])
 
             resp = json_with_headers(
-                payload,
+                [payload],
                 policy="passthrough",
                 extra_headers=extra,
                 etag_variant={"policy": "passthrough", "user_id": user_id, "limit": limit, "offset": offset},
@@ -701,13 +736,16 @@ def get_walk():
             try:
                 cleaned = sanitize_walk_records(res.get("records", []))
             except ValidationError as e:
-                # Keep the envelope, but mark as error for that uid
-                envelopes.append({"user_id": uid, "error": f"bad_input: {e}"})
+                # Keep the envelope, but mark as error for that uid (typed)
+                envelopes.append({
+                    "user_id": uid,
+                    "error": {"code": "bad_input", "message": str(e)}
+                })
                 continue
 
             page, has_next = paginate(res.get("total"), limit, offset)
             any_has_next = any_has_next or has_next
-            envelopes.append({"user_id": uid, "data": cleaned, "page": page})
+            envelopes.append({"user_id": uid, "data": cleaned, "page": page, "error": None})
 
         resp = json_with_headers(
             envelopes,
@@ -775,7 +813,7 @@ def get_sugarvita_player_types():
         return json_with_headers(response, policy="passthrough")
     except Exception as e:
         logging.error(f"[rid={getattr(request, 'request_id', '-')}] Error in get_sugarvita_player_types: {e}")
-        return json_with_headers({"error": "Internal server error"}, status=500, policy="error")
+        return api_error("internal", "Internal server error", status=500)
         #return json_with_headers({"error": f"No data found for user {user_id}"}, status=404, policy="error")
         #return json_with_headers({"error": "Unauthorized access to this user's data"}, status=403, policy="deny")
 
@@ -829,7 +867,7 @@ def get_health_literacy_diabetes():
         return json_with_headers(response, policy="passthrough")
     except Exception as e:
         logging.error(f"[rid={getattr(request, 'request_id', '-')}] Error in get_health_literacy_diabetes: {e}")
-        return json_with_headers({"error": "Internal server error"}, status=500, policy="error")
+        return api_error("internal", "Internal server error", status=500)
         #return json_with_headers({"error": f"No data found for user {user_id}"}, status=404, policy="error")
         #return json_with_headers({"error": "Unauthorized access to this user's data"}, status=403, policy="deny")
 
@@ -837,7 +875,7 @@ def serve_stream_single_user(*, user_id: int, fetch_batch, policy_label: str):
     limit, offset, err = parse_pagination_args()
     if err:
         msg, code = err
-        return json_with_headers({"error": msg}, status=code, policy="error")
+        return api_error("bad_input", msg, status=code)
 
     res = fetch_batch(user_id, limit, offset)  # {"records": [...], "total": int|None}
     try:

@@ -143,8 +143,8 @@
       "get": {
         "operationId": "getWalkData",
         "tags": ["Model Developer APIs"],
-        "summary": "Walk data (single-user with pagination or multi-user aggregate)",
-        "description": "If `user_id` is provided, returns a single-user envelope with page metadata. Without `user_id`, returns an array of envelopes for all users the client is authorized to access.",
+        "summary": "Walk data (always array of user envelopes)",
+        "description": "Always returns an array of per-user envelopes. If `user_id` is provided, the response is a 1-element array. Without `user_id`, returns envelopes for all users the client is authorized to access.",
         "parameters": [
           { "name": "user_id", "in": "query", "schema": { "type": "integer" }, "required": false, "description": "User ID to query (single-user fast path)." },
           { "name": "limit", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 1000 }, "required": false, "description": "Page size (default from server)." },
@@ -171,13 +171,8 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "oneOf": [
-                    { "$ref": "#/components/schemas/UserStreamEnvelope" },
-                    {
-                      "type": "array",
-                      "items": { "$ref": "#/components/schemas/UserStreamEnvelope" }
-                    }
-                  ]
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/UserStreamEnvelope" }
                 }
               }
             }
@@ -487,17 +482,20 @@
     },
 
     "schemas": {
+      "ErrorObject": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "string" },
+          "message": { "type": "string" },
+          "details": { "type": "object", "additionalProperties": true }
+        },
+        "required": ["code", "message"]
+      },
       "ErrorEnvelope": {
         "type": "object",
         "properties": {
           "error": {
-            "type": "object",
-            "properties": {
-              "code": { "type": "string" },
-              "message": { "type": "string" },
-              "details": { "type": "object", "additionalProperties": true }
-            },
-            "required": ["code", "message"]
+            "$ref": "#/components/schemas/ErrorObject"
           }
         },
         "required": ["error"]
@@ -536,7 +534,8 @@
         "properties": {
           "user_id": { "type": "integer" },
           "data": { "type": "array", "items": { "$ref": "#/components/schemas/WalkRecord" } },
-          "page": { "$ref": "#/components/schemas/Page" }
+          "page": { "$ref": "#/components/schemas/Page" },
+          "error": { "$ref": "#/components/schemas/ErrorObject", "nullable": true }
         },
         "required": ["user_id", "data"]
       },
@@ -555,9 +554,9 @@
         "properties": {
           "user_id": { "type": "integer" },
           "data": { "$ref": "#/components/schemas/TriviaPayload" },
-          "error": { "type": "string" }
+          "error": { "$ref": "#/components/schemas/ErrorObject" }
         },
-        "description": "Either `data` is present or an `error` string.",
+        "description": "Either `data` is present or an `error` object.",
         "anyOf": [
           { "required": ["user_id", "data"] },
           { "required": ["user_id", "error"] }
@@ -578,9 +577,9 @@
         "properties": {
           "user_id": { "type": "integer" },
           "data": { "$ref": "#/components/schemas/SugarVitaPayload" },
-          "error": { "type": "string" }
+          "error": { "$ref": "#/components/schemas/ErrorObject" }
         },
-        "description": "Either `data` is present or an `error` string.",
+        "description": "Either `data` is present or an `error` object.",
         "anyOf": [
           { "required": ["user_id", "data"] },
           { "required": ["user_id", "error"] }

@@ -46,8 +46,7 @@ def init(db_path: str | None = None):
         return
 
     if _conn is not None and _DB_PATH != resolved:
-        try: _conn.close()
-        except Exception: pass
+        _conn.close()
         _conn = None
 
     _conn = sqlite3.connect(resolved, check_same_thread=False)
@@ -70,25 +69,9 @@ def close():
         finally:
             _conn = None
 
-def upsert_walk_records(user_id: int, records: Iterable[dict]) -> int:
-    """Insert or update walk records for user in vault. Returns rows affected."""
-    if _conn is None:
-        return 0
-    now = int(time.time())
-    n = 0
-    with _conn:  # ensures a single transaction & commit
-        cur = _conn.cursor()
-        for r in records or []:
-            dt = r.get("date")
-            if not dt:
-                continue
-            steps = int(r.get("steps") or 0)
-            cur.execute(
-                "INSERT OR REPLACE INTO walk_records(user_id,date,steps,raw_json,inserted_at) VALUES (?,?,?,?,?)",
-                (int(user_id), str(dt), steps, json.dumps(r, ensure_ascii=False), now),
-            )
-            n += cur.rowcount
-    return n
+def upsert_walk_records(user_id: int, records: Iterable[dict], **kw) -> int:
+    """Alias maintained for compatibility; delegates to write_walk."""
+    return write_walk(user_id, records, **kw)
 
 
 def read_walk_records(user_id: int) -> list[dict]:
@@ -178,12 +161,8 @@ def compact():
     """
     if _conn is None:
         return
-    try:
-        _exec(_conn, "PRAGMA wal_checkpoint(TRUNCATE)")
-        _exec(_conn, "VACUUM")
-    except Exception:
-        # Best effort; safe to ignore during normal ops
-        pass
+    _exec(_conn, "PRAGMA wal_checkpoint(TRUNCATE)")
+    _exec(_conn, "VACUUM")
 
 def count_walk_records(user_id: int | None = None) -> int:
     if _conn is None:
@@ -211,6 +190,32 @@ def get_db_path() -> str | None:
 
 # ---- optional: backward-compat shim ---------------------------------------
 
-def write_walk(user_id: int, records: Iterable[dict], *, source: str = "", fetched_at: int | None = None) -> int:
-    """Alias for older code paths; delegates to upsert_walk_records."""
-    return upsert_walk_records(user_id, records)
+def write_walk(
+    user_id: int,
+    records: Iterable[dict],
+    *,
+    source: str = "",
+    fetched_at: int | None = None,
+) -> int:
+    """Insert or update walk records for user in vault. Returns rows affected.
+
+    Parameters `source` and `fetched_at` are accepted for forward/backward
+    compatibility but are not stored separately in the current schema.
+    """
+    if _conn is None:
+        return 0
+    now = int(time.time())
+    n = 0
+    with _conn:  # ensures a single transaction & commit
+        cur = _conn.cursor()
+        for r in records or []:
+            dt = r.get("date")
+            if not dt:
+                continue
+            steps = int(r.get("steps") or 0)
+            cur.execute(
+                "INSERT OR REPLACE INTO walk_records(user_id,date,steps,raw_json,inserted_at) VALUES (?,?,?,?,?)",
+                (int(user_id), str(dt), steps, json.dumps(r, ensure_ascii=False), now),
+            )
+            n += cur.rowcount or 0
+    return n
