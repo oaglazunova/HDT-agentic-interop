@@ -1,0 +1,16 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "HDT Agentic Interoperability Prototype (MCP + Vault + Policy Lanes)"
+version: "0.5.0"
+date-released: "2025-12-12"
+authors:
+  - family-names: "Glazunova"
+    given-names: "Olga"
+    affiliation: "Eindhoven University of Technology (TU/e)"
+repository-code: "https://github.com/oaglazunova/HDT-agentic-interop"
+keywords:
+  - Model Context Protocol
+  - Human Digital Twin
+  - Interoperability
+  - Digital Health
+  - Agentic Systems
