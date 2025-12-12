@@ -9,6 +9,13 @@ It performs:
 """
 
 import json, os, sys
+from pathlib import Path
+
+# Ensure project root is on sys.path so that "HDT_MCP" package resolves
+_THIS_FILE = Path(__file__).resolve()
+_PROJECT_ROOT = _THIS_FILE.parents[1]
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
 from urllib.request import urlopen, Request
 from urllib.error import URLError, HTTPError
 
