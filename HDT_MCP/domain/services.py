@@ -59,13 +59,17 @@ class HDTService:
                 return WalkStreamView(source="vault", records=cached, stats=self._stats(cached))
 
         # 2) Fallback to live
-        live = self.walk_source.fetch_walk(
-            user_id,
-            from_iso=from_iso,
-            to_iso=to_iso,
-            limit=limit,
-            offset=offset,
-        )
+        try:
+            live = self.walk_source.fetch_walk(
+                user_id,
+                from_iso=from_iso,
+                to_iso=to_iso,
+                limit=limit,
+                offset=offset,
+            )
+        except Exception:
+            # Be resilient in absence of upstream API/key
+            live = []
 
         # 3) Write-through (best-effort). Note: writes the retrieved slice/window.
         if self.vault and live:

@@ -87,6 +87,25 @@ It writes:
 
 Prefer running the script. If you’d rather create files manually, see Appendix: Sample config below.
 
+## Quick end-to-end demo (two terminals)
+
+If you just want to see everything work end-to-end with one demo script:
+
+In one terminal: start the API (localhost:5000)
+```
+python -m HDT_CORE_INFRASTRUCTURE.HDT_API
+```
+
+In another terminal: run the end-to-end demo
+```
+python scripts/demo_end_to_end.py
+```
+
+The demo will:
+- Fetch walk data from the API (showing ETag/304 behavior),
+- Call MCP tools in-process, and
+- Print the last few telemetry lines (policy/redactions) if enabled.
+
 ## 5) Run the API (terminal #1)
 ```
 python HDT_CORE_INFRASTRUCTURE/HDT_API.py

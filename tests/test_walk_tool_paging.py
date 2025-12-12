@@ -1,6 +1,9 @@
-from HDT_MCP.server import tool_get_walk_data
+from HDT_MCP.server import hdt_walk_stream
 
 def test_walk_tool_aggregate_smoke():
-    out = tool_get_walk_data(user_id="1", aggregate=True, page_limit=50, max_pages=2)
+    # Use the existing MCP tool that exposes the walk stream
+    out = hdt_walk_stream(user_id=1)
     assert isinstance(out, dict)
-    assert "data" in out
+    # Expect the domain-shaped payload with records and stats
+    assert "records" in out
+    assert isinstance(out["records"], list)

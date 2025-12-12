@@ -1,5 +1,52 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "hdt-agentic-interop"
-version = "0.0.0"
-description = "Façade and developer API for an agentic Human Digital Twin (HDT) stack"
-requires-python = ">=3.14,<3.15"
+version = "0.5.0"
+description = "Interoperable HDT prototype with MCP façade, vault, policy lanes, and telemetry."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Olga Glazunova", email = "o.glazunova@tue.nl" }]
+keywords = ["Model Context Protocol", "HDT", "interoperability", "digital health", "agentic systems"]
+
+dependencies = [
+  "flask>=3.0",
+  "requests>=2.31",
+  "python-dotenv>=1.0",
+  "mcp>=1.0.0",
+  "pydantic>=2.5",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "pre-commit>=3.6",
+  "ruff>=0.6.0",
+  "mypy>=1.10",
+]
+
+[project.urls]
+Homepage = "https://github.com/oaglazunova/HDT-agentic-interop"
+Repository = "https://github.com/oaglazunova/HDT-agentic-interop"
+Issues = "https://github.com/oaglazunova/HDT-agentic-interop/issues"
+
+# Optional convenience script (adjust the module path if your server file differs)
+[project.scripts]
+hdt-mcp = "HDT_MCP.server:main"
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["HDT_MCP", "HDT_CORE_INFRASTRUCTURE", "tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+warn_unused_ignores = true
+strict_optional = false

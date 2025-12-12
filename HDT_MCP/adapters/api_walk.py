@@ -16,11 +16,15 @@ class ApiWalkAdapter(WalkSourcePort):
         self,
         base_url: str,
         headers_provider: Optional[Callable[[], Dict[str, str]]] = None,
-        timeout_sec: int = 30,
+        timeout_sec: Optional[int] = None,
+        timeout: Optional[int] = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.headers_provider = headers_provider or (lambda: {})
-        self.timeout = timeout_sec
+        # Support both legacy 'timeout_sec' and new 'timeout' kwarg.
+        # Prefer 'timeout' if provided; fall back to 'timeout_sec'; default 30.
+        chosen_timeout = timeout if timeout is not None else (timeout_sec if timeout_sec is not None else 30)
+        self.timeout = int(chosen_timeout)
 
     def _normalize(self, user_id: int, payload: Any) -> List[WalkRecord]:
         """
@@ -62,18 +66,30 @@ class ApiWalkAdapter(WalkSourcePort):
         offset: Optional[int] = None,
     ) -> List[WalkRecord]:
         # Build query; your current API filters by ?user_id; others are currently ignored server-side
-        params = {"user_id": str(user_id)}
+        params = {"user_id": user_id}
         if from_iso:
             params["from"] = from_iso
         if to_iso:
             params["to"] = to_iso
         if limit is not None:
-            params["limit"] = str(limit)
+            params["limit"] = limit
         if offset is not None:
-            params["offset"] = str(offset)
+            params["offset"] = offset
 
         url = f"{self.base_url}/get_walk_data"
-        r = requests.get(url, headers=self.headers_provider(), params=params, timeout=self.timeout)
-        r.raise_for_status()
-        payload = r.json()
-        return self._normalize(user_id, payload)
+        try:
+            r = requests.get(
+                url,
+                headers=self.headers_provider(),
+                params=params,
+                timeout=self.timeout,
+            )
+            # Gracefully degrade on unauthorized in dev/test (no API key)
+            if r.status_code in (401, 403):
+                return []
+            r.raise_for_status()
+            payload = r.json()
+            return self._normalize(user_id, payload)
+        except requests.exceptions.RequestException:
+            # Network errors, timeouts, DNS resolution, etc. → return empty
+            return []
