@@ -1,6 +1,4 @@
-from __future__ import annotations
 from datetime import datetime, date as _date
-from typing import Iterable
 import re
 
 _DURATION_RE = re.compile(r"^\d{2}:\d{2}:\d{2}$")
@@ -8,34 +6,39 @@ _DURATION_RE = re.compile(r"^\d{2}:\d{2}:\d{2}$")
 class ValidationError(ValueError):
     pass
 
-def _normalize_iso_datetime(s: str) -> str:
+def _normalize_iso_datetime(s):
+    # Expect a string input under Python 3
     if not isinstance(s, str):
         raise ValidationError("date must be a string")
 
     raw = s.strip()
     # Reject trailing Z or explicit offsets to avoid silent tz loss
-    if raw.endswith("Z") or "+" in raw[10:] or "-" in raw[11:]:
-        raise ValidationError(f"timezone offsets not allowed: {s!r}")
+    # Keep the same windowing as the original: after date portion
+    if raw.endswith("Z") or ("+" in raw[10:]) or ("-" in raw[11:]):
+        raise ValidationError("timezone offsets not allowed: {0!r}".format(s))
 
-    try:
-        dt = datetime.fromisoformat(raw.replace(" ", "T"))
-        if len(raw) == 10:
-            return dt.date().isoformat()
-        return dt.strftime("%Y-%m-%d %H:%M:%S")
-    except Exception:
+    # Try datetime first: both "YYYY-MM-DD HH:MM:SS" and "YYYY-MM-DDTHH:MM:SS"
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
         try:
-            d = _date.fromisoformat(raw)
-            return d.isoformat()
+            dt = datetime.strptime(raw, fmt)
+            return dt.strftime("%Y-%m-%d %H:%M:%S")
         except Exception:
-            raise ValidationError(f"invalid ISO date/datetime: {s!r}")
+            pass
 
-def _coerce_int(value, *, min_value: int | None = None, name: str = "value") -> int:
+    # Then try date-only "YYYY-MM-DD"
+    try:
+        d = datetime.strptime(raw, "%Y-%m-%d").date()
+        return d.isoformat()
+    except Exception:
+        raise ValidationError("invalid ISO date/datetime: {0!r}".format(s))
+
+def _coerce_int(value, min_value=None, name="value"):
     try:
         iv = int(value)
     except Exception:
-        raise ValidationError(f"{name} not an integer: {value!r}")
+        raise ValidationError("{0} not an integer: {1!r}".format(name, value))
     if min_value is not None and iv < min_value:
-        raise ValidationError(f"{name} below minimum {min_value}: {iv}")
+        raise ValidationError("{0} below minimum {1}: {2}".format(name, min_value, iv))
     return iv
 
 def _coerce_float_or_none(v):
@@ -44,7 +47,7 @@ def _coerce_float_or_none(v):
     try:
         return float(v)
     except Exception:
-        raise ValidationError(f"not a float: {v!r}")
+        raise ValidationError("not a float: {0!r}".format(v))
 
 def _coerce_str_or_none(v):
     if v is None:
@@ -56,10 +59,10 @@ def _coerce_duration_or_none(v):
         return None
     s = str(v)
     if not _DURATION_RE.match(s):
-        raise ValidationError(f"duration must be HH:MM:SS, got {v!r}")
+        raise ValidationError("duration must be HH:MM:SS, got {0!r}".format(v))
     return s
 
-def sanitize_walk_record(rec: dict) -> dict:
+def sanitize_walk_record(rec):
     """
     Ensures a single walk record has a valid ISO date/datetime string
     and non-negative integer steps. Also coerces optional numeric fields.
@@ -91,7 +94,7 @@ def sanitize_walk_record(rec: dict) -> dict:
 
     return out
 
-def sanitize_walk_records(records: Iterable[dict], *, strict: bool = True) -> list[dict]:
+def sanitize_walk_records(records, strict=True):
     if records is None:
         return []
     cleaned = []
@@ -100,7 +103,8 @@ def sanitize_walk_records(records: Iterable[dict], *, strict: bool = True) -> li
             cleaned.append(sanitize_walk_record(r))
         except ValidationError as e:
             if strict:
-                raise ValidationError(f"record[{i}]: {e}") from e
+                # Python 2 does not support exception chaining
+                raise ValidationError("record[{0}]: {1}".format(i, e))
             # else: skip / or collect stats
     return cleaned
 

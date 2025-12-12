@@ -19,9 +19,8 @@ from HDT_MCP.models.behavior import behavior_strategy as _behavior_strategy
 from HDT_MCP.models.behavior import _headers as _base_headers
 from HDT_MCP.domain.services import HDTService
 from HDT_MCP.adapters.api_walk import ApiWalkAdapter
-from HDT_MCP.adapters.vault_repo import VaultRepo
+from HDT_MCP.adapters.vault_repo import VaultAdapter
 from HDT_MCP.constants import (
-    TOOL_WALK,
     LANE_ANALYTICS,
     LANE_MODELING,
     LANE_COACHING,
@@ -164,7 +163,7 @@ walk_adapter = ApiWalkAdapter(
     base_url=HDT_API_BASE,
     headers_provider=_headers,
 )
-vault_repo = VaultRepo(_vault) if (HDT_VAULT_ENABLE and _vault is not None) else None
+vault_repo = VaultAdapter(_vault) if (HDT_VAULT_ENABLE and _vault is not None) else None
 
 # Domain service
 _domain = HDTService(walk_source=walk_adapter, vault=vault_repo)
@@ -203,16 +202,6 @@ def _log_event(
         f.write(json.dumps(rec) + "\n")
 
 
-def _cached_get(path: str, params: dict | None=None) -> dict:
-    key = (path, tuple(sorted((params or {}).items())))
-    now = _time.time()
-    hit = _cache.get(key)
-    if hit and now - hit[0] < _CACHE_TTL:
-        return hit[1]
-    data = _hdt_get(path, params)
-    _cache[key] = (now, data)
-    return data
-
 def _hdt_get(path: str, params: dict | None=None) -> dict:
     url = _api_url(path)
     last = None
@@ -241,16 +230,23 @@ def _hdt_get(path: str, params: dict | None=None) -> dict:
 
 
 def _cached_get(path: str, params: dict | None=None) -> dict:
+    """Return a cached copy of GET JSON.
+
+    Guarantees immutability of cached entries by:
+    - Returning deep copies to callers
+    - Storing deep copies under the cache key
+    so downstream in-place mutations (e.g., policy redaction) never corrupt the cache.
+    """
     key = (path, tuple(sorted((params or {}).items())))
     now = _time.time()
     with _cache_lock:
         hit = _cache.get(key)
         if hit and now - hit[0] < _CACHE_TTL:
-            return hit[1]
+            return copy.deepcopy(hit[1])
     data = _hdt_get(path, params)
     with _cache_lock:
-        _cache[key] = (now, data)
-    return data
+        _cache[key] = (now, copy.deepcopy(data))
+    return copy.deepcopy(data)
 
 
 # --- policy/redaction helpers ------------------------------------------------
@@ -324,6 +320,7 @@ def _merge_rule(base: dict, override: dict | None) -> dict:
     out.setdefault("redact", [])
     return out
 
+
 def _resolve_rule(purpose: str, tool_name: str, client_id: str | None) -> dict:
     pol = _policy()
     rule = _merge_rule({}, pol.get("defaults", {}).get(purpose))
@@ -332,26 +329,6 @@ def _resolve_rule(purpose: str, tool_name: str, client_id: str | None) -> dict:
     rule = _merge_rule(rule, pol.get("tools", {}).get(tool_name, {}).get(purpose))
     return rule
 
-def _apply_policy(purpose: str, tool_name: str, payload: dict, *, client_id: str | None = None):
-    """
-    Mutates payload in place when allowed (redaction) and returns the payload.
-    If denied, returns an error dict and does NOT mutate payload.
-    Also records meta (allowed/redactions) in a contextvar for logging/tests.
-    """
-    rule = _resolve_rule(purpose, tool_name, client_id)
-    if not rule.get("allow", True):
-        _POLICY_LAST.set({"redactions": 0, "allowed": False, "purpose": purpose, "tool": tool_name})
-        return _typed_error(
-            "denied_by_policy",
-            "Access denied by policy",
-            purpose=purpose,
-            tool=tool_name,
-        )
-
-    redact_paths = rule.get("redact") or []
-    redactions = _redact_inplace(payload, redact_paths) if redact_paths else 0
-    _POLICY_LAST.set({"redactions": redactions, "allowed": True, "purpose": purpose, "tool": tool_name})
-    return payload
 
 def _apply_policy_metrics(
     purpose: str,
@@ -364,7 +341,8 @@ def _apply_policy_metrics(
     Convenience wrapper for tests/metrics: applies policy and returns a tuple
     of (result_payload, redactions_count).
     """
-    result = _apply_policy(purpose, tool_name, payload, client_id=client_id)
+    # Use safe application to protect any shared/cached payloads from in-place mutation
+    result = _apply_policy_safe(purpose, tool_name, payload, client_id=client_id)
     meta = _policy_last_meta() or {}
     return result, int(meta.get("redactions", 0))
 
@@ -387,48 +365,36 @@ def _policy_last_meta() -> dict:
     """For logging/tests: returns last policy meta (redactions, allowed, purpose, tool)."""
     return _POLICY_LAST.get()
 
+def _apply_policy(purpose: str, tool_name: str, payload: dict, *, client_id: str | None = None):
+    """
+    Mutates payload in place when allowed (redaction) and returns the payload.
+    If denied, returns an error dict and does NOT mutate payload.
+    Also records meta (allowed/redactions) in a contextvar for logging/tests.
+    """
+    rule = _resolve_rule(purpose, tool_name, client_id)
+    if not rule.get("allow", True):
+        _POLICY_LAST.set({"redactions": 0, "allowed": False, "purpose": purpose, "tool": tool_name})
+        return _typed_error(
+            "denied_by_policy",
+            "Access denied by policy",
+            purpose=purpose,
+            tool=tool_name,
+        )
+
+    redact_paths = rule.get("redact") or []
+    redactions = _redact_inplace(payload, redact_paths) if redact_paths else 0
+    _POLICY_LAST.set({"redactions": redactions, "allowed": True, "purpose": purpose, "tool": tool_name})
+    return payload
+
 def _apply_policy_safe(purpose: str, tool_name: str, payload: dict, *, client_id: str | None = None):
     """Apply policy to a deep copy to avoid mutating cached/shared objects."""
     clone = copy.deepcopy(payload)
     return _apply_policy(purpose, tool_name, clone, client_id=client_id)
 
 
+
 # ---------- RESOURCES (context / “read-only”) ----------
 # Resources are things the agent can "open" for context, like files/URIs.
-
-@mcp.resource("vault://user/{user_id}/integrated")
-def get_integrated_view(user_id: str) -> dict:
-    """
-    Integrated HDT View via domain service; policy + telemetry applied.
-    """
-    t0 = _time.time()
-    purpose = LANE_ANALYTICS
-
-    try:
-        view = _domain.integrated_view(int(user_id))
-        integrated = _apply_policy_safe(LANE_ANALYTICS, _INTEGRATED_TOOL_NAME, view.model_dump(), client_id=MCP_CLIENT_ID)
-
-        # resource-level policy
-        integrated = _apply_policy(purpose, _INTEGRATED_TOOL_NAME, integrated, client_id=MCP_CLIENT_ID)
-
-        _log_event(
-            "resource",
-            f"vault://user/{user_id}/integrated",
-            {"user_id": user_id, "purpose": purpose, "source": integrated["streams"]["walk"]["source"],
-             "records": integrated["streams"]["walk"]["count"]},
-            True,
-            int((_time.time() - t0) * 1000),
-        )
-        return integrated
-    except Exception as e:
-        _log_event(
-            "resource",
-            f"vault://user/{user_id}/integrated",
-            {"user_id": user_id, "purpose": purpose, "error": str(e)},
-            False,
-            int((_time.time() - t0) * 1000),
-        )
-        return _typed_error("internal", str(e), user_id=user_id)
 
 @mcp.resource("hdt://{user_id}/sources")
 def list_sources(user_id: str) -> dict:
@@ -448,14 +414,19 @@ def registry_tools() -> dict:
     return {
         "server": "HDT-MCP",
         "tools": [
-            {"name": TOOL_WALK, "args": ["user_id"]},
+            # Primary domain-shaped tools
+            {"name": "hdt.walk.stream@v1", "args": ["user_id", "prefer", "start", "end"]},
+            {"name": "hdt.walk.stats@v1", "args": ["user_id", "start", "end"]},
+
+            # Other tools
+            {"name": "healthz@v1", "args": []},
             {"name": "hdt.get_trivia_data@v1", "args": ["user_id"]},
             {"name": "hdt.get_sugarvita_data@v1", "args": ["user_id"]},
             {"name": "hdt.get_sugarvita_player_types@v1", "args": ["user_id"]},
             {"name": "hdt.get_health_literacy_diabetes@v1", "args": ["user_id"]},
+            {"name": "behavior_strategy@v1", "args": ["user_id"]},
             {"name": "intervention_time@v1", "args": []},
-            {"name": "policy.evaluate@v1", "args": ["purpose","client_id","tool"]},
-            {"name": "behavior_strategy@v1", "args": ["user_id"]}
+            {"name": "policy.evaluate@v1", "args": ["purpose", "client_id", "tool"]},
         ]
     }
 
@@ -468,16 +439,45 @@ def telemetry_recent(n: int = 50) -> dict:
     return {"records": [json.loads(x) for x in lines]}
 
 
+@mcp.resource("vault://user/{user_id}/integrated")
+def get_integrated_view(user_id: str) -> dict:
+    t0 = _time.time()
+    purpose = "analytics"
+    try:
+        # Use domain-integrated view (vault-first)
+        view = _domain.integrated_view(int(user_id))
+        integrated = view.model_dump() if hasattr(view, "model_dump") else {
+            "user_id": view.user_id,
+            "streams": view.streams,
+            "generated_at": view.generated_at,
+        }
+        integrated = _apply_policy_safe(purpose, _INTEGRATED_TOOL_NAME, integrated, client_id=MCP_CLIENT_ID)
+        days = integrated.get("streams", {}).get("walk", {}).get("stats", {}).get("days", 0)
+        _log_event("resource", f"vault://user/{user_id}/integrated",
+                   {"user_id": user_id, "purpose": purpose, "records": days},
+                   True, int((_time.time()-t0)*1000))
+        return integrated
+    except Exception as e:
+        _log_event("resource", f"vault://user/{user_id}/integrated",
+                   {"user_id": user_id, "purpose": purpose, "error": str(e)},
+                   False, int((_time.time()-t0)*1000))
+        return _typed_error("internal", str(e), user_id=user_id)
+
+
 
 # --- 2) TOOLS (actions / compute) -------------------------------------------
 # Tools are callables with typed params; MCP auto-generates JSON Schemas (B1).
+
+@mcp.tool(name="healthz@v1")
+def tool_healthz() -> dict:
+    return {"ok": True}
 
 @mcp.tool(name="hdt.get_trivia_data@v1")
 def tool_get_trivia_data(user_id: str) -> dict:
     t0 = _time.time()
     try:
         out = _cached_get("/get_trivia_data", {"user_id": user_id})
-        out = _apply_policy(LANE_ANALYTICS, "hdt.get_trivia_data@v1", out)
+        out = _apply_policy_safe(LANE_ANALYTICS, "hdt.get_trivia_data@v1", out)
         policy_meta = _policy_last_meta()
         _log_event("tool", "hdt.get_trivia_data@v1", {"user_id": user_id, "purpose": LANE_ANALYTICS, "redactions": policy_meta.get("redactions", 0)}, True, int((_time.time()-t0)*1000))
         return out
@@ -490,83 +490,12 @@ def tool_get_sugarvita_data(user_id: str) -> dict:
     t0 = _time.time()
     try:
         out = _cached_get("/get_sugarvita_data", {"user_id": user_id})
-        out = _apply_policy(LANE_ANALYTICS, "hdt.get_sugarvita_data@v1", out, client_id=MCP_CLIENT_ID)
+        out = _apply_policy_safe(LANE_ANALYTICS, "hdt.get_sugarvita_data@v1", out, client_id=MCP_CLIENT_ID)
         policy_meta = _policy_last_meta()
         _log_event("tool", "hdt.get_sugarvita_data@v1", {"user_id": user_id, "purpose": LANE_ANALYTICS, "redactions": policy_meta.get("redactions", 0)}, True, int((_time.time()-t0)*1000))
         return out
     except Exception as e:
         _log_event("tool", "hdt.get_sugarvita_data@v1", {"user_id": user_id, "error": str(e)}, False, int((_time.time()-t0)*1000))
-        return _typed_error("internal", str(e), user_id=user_id)
-
-@mcp.tool(name=TOOL_WALK)
-def tool_get_walk_data(
-    user_id: str,
-    purpose: str = LANE_ANALYTICS,
-    # façade options
-    limit: int | None = None,
-    offset: int | None = None,
-    aggregate: bool = False,   # set True to auto-page and merge
-    page_limit: int = 200,     # used when aggregate=True
-    max_pages: int = 5,        # safety cap when aggregate=True
-	# Note: domain returns full stream; paging args are handled locally
-) -> dict | list[dict]:
-
-    t0 = _time.time()
-    persisted = 0
-    try:
-        # Fetch from domain (vault-first, normalized)
-        view = _domain.walk_stream(int(user_id), prefer_vault=True)
-        records = [r.model_dump() for r in view.records]
-
-        if aggregate:
-            out: dict = {
-                "user_id": int(user_id),
-                "data": records,
-                "page": {"total": len(records), "limit": len(records), "offset": 0, "aggregated": True},
-            }
-        else:
-            start = int(offset or 0)
-            if start < 0:
-                start = 0
-            end = start + int(limit) if limit is not None else len(records)
-            slice_ = records[start:end]
-            out = {
-                "user_id": int(user_id),
-                "data": slice_,
-                "page": {"total": len(records), "limit": len(slice_), "offset": start},
-            }
-
-        # Optional: upsert the final data slice
-        if HDT_VAULT_ENABLE and _vault is not None:
-            recs = out.get("data") or []
-            if recs:
-                try:
-                    persisted = int(_vault.upsert_walk_records(int(user_id), recs))
-                except Exception:
-                    pass
-
-        # Apply policy once, on the final out
-        out = _apply_policy(purpose, TOOL_WALK, out, client_id=MCP_CLIENT_ID)
-        policy_meta = _policy_last_meta()
-        _log_event(
-            "tool",
-            TOOL_WALK,
-            {"user_id": user_id, "purpose": purpose,
-             "redactions": policy_meta.get("redactions", 0),
-             "persisted": persisted, "aggregate": aggregate, "source": view.source},
-            True,
-            int((_time.time() - t0) * 1000),
-        )
-        return out
-
-    except Exception as e:
-        _log_event(
-            "tool",
-            TOOL_WALK,
-            {"user_id": user_id, "purpose": purpose, "error": str(e)},
-            False,
-            int((_time.time() - t0) * 1000),
-        )
         return _typed_error("internal", str(e), user_id=user_id)
 
 
@@ -575,7 +504,7 @@ def tool_get_sugarvita_player_types(user_id: str, purpose: Literal["analytics","
     t0 = _time.time()
     try:
         raw = _cached_get("/get_sugarvita_player_types", {"user_id": user_id})
-        out = _apply_policy(purpose, "hdt.get_sugarvita_player_types@v1", raw, client_id=MCP_CLIENT_ID)
+        out = _apply_policy_safe(purpose, "hdt.get_sugarvita_player_types@v1", raw, client_id=MCP_CLIENT_ID)
         policy_meta = _policy_last_meta()
         _log_event("tool", "hdt.get_sugarvita_player_types@v1", {"user_id": user_id, "purpose": purpose, "redactions": policy_meta.get("redactions", 0)}, True, int((_time.time()-t0)*1000))
         return out
@@ -588,7 +517,7 @@ def tool_get_health_literacy_diabetes(user_id: str, purpose: Literal["analytics"
     t0 = _time.time()
     try:
         raw = _cached_get("/get_health_literacy_diabetes", {"user_id": user_id})
-        out = _apply_policy(purpose, "hdt.get_health_literacy_diabetes@v1", raw, client_id=MCP_CLIENT_ID)
+        out = _apply_policy_safe(purpose, "hdt.get_health_literacy_diabetes@v1", raw, client_id=MCP_CLIENT_ID)
         policy_meta = _policy_last_meta()
         _log_event("tool", "hdt.get_health_literacy_diabetes@v1", {"user_id": user_id, "purpose": purpose, "redactions": policy_meta.get("redactions", 0)}, True, int((_time.time()-t0)*1000))
         return out
@@ -653,7 +582,7 @@ def tool_behavior_strategy(user_id: str, purpose: str = LANE_COACHING) -> dict:
     try:
         plan = _behavior_strategy(int(user_id))
         # Apply coaching-lane policy (lets you redact if needed)
-        plan = _apply_policy(purpose, "behavior_strategy@v1", plan, client_id=MCP_CLIENT_ID)
+        plan = _apply_policy_safe(purpose, "behavior_strategy@v1", plan, client_id=MCP_CLIENT_ID)
         _log_event("tool", "behavior_strategy@v1",
                    {"user_id": user_id, "purpose": purpose, "avg_steps": plan.get("avg_steps", 0)},
                    True, int((_time.time()-t0)*1000))
@@ -664,16 +593,65 @@ def tool_behavior_strategy(user_id: str, purpose: str = LANE_COACHING) -> dict:
                    False, int((_time.time()-t0)*1000))
         return _typed_error("internal", str(e), user_id=user_id)
 
-@mcp.tool(name="hdt.get_walk_stream@v1")
-def tool_get_walk_stream(user_id: str) -> dict:
-    view = _domain.walk_stream(int(user_id), prefer_vault=True)
-    return {
-        "source": view.source,
-        "stats": view.stats.model_dump(),
-        "records": [r.model_dump() for r in view.records],
-    }
 
-# (Removed duplicate older implementation of tool_get_walk_data that proxied HTTP)
+@mcp.tool(name="hdt.walk.stream@v1")
+def hdt_walk_stream(user_id: int,
+                    prefer: str = "auto",
+                    start: str | None = None,
+                    end: str | None = None) -> dict:
+    """
+    Domain-shaped walk stream for agents.
+    prefer: "vault" | "live" | "auto"
+    """
+    # Validate prefer input early to avoid surprising defaults
+    if prefer not in ("auto", "vault", "live"):
+        return _typed_error(
+            "bad_request",
+            "prefer must be one of: auto, vault, live",
+            prefer=prefer,
+        )
+    # Map prefer string to service's boolean flag
+    prefer_vault = True if prefer in ("auto", "vault") else False
+    view = _domain.walk_stream(
+        int(user_id),
+        prefer_vault=prefer_vault,
+        from_iso=start,
+        to_iso=end,
+    )
+    payload = {
+        "user_id": int(user_id),
+        "records": [
+            {
+                "date": r.date,  # already ISO string
+                "steps": r.steps,
+                "distance_meters": r.distance_meters,
+                "duration": r.duration,
+                "kcalories": r.kcalories,
+            } for r in view.records
+        ],
+        "source": view.source,
+        "stats": view.stats.model_dump() if hasattr(view.stats, "model_dump") else {
+            "days": view.stats.days,
+            "total_steps": view.stats.total_steps,
+            "avg_steps": view.stats.avg_steps,
+        },
+    }
+    return _apply_policy_safe("analytics", "hdt.walk.stream@v1", payload, client_id=MCP_CLIENT_ID)
+
+
+@mcp.tool(name="hdt.walk.stats@v1")
+def hdt_walk_stats(user_id: int,
+                   start: str | None = None,
+                   end: str | None = None) -> dict:
+    # Prefer vault when available
+    view = _domain.walk_stream(int(user_id), prefer_vault=True, from_iso=start, to_iso=end)
+    stats = view.stats.model_dump() if hasattr(view.stats, "model_dump") else {
+        "days": view.stats.days,
+        "total_steps": view.stats.total_steps,
+        "avg_steps": view.stats.avg_steps,
+    }
+    return _apply_policy_safe("analytics", "hdt.walk.stats@v1", {"user_id": user_id, "stats": stats}, client_id=MCP_CLIENT_ID)
+
 
 
 # --- 3) “Model Hub” placeholders (M1/M2) ------------------------------------

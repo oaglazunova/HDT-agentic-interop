@@ -8,17 +8,16 @@ import uuid
 from typing import Optional, Dict, List, Tuple, Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-REPO_ROOT = Path(__file__).resolve().parents[1]
+
+# Add the project root to the Python path (so absolute imports work when run as a script)
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 try:
-    # When running as a script with project root on sys.path
+    # Try absolute first; fall back to relative when installed as a package
     from validation import sanitize_walk_records, ValidationError
 except ImportError:
     # When running as a package module: python -m HDT_CORE_INFRASTRUCTURE.HDT_API
     from .validation import sanitize_walk_records, ValidationError
-
-# Add the project root to the Python path (so absolute imports work when run as a script)
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 try:
     from hdt_api_utils import parse_pagination_args, paginate, set_next_link
@@ -149,7 +148,7 @@ def api_error(code: str,
               message: str,
               *,
               status: int = 400,
-              details: dict | None = None,
+              details: Optional[dict] = None,
               policy: str = "error"):
     """
     Return a consistent error envelope:
@@ -273,20 +272,6 @@ except Exception as e:
 users = _merge_users(public, secrets)
 app.logger.info("Loaded %d users (merged)", len(users))
 
-def get_users_by_permission(client_id, required_permission):
-    """
-    Identify users who have granted the requesting client access to the required permission.
-    """
-    accessible_users = []
-    for user_id, permissions in (user_permissions or {}).items():
-        allowed = permissions.get("allowed_clients", {})
-        if client_id in allowed and required_permission in allowed[client_id]:
-            try:
-                accessible_users.append(int(user_id))
-            except (ValueError, TypeError):
-                app.logger.warning(f"Invalid user_id format: {user_id}")
-    return accessible_users
-
 
 
 def get_connected_app_info(user_id, app_type):
@@ -371,7 +356,7 @@ def metadata_model_developer_apis():
                 "functionality": "Fetches step count and walk-related metrics from connected applications for authorized users.",
                 "output": {
                     "user_id": "integer",
-                    "data": [
+                    "records": [
                         {
                             "date": "string (YYYY-MM-DD)",
                             "steps": "integer",
@@ -555,13 +540,13 @@ def openapi():
                         "type": "object",
                         "properties": {
                             "user_id": {"type": "integer"},
-                            "data": {"type": "array", "items": {"$ref": "#/components/schemas/WalkRecord"}},
+                            "records": {"type": "array", "items": {"$ref": "#/components/schemas/WalkRecord"}},
                             "page": {"$ref": "#/components/schemas/Page"},
                             "error": {"anyOf": [{"$ref": "#/components/schemas/ErrorObject"}, {"type": "null"}]}
                         },
-                        "description": "Either `data`+`page` are present or an `error` object.",
+                        "description": "Either `records`+`page` are present or an `error` object.",
                         "anyOf": [
-                            {"required": ["user_id", "data", "page"]},
+                            {"required": ["user_id", "records", "page"]},
                             {"required": ["user_id", "error"]}
                         ]
                     },
@@ -599,8 +584,8 @@ def openapi():
 @authenticate_and_authorize(external_parties, user_permissions, "get_trivia_data")
 def get_trivia_data():
     try:
-        client_id = request.client["client_id"]
-        accessible_user_ids = get_users_by_permission(client_id, "get_trivia_data")
+        # Use permissions computed by the auth decorator
+        accessible_user_ids = request.accessible_user_ids
         response_data = []
 
         for user_id in accessible_user_ids:
@@ -644,8 +629,8 @@ def get_trivia_data():
 @authenticate_and_authorize(external_parties, user_permissions, "get_sugarvita_data")
 def get_sugarvita_data():
     try:
-        client_id = request.client["client_id"]
-        accessible_user_ids = get_users_by_permission(client_id, "get_sugarvita_data")
+        # Use permissions computed by the auth decorator
+        accessible_user_ids = request.accessible_user_ids
         response_data = []
 
         for user_id in accessible_user_ids:
@@ -687,7 +672,7 @@ def get_sugarvita_data():
 # Walk endpoint
 @app.route("/get_walk_data", methods=["GET"])
 @authenticate_and_authorize(external_parties, user_permissions, "get_walk_data")
-def get_walk():
+def get_walk_data():
     try:
         # decorator computes request.accessible_user_ids
         accessible_user_ids = getattr(request, "accessible_user_ids", [])
@@ -699,12 +684,17 @@ def get_walk():
             msg, code = err
             return api_error("bad_input", msg, status=code)
 
+        # Optional time window filters
+        # Accept either date (YYYY-MM-DD) or ISO date-time; validation is lenient here.
+        from_iso = request.args.get("from")
+        to_iso = request.args.get("to")
+
         # -------- Single-user (explicit ?user_id=...) ----------
         if user_id is not None:
             if user_id not in accessible_user_ids:
                 return api_error("forbidden", f"User {user_id} not permitted", status=403, policy="deny")
 
-            res = fetch_walk_batch(user_id, limit, offset)  # -> {"records": [...], "total": int|None}
+            res = fetch_walk_batch(user_id, limit, offset, from_iso=from_iso, to_iso=to_iso)  # -> {"records": [...], "total": int|None}
             try:
                 cleaned = sanitize_walk_records(res.get("records", []))  # strict validation
             except ValidationError as e:
@@ -712,7 +702,7 @@ def get_walk():
 
             page, has_next = paginate(res.get("total"), limit, offset)
 
-            payload = {"user_id": user_id, "data": cleaned, "page": page, "error": None}
+            payload = {"user_id": user_id, "records": cleaned, "page": page, "error": None}
             extra = {"X-Limit": str(page.get("limit", "")), "X-Offset": str(page.get("offset", ""))}
             if page.get("total") is not None:
                 extra["X-Total"] = str(page["total"])
@@ -721,7 +711,14 @@ def get_walk():
                 [payload],
                 policy="passthrough",
                 extra_headers=extra,
-                etag_variant={"policy": "passthrough", "user_id": user_id, "limit": limit, "offset": offset},
+                etag_variant={
+                    "policy": "passthrough",
+                    "user_id": user_id,
+                    "limit": limit,
+                    "offset": offset,
+                    "from": from_iso,
+                    "to": to_iso,
+                },
             )
             if has_next:
                 resp = set_next_link(resp, request.base_url, limit, offset + limit)
@@ -732,7 +729,7 @@ def get_walk():
         any_has_next = False
 
         for uid in accessible_user_ids:
-            res = fetch_walk_batch(uid, limit, offset)
+            res = fetch_walk_batch(uid, limit, offset, from_iso=from_iso, to_iso=to_iso)
             try:
                 cleaned = sanitize_walk_records(res.get("records", []))
             except ValidationError as e:
@@ -745,12 +742,18 @@ def get_walk():
 
             page, has_next = paginate(res.get("total"), limit, offset)
             any_has_next = any_has_next or has_next
-            envelopes.append({"user_id": uid, "data": cleaned, "page": page, "error": None})
+            envelopes.append({"user_id": uid, "records": cleaned, "page": page, "error": None})
 
         resp = json_with_headers(
             envelopes,
             policy="passthrough",
-            etag_variant={"policy": "passthrough", "limit": limit, "offset": offset},
+            etag_variant={
+                "policy": "passthrough",
+                "limit": limit,
+                "offset": offset,
+                "from": from_iso,
+                "to": to_iso,
+            },
         )
         if any_has_next:
             resp = set_next_link(resp, request.base_url, limit, offset + limit)
@@ -871,39 +874,6 @@ def get_health_literacy_diabetes():
         #return json_with_headers({"error": f"No data found for user {user_id}"}, status=404, policy="error")
         #return json_with_headers({"error": "Unauthorized access to this user's data"}, status=403, policy="deny")
 
-def serve_stream_single_user(*, user_id: int, fetch_batch, policy_label: str):
-    limit, offset, err = parse_pagination_args()
-    if err:
-        msg, code = err
-        return api_error("bad_input", msg, status=code)
-
-    res = fetch_batch(user_id, limit, offset)  # {"records": [...], "total": int|None}
-    try:
-        cleaned = sanitize_walk_records(res.get("records", []))  # strict by default
-    except ValidationError as e:
-        return api_error("bad_input", str(e), status=400)
-
-    page, has_next = paginate(
-        res.get("total"), limit, offset,
-        returned_count=len(cleaned)  # helps the has_next heuristic when total=None
-    )
-
-    payload = {"user_id": user_id, "data": cleaned, "page": page}
-    extra = {"X-Limit": str(page.get("limit","")), "X-Offset": str(page.get("offset",""))}
-    if page.get("total") is not None:
-        extra["X-Total"] = str(page["total"])  # keep as string for headers
-
-    resp = json_with_headers(
-        payload,
-        policy=policy_label,
-        extra_headers=extra,
-        etag_variant={"policy": policy_label}
-    )
-    if has_next:
-        base = request.base_url
-        resp = set_next_link(resp, base, limit, offset + limit)
-    return resp
-
 
 # Root endpoint to serve the index.html file
 @app.route('/')
@@ -963,6 +933,7 @@ def add_cors_headers(resp):
         "Access-Control-Expose-Headers",
         "ETag, X-Client-Id, X-Users-Count, X-Policy, X-Request-Id, Link, X-Limit, X-Offset, X-Total"
     )
+    # resp.headers.setdefault("Access-Control-Allow-Credentials", "true")
     return resp
 
 #If run from a browser

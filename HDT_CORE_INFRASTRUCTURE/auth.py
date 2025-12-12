@@ -5,6 +5,11 @@ import logging
 def authenticate_and_authorize(external_parties, user_permissions, required_permission):
     """
     Decorator factory to authenticate and authorize based on required_permission.
+
+    Canonical client header is Authorization: Bearer <token>. The server also accepts
+    X-API-KEY (and x-api-key) for compatibility during migration. Prefer Authorization
+    in client code; X-API-KEY may be removed in a future version.
+
     - Accepts Authorization: Bearer <token> OR X-API-KEY / x-api-key
     - Matches provided token against entry.api_key OR entry.client_id
     - Supports external_parties as {'external_parties': [...]} or just [...]
@@ -21,12 +26,12 @@ def authenticate_and_authorize(external_parties, user_permissions, required_perm
             # ---- 1) Extract API key from headers (and allow ?api_key=... in dev) ----
             api_key = None
 
-            # Authorization: Bearer <token>
+            # Authorization: Bearer <token> (canonical)
             auth_header = request.headers.get("Authorization")
             if auth_header and auth_header.lower().startswith("bearer "):
                 api_key = auth_header.split(" ", 1)[1].strip()
 
-            # X-API-KEY (case-insensitive in Flask, but call both for clarity)
+            # X-API-KEY (compatibility; keep accepting during migration)
             if not api_key:
                 api_key = request.headers.get("X-API-KEY") or request.headers.get("x-api-key")
 

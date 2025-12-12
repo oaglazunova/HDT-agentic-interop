@@ -3,7 +3,8 @@ import os, sys, json, requests
 API_URL = (os.environ.get("HDT_API_BASE") or "http://localhost:5000").rstrip("/")
 API_KEY = os.environ.get("MODEL_DEVELOPER_1_API_KEY") or "MODEL_DEVELOPER_1"
 USER_ID = int(os.environ.get("SMOKE_USER_ID") or "3")
-HDRS = {"Authorization": f"Bearer {API_KEY}", "X-API-KEY": API_KEY}
+# Canonical header: Authorization: Bearer
+HDRS = {"Authorization": f"Bearer {API_KEY}"}
 
 def die(msg, payload=None):
     if payload is not None:

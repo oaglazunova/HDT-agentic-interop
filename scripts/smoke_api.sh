@@ -7,7 +7,8 @@ API_URL="${API_URL%/}"
 
 API_KEY="${MODEL_DEVELOPER_1_API_KEY:-MODEL_DEVELOPER_1}"
 
-hdr=(-H "Authorization: Bearer ${API_KEY}" -H "X-API-KEY: ${API_KEY}" -sS)
+# Canonical header only: Authorization: Bearer
+hdr=(-H "Authorization: Bearer ${API_KEY}" -sS)
 
 echo "→ GET ${API_URL}/healthz"
 curl "${hdr[@]}" "${API_URL}/healthz" | grep -q '"status"[[:space:]]*:[[:space:]]*"ok"'

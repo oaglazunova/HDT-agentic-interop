@@ -1,6 +1,6 @@
 # HDT_MCP/vault.py
 from __future__ import annotations
-import sqlite3, json, time, os
+import sqlite3, json, time, os, warnings
 from pathlib import Path
 from typing import Iterable, Optional
 
@@ -8,11 +8,26 @@ _conn: sqlite3.Connection | None = None
 _DB_PATH: str | None = None
 
 def _default_db_path() -> str:
-    path = (
-        os.getenv("HDT_VAULT_PATH")
-        or os.getenv("HDT_VAULT_DB")
-        or str(Path(__file__).resolve().parents[1] / "data" / "lifepod.sqlite")
-    )
+    """Resolve the vault DB path.
+
+    Precedence:
+      1) explicit parameter to init()
+      2) env HDT_VAULT_PATH (preferred)
+      3) env HDT_VAULT_DB (DEPRECATED; still honored with warning)
+      4) repo default path data/lifepod.sqlite
+    """
+    path_env = os.getenv("HDT_VAULT_PATH")
+    if not path_env:
+        legacy = os.getenv("HDT_VAULT_DB")
+        if legacy:
+            warnings.warn(
+                "HDT_VAULT_DB is deprecated and will be removed in a future release. "
+                "Use HDT_VAULT_PATH instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            path_env = legacy
+    path = path_env or str(Path(__file__).resolve().parents[1] / "data" / "lifepod.sqlite")
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -35,8 +50,9 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
 
 def init(db_path: str | None = None):
     """
-    Initialize the vault. If db_path is omitted, read env (HDT_VAULT_PATH/HDT_VAULT_DB)
-    or fallback to repo/data/lifepod.sqlite. Safe to call multiple times.
+    Initialize the vault. If db_path is omitted, reads env (HDT_VAULT_PATH),
+    with legacy support for HDT_VAULT_DB (deprecated), otherwise falls back to
+    repo/data/lifepod.sqlite. Safe to call multiple times.
     Enforces WAL mode, NORMAL sync, FK, and a reasonable busy timeout.
     """
     global _conn, _DB_PATH
@@ -70,8 +86,29 @@ def close():
             _conn = None
 
 def upsert_walk_records(user_id: int, records: Iterable[dict], **kw) -> int:
-    """Alias maintained for compatibility; delegates to write_walk."""
-    return write_walk(user_id, records, **kw)
+    """Idempotently upsert walk records for a user. Returns rows affected.
+
+    This is the canonical write path. Any legacy helpers should delegate here.
+    Accepts extra keyword arguments for forward/backward compatibility; they are
+    currently ignored by the storage layer.
+    """
+    if _conn is None:
+        return 0
+    now = int(time.time())
+    n = 0
+    with _conn:  # ensures a single transaction & commit
+        cur = _conn.cursor()
+        for r in records or []:
+            dt = r.get("date")
+            if not dt:
+                continue
+            steps = int(r.get("steps") or 0)
+            cur.execute(
+                "INSERT OR REPLACE INTO walk_records(user_id,date,steps,raw_json,inserted_at) VALUES (?,?,?,?,?)",
+                (int(user_id), str(dt), steps, json.dumps(r, ensure_ascii=False), now),
+            )
+            n += cur.rowcount or 0
+    return n
 
 
 def read_walk_records(user_id: int) -> list[dict]:
@@ -197,25 +234,9 @@ def write_walk(
     source: str = "",
     fetched_at: int | None = None,
 ) -> int:
-    """Insert or update walk records for user in vault. Returns rows affected.
+    """Backward-compatible alias to the canonical upsert path.
 
-    Parameters `source` and `fetched_at` are accepted for forward/backward
-    compatibility but are not stored separately in the current schema.
+    Parameters are accepted for compatibility but ignored by storage.
     """
-    if _conn is None:
-        return 0
-    now = int(time.time())
-    n = 0
-    with _conn:  # ensures a single transaction & commit
-        cur = _conn.cursor()
-        for r in records or []:
-            dt = r.get("date")
-            if not dt:
-                continue
-            steps = int(r.get("steps") or 0)
-            cur.execute(
-                "INSERT OR REPLACE INTO walk_records(user_id,date,steps,raw_json,inserted_at) VALUES (?,?,?,?,?)",
-                (int(user_id), str(dt), steps, json.dumps(r, ensure_ascii=False), now),
-            )
-            n += cur.rowcount or 0
-    return n
+    # Delegate to the canonical function; pass-through to keep signature stable
+    return upsert_walk_records(user_id, records, source=source, fetched_at=fetched_at)

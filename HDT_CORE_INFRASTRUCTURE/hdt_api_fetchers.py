@@ -26,7 +26,25 @@ def _sort_records_by_date(rows: List[Dict]) -> List[Dict]:
     with_date.sort(key=_key, reverse=_DESC)
     return with_date + without_date
 
-def fetch_walk_batch(user_id: int, limit: int, offset: int) -> FetcherResult:
+def _normalize_iso_key(s: str) -> str:
+    """
+    Normalize a date/date-time string to a comparable ISO key:
+    - remove trailing 'Z'
+    - expand date-only (YYYY-MM-DD) to start-of-day time to allow lexicographic compare
+    """
+    s = s.replace("Z", "")
+    if "T" not in s:
+        s = f"{s}T00:00:00"
+    return s
+
+
+def fetch_walk_batch(
+    user_id: int,
+    limit: int,
+    offset: int,
+    from_iso: Optional[str] = None,
+    to_iso: Optional[str] = None,
+) -> FetcherResult:
     # Local import to avoid circulars
     from HDT_CORE_INFRASTRUCTURE.HDT_API import get_connected_app_info
     app_name, player_id, auth_bearer = get_connected_app_info(user_id, "walk_data")
@@ -43,12 +61,43 @@ def fetch_walk_batch(user_id: int, limit: int, offset: int) -> FetcherResult:
         # If GameBus supports server-side order+paging, prefer that (faster).
         # Otherwise: fetch all -> sort -> slice.
         all_rows = gb_fetch(player_id, auth_bearer=auth_bearer) or []
+        # Optional window filtering
+        if from_iso or to_iso:
+            fkey = _normalize_iso_key(from_iso) if from_iso else None
+            tkey = _normalize_iso_key(to_iso) if to_iso else None
+            filtered: List[Dict] = []
+            for r in all_rows:
+                d = r.get("date")
+                if not isinstance(d, str):
+                    continue
+                k = _normalize_iso_key(d)
+                if fkey and k < fkey:
+                    continue
+                if tkey and k > tkey:
+                    continue
+                filtered.append(r)
+            all_rows = filtered
         all_rows = _sort_records_by_date(all_rows)
         total = len(all_rows)
         records = all_rows[offset: offset + limit]
 
     elif app_norm in ("google fit", "googlefit", "google_fit"):
         all_rows = gf_fetch(player_id, auth_bearer=auth_bearer) or []
+        if from_iso or to_iso:
+            fkey = _normalize_iso_key(from_iso) if from_iso else None
+            tkey = _normalize_iso_key(to_iso) if to_iso else None
+            filtered = []
+            for r in all_rows:
+                d = r.get("date")
+                if not isinstance(d, str):
+                    continue
+                k = _normalize_iso_key(d)
+                if fkey and k < fkey:
+                    continue
+                if tkey and k > tkey:
+                    continue
+                filtered.append(r)
+            all_rows = filtered
         all_rows = _sort_records_by_date(all_rows)
         total = len(all_rows)
         records = all_rows[offset: offset + limit]
@@ -61,6 +110,21 @@ def fetch_walk_batch(user_id: int, limit: int, offset: int) -> FetcherResult:
                 {"date": (today - timedelta(days=1)).isoformat(), "steps": 6120},
                 {"date": today.isoformat(),                        "steps": 3580},
             ]
+            if from_iso or to_iso:
+                fkey = _normalize_iso_key(from_iso) if from_iso else None
+                tkey = _normalize_iso_key(to_iso) if to_iso else None
+                filtered = []
+                for r in all_rows:
+                    d = r.get("date")
+                    if not isinstance(d, str):
+                        continue
+                    k = _normalize_iso_key(d)
+                    if fkey and k < fkey:
+                        continue
+                    if tkey and k > tkey:
+                        continue
+                    filtered.append(r)
+                all_rows = filtered
             all_rows = _sort_records_by_date(all_rows)
             total = len(all_rows)
             records = all_rows[offset: offset + limit]

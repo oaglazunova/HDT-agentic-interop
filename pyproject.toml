@@ -1,0 +1,5 @@
+[project]
+name = "hdt-agentic-interop"
+version = "0.0.0"
+description = "Façade and developer API for an agentic Human Digital Twin (HDT) stack"
+requires-python = ">=3.14,<3.15"

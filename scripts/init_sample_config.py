@@ -57,7 +57,7 @@ files = {
             {
                 "user_id": 3,
                 "connected_apps_walk_data": [
-                    { "connected_application": "Placeholder walk app", "player_id": "demo" }
+                    { "connected_application": "Placeholder Walk", "player_id": "demo" }
                 ]
             }
         ]

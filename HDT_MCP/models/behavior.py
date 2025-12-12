@@ -35,8 +35,8 @@ def _headers() -> dict:
     if not HDT_API_KEY:
         return {}
     return {
+        # Canonical header: prefer Authorization: Bearer
         "Authorization": f"Bearer {HDT_API_KEY}",
-        "X-API-KEY": HDT_API_KEY,
     }
 
 def _fetch_walk_via_api(user_id: int) -> list[dict]:

@@ -12,7 +12,7 @@ Façade and developer API for an **agentic Human Digital Twin (HDT)** stack:
 
 ## Prerequisites
 
-- **Python 3.11+**
+- **Python 3.14 (3.14.x)**
 - **Git**
 - (Optional) `curl` (Bash) or `Invoke-RestMethod` (PowerShell)
 
@@ -35,6 +35,8 @@ cd HDT-agentic-interop
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 ```
+
+> Note: The repository includes a `.python-version` file pinned to `3.14` and a `pyproject.toml` with `requires-python = ">=3.14,<3.15"` to ensure the correct interpreter is used.
 
 ## 2) Install dependencies
 ```
@@ -64,7 +66,7 @@ HDT_ENABLE_POLICY_TOOLS=1
 
 # Vault (optional cache)
 HDT_VAULT_ENABLE=1
-HDT_VAULT_DB=./data/lifepod.sqlite       # or set HDT_VAULT_PATH instead
+HDT_VAULT_PATH=./data/lifepod.sqlite     # preferred; HDT_VAULT_DB is deprecated
 
 # Policy file location
 HDT_POLICY_PATH=./config/policy.json
@@ -95,11 +97,15 @@ Starting the HDT API server on http://localhost:5000
 ```
 ## 6) Smoke the API
 
+Note on auth headers:
+- Canonical client header is `Authorization: Bearer <API_KEY>`.
+- `X-API-KEY: <API_KEY>` is still accepted by the server for compatibility/migration and may be removed later.
+
 ### PowerShell
 ```
 $apiKey = $env:MODEL_DEVELOPER_1_API_KEY
 if (-not $apiKey) { $apiKey = "MODEL_DEVELOPER_1" }  # local fallback
-$headers = @{ Authorization = "Bearer $apiKey"; "X-API-KEY" = $apiKey }
+$headers = @{ Authorization = "Bearer $apiKey"; "X-API-KEY" = $apiKey }  # both work; Authorization is preferred
 
 Invoke-RestMethod -Uri "http://localhost:5000/healthz" -Headers $headers -Method GET
 Invoke-RestMethod -Uri "http://localhost:5000/get_walk_data?user_id=2" -Headers $headers -Method GET
@@ -108,6 +114,7 @@ Invoke-RestMethod -Uri "http://localhost:5000/get_walk_data?user_id=2" -Headers 
 ### Bash
 ```
 APIKEY="${MODEL_DEVELOPER_1_API_KEY:-MODEL_DEVELOPER_1}"
+# Prefer Authorization; X-API-KEY also accepted
 curl -sf "http://localhost:5000/healthz" -H "Authorization: Bearer $APIKEY"
 curl -sf "http://localhost:5000/get_walk_data?user_id=2" \
   -H "Authorization: Bearer $APIKEY" -H "X-API-KEY: $APIKEY"
@@ -158,7 +165,9 @@ Run from repo root and use module invocation: `python -m HDT_MCP.server`.
 - Want data without real integrations?
 Set `HDT_ALLOW_PLACEHOLDER_MOCKS=1` and use `user_id=2` (Placeholder Walk).
 - Vault file not created:
-Ensure `HDT_VAULT_ENABLE=1` and `HDT_VAULT_DB` (or `HDT_VAULT_PATH`) points to a writable location. Parent directories are created automatically.
+Ensure `HDT_VAULT_ENABLE=1` and `HDT_VAULT_PATH` points to a writable location. Parent directories are created automatically.
+
+Note: `HDT_VAULT_DB` is deprecated and will be removed in a future release. Use `HDT_VAULT_PATH` instead.
 - CORS / JS apps:
 The API exposes `Access-Control-Expose-Headers: X-Client-Id, X-Users-Count, X-Policy`. If calling from a browser, ensure your `Origin` is acceptable (dev defaults are permissive).
 
@@ -182,7 +191,7 @@ The API exposes `Access-Control-Expose-Headers: X-Client-Id, X-Users-Count, X-Po
     {
       "user_id": 3,
       "connected_apps_walk_data": [
-        { "connected_application": "Placeholder walk app", "player_id": "demo" }
+        { "connected_application": "Placeholder Walk", "player_id": "demo" }
       ]
     }
   ]
@@ -550,6 +559,19 @@ When a call is blocked by policy, you receive:
 ```
 
 ### Tools
+- `hdt.walk.stream@v1(user_id: int, prefer: "auto"|"vault"|"live" = "auto", start?: string, end?: string)`
+  - Canonical walk entry point for agents. Returns a domain-shaped stream with `records[]` and `stats`.
+  - `prefer` controls source selection: `auto` (default), `vault`, or `live`.
+  - Example:
+    ```json
+    { "user_id": 1, "prefer": "auto", "start": "2025-01-01", "end": "2025-01-31" }
+    ```
+- `hdt.walk.stats@v1(user_id: int, start?: string, end?: string)`
+  - Lightweight rollups for a user’s walk data (e.g., `days`, `total_steps`, `avg_steps`).
+  - Example:
+    ```json
+    { "user_id": 1, "start": "2025-01-01", "end": "2025-01-31" }
+    ```
 - `hdt.get_trivia_data@v1(user_id: str)`
   - Wraps `/get_trivia_data`. Example args:
     ```json
@@ -559,11 +581,6 @@ When a call is blocked by policy, you receive:
   - Wraps `/get_sugarvita_data`. Example:
     ```json
     { "user_id": "1" }
-    ```
-- `hdt.get_walk_data@v1(user_id: str, purpose: "analytics"|"modeling"|"coaching" = "analytics")`
-  - Wraps `/get_walk_data`. Example:
-    ```json
-    { "user_id": "1", "purpose": "analytics" }
     ```
 - `hdt.get_sugarvita_player_types@v1(user_id: str, purpose = "analytics")`
   - Wraps `/get_sugarvita_player_types`. Example:
@@ -580,6 +597,9 @@ When a call is blocked by policy, you receive:
 - `intervention_time@v1(local_tz = "Europe/Amsterdam", preferred_hours = [18,21], min_gap_hours = 6, last_prompt_iso = null)`
   - Returns a basic suggestion for next intervention window.
 
+#### Legacy
+- `TOOL_WALK` (`hdt.get_walk_data@v1`) — legacy/compatibility. Prefer `hdt.walk.stream@v1` going forward.
+
 ### Resources
 - `vault://{user_id}/integrated`
   - Minimal integrated view combining walk records and rollups for a user.
@@ -589,6 +609,28 @@ When a call is blocked by policy, you receive:
   - Returns a compact list of available tools.
 - `telemetry://recent/{n}`
   - Returns the last `n` telemetry events recorded locally by the MCP façade.
+
+  Quick demo (Inspector):
+  1) Make any tool call (e.g., `hdt.get_walk_data@v1`) so there is something to log.
+  2) Open the Resources panel and request: `telemetry://recent/5`
+  3) You’ll get a compact JSON list of recent events, for example:
+  ```json
+  {
+    "records": [
+      {
+        "ts": "2025-01-01T12:34:56.789Z",
+        "kind": "tool",
+        "name": "hdt.get_walk_data@v1",
+        "client_id": "MODEL_DEVELOPER_1",
+        "request_id": "f9b0c8b2-...",
+        "corr_id": "f9b0c8b2-...",
+        "args": { "user_id": "2", "purpose": "analytics", "redactions": 1 },
+        "ok": true,
+        "ms": 123
+      }
+    ]
+  }
+  ```
 
 ---
 

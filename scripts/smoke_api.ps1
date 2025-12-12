@@ -13,9 +13,9 @@ $ApiUrl = $ApiUrl.TrimEnd('/')
 $apiKey = $env:MODEL_DEVELOPER_1_API_KEY
 if ([string]::IsNullOrWhiteSpace($apiKey)) { $apiKey = 'MODEL_DEVELOPER_1' }
 
+# Canonical header: use Authorization: Bearer
 $headers = @{
   Authorization = "Bearer $apiKey"
-  "X-API-KEY"   = $apiKey
 }
 
 Write-Host "→ GET $ApiUrl/healthz"
