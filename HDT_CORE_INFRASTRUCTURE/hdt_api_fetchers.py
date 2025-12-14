@@ -37,7 +37,10 @@ def _normalize_iso_key(s: str) -> str:
         s = f"{s}T00:00:00"
     return s
 
-
+# TODO: redesign function signature: what are offsets? How can one identify them without any previous knowledge of the
+# TODO: user data? No actual/real optimization is present for getting data in batches since the request to gamebus still fetches
+# TODO: the whole user data
+# TODO: DRY = DON'T REPEAT YOURSELF
 def fetch_walk_batch(
     user_id: int,
     limit: int,

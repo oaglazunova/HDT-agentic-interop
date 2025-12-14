@@ -7,7 +7,7 @@
 - **Policy lanes** (analytics/modeling/coaching) with field redaction & deny support.
 - **Vault** integration (read-mostly, write-through) + maintenance tool.
 - **Telemetry** JSONL with request correlation and redaction counts.
-- **API hardening**: stable ETag/304, pagination headers, OpenAPI fallback, merged `users.json` + `users.secrets.json`.
+- **API hardening**: stable ETag/304, pagination headers, merged `users.json` + `users.secrets.json`.
 - **Quickstart** docs, sample `config/*.json`, `.env.example`.
 - **CI/pre-commit** hooks: pytest smoke, basic hygiene.
 

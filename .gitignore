@@ -1,46 +1,97 @@
-# IDE
+# =========================
+# IDE / Editor
+# =========================
 .idea/
 .vscode/
 
-# Python bytecode/cache
+# =========================
+# OS / Misc
+# =========================
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# =========================
+# Python bytecode / caches
+# =========================
 __pycache__/
 *.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pytype/
+.pyre/
+.cache/
 
+# =========================
 # Virtual environments
+# =========================
 .venv/
 venv/
 myenv/
-.venv39
+.venv39/
+.envrc
 
-# Test/coverage caches
-.pytest_cache/
+# =========================
+# Build / packaging artifacts
+# =========================
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# =========================
+# Test / coverage
+# =========================
 htmlcov/
 .coverage
 .coverage.*
+coverage.xml
+pytest.xml
 
-# Type checker caches
-.mypy_cache/
-
+# =========================
 # Logs
+# =========================
 *.log
+config/*.log
 
-# Environment/secrets
+# =========================
+# Environment / secrets
+# =========================
 .env
+.env.*
+!.env.example
 /config/users.secrets.json
 
-# Local data/results
-.csv
+# =========================
+# Local data / results (repo-specific)
+# =========================
+*.csv
 digital_twin_results.csv
 trivia.json
 engagement.json
 playthrough.json
-HDT_MCP/telemetry/
 
+# telemetry output
+hdt_mcp/telemetry/
+hdt_mcp/telemetry/*.jsonl
 
+# =========================
 # DuckDB runtime files
+# =========================
 data/*.duckdb-wal
 data/*.duckdb-shm
 
-# Telemetry/logs
-HDT_MCP/telemetry/*.jsonl
-config/*.log
+# =========================
+# Python cache files that sometimes slip in
+# =========================
+*.pyc
+
+# =========================
+# Temporary files
+# =========================
+*.tmp
+*.swp
+*.bak

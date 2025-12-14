@@ -442,120 +442,6 @@ def metadata_app_developer_apis():
 
     return json_with_headers(metadata, policy="info")
 
-@app.route("/openapi.json", methods=["GET"])
-def openapi():
-    """
-    Serve the OpenAPI specification. Prefer the repository file at `openapi/openapi.json`
-    to ensure it stays in sync with docs, and fallback to a minimal in-code spec if the
-    file isn't available.
-    """
-    try:
-        repo_root = Path(__file__).resolve().parents[1]
-        spec_path = repo_root / "openapi" / "openapi.json"
-        with spec_path.open("r", encoding="utf-8") as f:
-            spec = json.load(f)
-        return json_with_headers(spec, policy="info")
-    except Exception:
-        # Minimal fallback spec that still contains the headers/components expected by tests
-        spec = {
-            "openapi": "3.0.3",
-            "info": {"title": "HDT API", "version": "0.1.0"},
-            "paths": {
-                "/get_walk_data": {
-                    "get": {
-                        "summary": "Walk data (always array of user envelopes)",
-                        "description": "Always returns an array of per-user envelopes. If `user_id` is provided, the response is a 1-element array. Without `user_id`, returns envelopes for all users the client is authorized to access.",
-                        "parameters": [
-                            {"name": "user_id", "in": "query", "schema": {"type": "integer"}},
-                            {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 1000}},
-                            {"name": "offset", "in": "query", "schema": {"type": "integer", "minimum": 0}},
-                        ],
-                        "responses": {
-                            "200": {
-                                "description": "OK",
-                                "headers": {
-                                    "ETag": {"schema": {"type": "string"}},
-                                    "X-Request-Id": {"schema": {"type": "string"}},
-                                    "Link": {"schema": {"type": "string"}},
-                                    "X-Limit": {"schema": {"type": "integer"}},
-                                    "X-Offset": {"schema": {"type": "integer"}},
-                                    "X-Total": {"schema": {"type": "integer"}},
-                                },
-                                "content": {
-                                    "application/json": {
-                                        "schema": {
-                                            "type": "array",
-                                            "items": {"$ref": "#/components/schemas/UserStreamEnvelope"}
-                                        }
-                                    }
-                                },
-                            },
-                            "304": {"description": "Not Modified (ETag match)."},
-                        },
-                    }
-                }
-            },
-            "components": {
-                "headers": {
-                    "ETag": {"schema": {"type": "string"}},
-                    "X-Request-Id": {"schema": {"type": "string"}},
-                    "X-Client-Id": {"schema": {"type": "string"}},
-                    "X-Users-Count": {"schema": {"type": "integer"}},
-                    "X-Policy": {"schema": {"type": "string"}},
-                    "Link": {"schema": {"type": "string"}},
-                    "X-Limit": {"schema": {"type": "integer"}},
-                    "X-Offset": {"schema": {"type": "integer"}},
-                    "X-Total": {"schema": {"type": "integer"}},
-                },
-                "schemas": {
-                    "ErrorObject": {
-                        "type": "object",
-                        "properties": {
-                            "code": {"type": "string"},
-                            "message": {"type": "string"},
-                            "details": {"type": "object", "additionalProperties": True}
-                        },
-                        "required": ["code", "message"]
-                    },
-                    "WalkRecord": {
-                        "type": "object",
-                        "properties": {
-                            "date": {"type": "string", "format": "date"},
-                            "steps": {"type": "integer"},
-                            "distance_meters": {"type": ["number", "null"]},
-                            "duration": {"type": ["string", "null"]},
-                            "kcalories": {"type": ["number", "null"]},
-                        },
-                    },
-                    "Page": {
-                        "type": "object",
-                        "properties": {
-                            "total": {"type": "integer"},
-                            "limit": {"type": "integer"},
-                            "offset": {"type": "integer"},
-                        },
-                        "required": ["total", "limit", "offset"],
-                    },
-                    "UserStreamEnvelope": {
-                        "type": "object",
-                        "properties": {
-                            "user_id": {"type": "integer"},
-                            "records": {"type": "array", "items": {"$ref": "#/components/schemas/WalkRecord"}},
-                            "page": {"$ref": "#/components/schemas/Page"},
-                            "error": {"anyOf": [{"$ref": "#/components/schemas/ErrorObject"}, {"type": "null"}]}
-                        },
-                        "description": "Either `records`+`page` are present or an `error` object.",
-                        "anyOf": [
-                            {"required": ["user_id", "records", "page"]},
-                            {"required": ["user_id", "error"]}
-                        ]
-                    },
-                },
-            },
-        }
-        return json_with_headers(spec, policy="info")
-
-
 # Below are the API endpoints that virtual twin model developers can call to retrieve user data for specific domains (e.g., trivia, SugarVita, walking).
 #
 # The functionality of these endpoints includes:
@@ -882,16 +768,6 @@ def index():
     Serve the index.html file from the static directory.
     """
     return send_from_directory(static_dir, 'index.html')
-
-@app.route("/openapi.yaml")
-def openapi_yaml():
-    # Serve the OpenAPI file from the repo root
-    return send_from_directory(str(REPO_ROOT), "openapi.yaml", mimetype="text/yaml")
-
-@app.route("/docs")
-def api_docs():
-    # Serve Redoc HTML that points at /openapi.yaml
-    return send_from_directory(static_dir, "docs/index.html")
 
 @app.get("/healthz")
 def healthz():
