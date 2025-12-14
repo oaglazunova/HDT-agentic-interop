@@ -14,7 +14,7 @@ import os, json, sys
 from pprint import pprint
 
 # Import MCP tools from the server module
-from HDT_MCP.server import (
+from hdt_mcp.server import (
     consent_status,          # consent.status@v1
     tool_get_walk_data,      # hdt.get_walk_data@v1
     intervention_time,       # intervention_time@v1

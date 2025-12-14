@@ -49,8 +49,8 @@ def api_demo(user_id: int = 1, limit: int = 5) -> None:
     try:
         r1 = requests.get(url, headers=headers, timeout=15)
     except requests.exceptions.ConnectionError:
-        note("Could not reach the API. Start it first: `python -m HDT_CORE_INFRASTRUCTURE.HDT_API` "
-             "or `python HDT_CORE_INFRASTRUCTURE/hdt_api.py`.")
+        note("Could not reach the API. Start it first: `python -m hdt_api.app` "
+             "or `python hdt_api/app.py`.")
         raise SystemExit(2)
 
     print(f"Status: {r1.status_code}")
@@ -96,9 +96,7 @@ def _import_mcp_server_module() -> Any:
     Tries a few common names used in this repo; adjust if you renamed the file.
     """
     candidates = [
-        "HDT_MCP.server",          # recommended
-        "HDT_MCP.mcp_server",      # older
-        "mcp_server",              # fallback
+        "hdt_mcp.server"
     ]
     last_err: Optional[Exception] = None
     for mod in candidates:
@@ -155,7 +153,7 @@ def telemetry_tail(n: int = 3) -> None:
             m = _import_mcp_server_module()
             p = Path(m.__file__).parent / "telemetry" / "mcp-telemetry.jsonl"
         except Exception:
-            p = repo_root() / "HDT_MCP" / "telemetry" / "mcp-telemetry.jsonl"  # best-effort fallback
+            p = repo_root() / "hdt_mcp" / "telemetry" / "mcp-telemetry.jsonl"  # best-effort fallback
 
     if not p.exists():
         note(f"No telemetry file yet at {p}. Telemetry may be disabled or no tools were called.")

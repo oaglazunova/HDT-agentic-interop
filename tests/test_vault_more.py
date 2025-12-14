@@ -6,7 +6,7 @@ from datetime import date, timedelta
 
 import pytest
 
-from HDT_MCP import vault
+from hdt_mcp import vault
 
 
 def _init_tmp_db(tmp_path, monkeypatch):

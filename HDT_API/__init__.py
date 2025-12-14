@@ -1,8 +1,11 @@
-"""
-Compatibility package to expose `HDT_API.hdt_api:app` expected by tests.
+"""HDT Flask API package.
 
-This forwards imports to the real implementation in
-`HDT_CORE_INFRASTRUCTURE.HDT_API`.
+Run locally from repo root:
+
+    python -m hdt_api.app
+
 """
 
-# Intentionally empty; see `hdt_api.py` for the re-export.
+from .app import create_app
+
+__all__ = ["create_app"]

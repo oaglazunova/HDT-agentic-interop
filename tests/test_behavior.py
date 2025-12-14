@@ -1,5 +1,5 @@
-from HDT_MCP.models.behavior import behavior_strategy
-from HDT_MCP import vault
+from hdt_mcp.models.behavior import behavior_strategy
+from hdt_mcp import vault
 
 def test_behavior_from_vault(tmp_path, monkeypatch):
     # Isolate a temp vault file

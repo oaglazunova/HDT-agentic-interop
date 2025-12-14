@@ -1,5 +1,5 @@
-from HDT_MCP.domain.services import HDTService
-from HDT_MCP.domain.models import WalkRecord
+from hdt_mcp.domain.services import HDTService
+from hdt_mcp.domain.models import WalkRecord
 
 
 class StubWalkSource:

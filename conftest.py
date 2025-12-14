@@ -19,12 +19,9 @@ def app():
     Lazily import to prevent hard failures when API module isn't available.
     """
     try:
-        from HDT_CORE_INFRASTRUCTURE.HDT_API import app as _flask_app  # type: ignore
-    except Exception:
-        try:
-            from HDT_API.hdt_api import app as _flask_app  # type: ignore
-        except Exception as e:  # pragma: no cover - not needed in unit-only runs
-            pytest.skip("Flask app not available: %s" % (e,))
+        from hdt_api.app import app as _flask_app  # type: ignore
+    except Exception as e:  # pragma: no cover - not needed in unit-only runs
+        pytest.skip("Flask app not available: %s" % (e,))
     _flask_app.config.setdefault("TESTING", True)
     return _flask_app
 

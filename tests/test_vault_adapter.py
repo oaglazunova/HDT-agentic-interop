@@ -1,8 +1,8 @@
 from __future__ import annotations
 from typing import Any, List
 
-from HDT_MCP.adapters.vault_repo import VaultAdapter, _chunks
-from HDT_MCP.domain.models import WalkRecord
+from hdt_mcp.adapters.vault_repo import VaultAdapter, _chunks
+from hdt_mcp.domain.models import WalkRecord
 
 
 class _VaultWithRecords:

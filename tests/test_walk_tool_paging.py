@@ -1,4 +1,4 @@
-from HDT_MCP.server import hdt_walk_stream
+from hdt_mcp.server import hdt_walk_stream
 
 def test_walk_tool_aggregate_smoke():
     # Use the existing MCP tool that exposes the walk stream

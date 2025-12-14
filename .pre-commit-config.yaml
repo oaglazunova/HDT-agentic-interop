@@ -3,7 +3,7 @@ repos:
     hooks:
       - id: pytest-quick
         name: pytest (quick)
-        entry: python -m pytest --maxfail=1 --disable-warnings -q --cov-config=.coveragerc --cov=HDT_MCP --cov=HDT_CORE_INFRASTRUCTURE --cov-report=term --cov-fail-under=85
+        entry: python -m pytest --maxfail=1 --disable-warnings -q --cov-config=.coveragerc --cov=hdt_mcp --cov=hdt_api --cov-report=term --cov-fail-under=85
         language: python
         pass_filenames: false
         additional_dependencies:
@@ -28,6 +28,18 @@ repos:
         entry: python scripts/smoke_api.py
         pass_filenames: false
         stages: [ pre-commit ]
+
+      - id: ruff
+        name: ruff
+        entry: python -m ruff check .
+        language: system
+        pass_filenames: false
+
+      - id: mypy
+        name: mypy
+        entry: python -m mypy hdt_mcp hdt_api
+        language: system
+        pass_filenames: false
 
 default_language_version:
   # Use whatever Python is on PATH (your venv), instead of pinning 3.11 which may not be installed.

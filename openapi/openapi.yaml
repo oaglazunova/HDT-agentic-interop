@@ -1,0 +1,298 @@
+openapi: 3.1.0
+info:
+  title: HDT API (Interoperable HDT façade)
+  version: 0.1.0
+  description: >
+    Minimal OpenAPI spec for three endpoints exposed by the HDT API:
+    - get_walk_data (model developer)
+    - get_sugarvita_player_types (app developer)
+    - get_health_literacy_diabetes (app developer)
+
+servers:
+  - url: http://localhost:5000
+
+security:
+  # Either Bearer or X-API-KEY will satisfy auth (OR semantics in OpenAPI)
+  - BearerAuth: []
+  - ApiKeyAuth: []
+
+paths:
+  /get_walk_data:
+    get:
+      summary: Retrieve walk data for permitted users (optionally a single user)
+      description: >
+        Returns walk records per permitted user. If `user_id` is provided
+        and permitted, returns only that user's records; otherwise returns all
+        permitted users for the calling client.
+      parameters:
+        - name: user_id
+          in: query
+          required: false
+          description: Optional user id filter (must be permitted for caller)
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: List of user envelopes with walk data or error
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            X-Request-Id:
+              $ref: '#/components/headers/X-Request-Id'
+            Link:
+              $ref: '#/components/headers/Link'
+            X-Limit:
+              $ref: '#/components/headers/X-Limit'
+            X-Offset:
+              $ref: '#/components/headers/X-Offset'
+            X-Total:
+              $ref: '#/components/headers/X-Total'
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WalkEnvelope'
+        '304':
+          description: Not Modified (ETag match)
+        '400':
+          description: Bad request (e.g., invalid user_id)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden (user not permitted)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+
+  /get_sugarvita_player_types:
+    get:
+      summary: Retrieve SugarVita-derived player type scores for a user
+      parameters:
+        - name: user_id
+          in: query
+          description: ID of the user to query (must be permitted)
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Player type scores for the user (may be empty if no entries)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlayerTypesResponse'
+        '403':
+          description: Unauthorized access to this user's data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No data found for user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+
+  /get_health_literacy_diabetes:
+    get:
+      summary: Retrieve the latest diabetes health literacy score for a user
+      parameters:
+        - name: user_id
+          in: query
+          description: ID of the user to query (must be permitted)
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Latest health literacy score for the user (may be null if no entries)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthLiteracyResponse'
+        '403':
+          description: Unauthorized access to this user's data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No data found for user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: "Supply `Authorization: Bearer <API_KEY>`"
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-KEY
+      description: "Supply `X-API-KEY: <API_KEY>`"
+
+  headers:
+    ETag:
+      description: Strong ETag for conditional requests
+      schema:
+        type: string
+    X-Request-Id:
+      description: Correlation id echoed back in responses
+      schema:
+        type: string
+    X-Client-Id:
+      description: Logical client id inferred by the server
+      schema:
+        type: string
+    X-Users-Count:
+      description: Number of users represented in the response payload
+      schema:
+        type: integer
+    X-Policy:
+      description: Effective policy lane applied to the response
+      schema:
+        type: string
+    Link:
+      description: RFC 5988 pagination links
+      schema:
+        type: string
+    X-Limit:
+      description: Pagination limit for the current page
+      schema:
+        type: integer
+    X-Offset:
+      description: Pagination offset for the current page
+      schema:
+        type: integer
+    X-Total:
+      description: Total number of available items for the query
+      schema:
+        type: integer
+
+  schemas:
+    WalkRecord:
+      type: object
+      properties:
+        date:
+          type: string
+          format: date
+          example: "2025-11-28"
+        steps:
+          type: integer
+          example: 6120
+        distance_meters:
+          type: number
+          nullable: true
+        duration:
+          type: string
+          nullable: true
+          description: "HH:MM:SS"
+        kcalories:
+          type: number
+          nullable: true
+      required: [date, steps]
+
+    WalkEnvelope:
+      type: object
+      properties:
+        user_id:
+          type: integer
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/WalkRecord'
+        error:
+          type: string
+          nullable: true
+      required: [user_id]
+
+    PlayerTypesResponse:
+      type: object
+      properties:
+        user_id:
+          type: integer
+        latest_update:
+          type: string
+          nullable: true
+          description: ISO datetime of latest data
+        player_types:
+          type: object
+          additionalProperties:
+            type: number
+          description: Map of label->score (e.g., Socializer/Competitive/Explorer)
+      required: [user_id, player_types]
+
+    HealthLiteracyResponse:
+      type: object
+      properties:
+        user_id:
+          type: integer
+        latest_update:
+          type: string
+          nullable: true
+        health_literacy_score:
+          oneOf:
+            - type: "null"
+            - type: object
+              properties:
+                name:
+                  type: string
+                  example: diabetes
+                score:
+                  type: number
+                  example: 0.72
+                sources:
+                  type: object
+                  additionalProperties:
+                    type: number
+                  example: { trivia: 0.66, sugarvita: 0.78 }
+              required: [name, score]
+          description: >
+            Latest computed HL score; may be null if no entries. Note:
+            the current server may return a simplified object – this schema
+            represents the intended shape.
+      required: [user_id]
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+      required: [error]

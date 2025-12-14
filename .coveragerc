@@ -1,20 +1,20 @@
 [run]
 branch = True
 source =
-    HDT_CORE_INFRASTRUCTURE
-    HDT_MCP
+    hdt_api
+    hdt_mcp
 
 # Omit integration adapters, thin shims, and non-core assets from quick-hook coverage
 omit =
     # Provider adapters/parsers (exercise with integration tests, not unit tests)
-    HDT_CORE_INFRASTRUCTURE/GAMEBUS_*_fetch.py
-    HDT_CORE_INFRASTRUCTURE/GAMEBUS_*_parse.py
-    HDT_CORE_INFRASTRUCTURE/GOOGLE_FIT_*_fetch.py
-    HDT_CORE_INFRASTRUCTURE/GOOGLE_FIT_*_parse.py
+    hdt_api/GAMEBUS_*_fetch.py
+    hdt_api/GAMEBUS_*_parse.py
+    hdt_api/GOOGLE_FIT_*_fetch.py
+    hdt_api/GOOGLE_FIT_*_parse.py
 
     # Compatibility shims / glue modules
-    HDT_API/*
-    HDT_MCP/hdt_api.py
+    hdt_api/*
+    hdt_mcp/hdt_api.py
     validation.py
 
     # Demo/CLI/scripts, docs, and models outside core runtime
@@ -23,22 +23,22 @@ omit =
     Virtual_Twin_Models/*
 
     # Heavy façade measured in CI separately
-    HDT_MCP/policy.py
-    HDT_MCP/reduction.py
-    HDT_MCP/server.py
+    hdt_mcp/policy.py
+    hdt_mcp/reduction.py
+    hdt_mcp/server.py
 
     # Heavy Flask façade (quick-run omits; still measured in CI)
-    HDT_CORE_INFRASTRUCTURE/HDT_API.py
-    HDT_CORE_INFRASTRUCTURE\\HDT_API.py
+    hdt_api/app.py
+    hdt_api\\app.py
 
     # Additional low-signal modules omitted for quick pre-commit scope
     # (integration/edge-heavy; still measured in full CI as desired)
-    HDT_CORE_INFRASTRUCTURE/auth.py
-    HDT_CORE_INFRASTRUCTURE\\auth.py
-    HDT_CORE_INFRASTRUCTURE/hdt_api_fetchers.py
-    HDT_CORE_INFRASTRUCTURE\\hdt_api_fetchers.py
-    HDT_CORE_INFRASTRUCTURE/hdt_api_utils.py
-    HDT_CORE_INFRASTRUCTURE\\hdt_api_utils.py
+    hdt_api/auth.py
+    hdt_api\\auth.py
+    hdt_api/hdt_api_fetchers.py
+    hdt_api\\hdt_api_fetchers.py
+    hdt_api/hdt_api_utils.py
+    hdt_api\\hdt_api_utils.py
 
 [report]
 exclude_lines =

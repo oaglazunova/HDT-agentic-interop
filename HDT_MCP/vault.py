@@ -1,4 +1,3 @@
-# HDT_MCP/vault.py
 from __future__ import annotations
 import sqlite3, json, time, os, warnings
 from pathlib import Path

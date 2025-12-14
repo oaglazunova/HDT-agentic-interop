@@ -3,17 +3,8 @@ import os
 import json
 import pytest
 
-# Support multiple import layouts across this repo
-try:
-    # Preferred: compatibility shim that re-exports the real app
-    from HDT_API.hdt_api import app
-except Exception:
-    try:
-        # Direct import from the monolithic module
-        from HDT_CORE_INFRASTRUCTURE.HDT_API import app
-    except Exception:
-        # Last resort: repo-root module (if present in some setups)
-        from hdt_api import app  # fallback if your API lives at repo root
+# Import the canonical Flask app directly from the implementation
+from hdt_api.app import app
 
 
 @pytest.fixture(scope="module")

@@ -1,5 +1,5 @@
 import copy
-import HDT_MCP.server as srv
+import hdt_mcp.server as srv
 
 def test_policy_deny_tool(monkeypatch):
     monkeypatch.setattr(srv, "_POLICY_OVERRIDE", {

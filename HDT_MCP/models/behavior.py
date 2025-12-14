@@ -3,13 +3,15 @@ from typing import TypedDict, List, Optional
 import os, json, time, math
 from datetime import datetime, timedelta
 from pathlib import Path
+import importlib
 
-# Optional: read from vault if available
+# Optional: read from vault if available; resolve dynamically to avoid hard dependency
+_vault = None
 try:
-    from HDT_VAULT import vault as _vault
+    _vault = importlib.import_module("HDT_VAULT.vault")
 except Exception:
     try:
-        from HDT_MCP import vault as _vault
+        _vault = importlib.import_module("hdt_mcp.vault")
     except Exception:
         _vault = None
 

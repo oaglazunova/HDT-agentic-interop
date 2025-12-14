@@ -1,6 +1,6 @@
 import types
 from flask import request
-from HDT_CORE_INFRASTRUCTURE.HDT_API import app, json_with_headers
+from hdt_api.app import app, json_with_headers
 
 def _set_request_client(client_id: str = "TEST_CLIENT"):
     # Attach a minimal .client dict as your decorator would

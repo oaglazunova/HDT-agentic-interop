@@ -40,9 +40,11 @@ python -m venv .venv
 
 ## 2) Install dependencies
 ```
-pip install -r requirements.txt
-# optional (tests, hooks, lint):
-pip install -r requirements-dev.txt
+# Recommended for local development (installs package + dev tools from pyproject.toml)
+pip install -e ".[dev]"
+
+# If you only need runtime (no tests/linters):
+# pip install -e .
 ```
 
 ## 3) Create `.env` (from example)
@@ -93,7 +95,7 @@ If you just want to see everything work end-to-end with one demo script:
 
 In one terminal: start the API (localhost:5000)
 ```
-python -m HDT_CORE_INFRASTRUCTURE.HDT_API
+python -m hdt_api.app
 ```
 
 In another terminal: run the end-to-end demo
@@ -108,7 +110,7 @@ The demo will:
 
 ## 5) Run the API (terminal #1)
 ```
-python HDT_CORE_INFRASTRUCTURE/HDT_API.py
+python hdt_api/app.py
 ```
 You should see:
 ```
@@ -148,11 +150,11 @@ X-Policy: passthrough|info|error
 ```
 ## 7) Run the MCP façade (terminal #2)
 ```
-python -m HDT_MCP.server
+python -m hdt_mcp.server
 ```
 Exposes MCP tools/resources (e.g., `hdt.get_walk_data@v1`, `policy.evaluate@v1`).
 `vault://user/{id}/integrated` returns the integrated HDT view (reads from vault first, falls back to live, applies policy).
-Telemetry is appended to `HDT_MCP/telemetry/mcp-telemetry.jsonl`.
+Telemetry is appended to `hdt_mcp/telemetry/mcp-telemetry.jsonl`.
 
 Optional single-file smoke:
 ```
@@ -177,8 +179,8 @@ Walk records are returned in `HDT_WALK_ORDER` (env; default `asc`, i.e., oldest�
 
 ## Troubleshooting
 
-- No module named 'HDT_MCP':
-Run from repo root and use module invocation: `python -m HDT_MCP.server`.
+- No module named 'hdt_mcp':
+Run from repo root and use module invocation: `python -m hdt_mcp.server`.
 - 401/403 or empty results:
 `.env` must define `MODEL_DEVELOPER_1_API_KEY`; configs in `config/*.json` must match your client id and permissions (the init script sets this).
 - Want data without real integrations?
@@ -309,7 +311,7 @@ def json_with_headers(payload, *, policy: str | None = None, status: int = 200):
   - `user_permissions.json`: Maps user IDs to allowed external clients and their permitted actions.
   - `users.json`: Provides details about users, including their connected apps for each health domain and the associated authentication tokens.
 
-#### **`HDT_CORE_INFRASTRUCTURE` Subfolder**
+#### **`hdt_api` Subfolder**
 - **Purpose**: Handles data fetching, parsing, authentication, and API exposure (to be extended with more available data sources and API endpoints).
 - **Key Files**:
   - `auth.py`: Implements an authentication and authorization decorator based on API keys, user permissions, and required actions.
@@ -319,7 +321,7 @@ def json_with_headers(payload, *, policy: str | None = None, status: int = 200):
   - `GAMEBUS_WALK_parse.py`: Contains parsing functions for converting raw responses from GameBus into structured formats.
   - `GOOGLE_FIT_WALK_fetch`: Fetches Google Fit step count data.
   - `GOOGLE_FIT_WALK_parse`:Contains parsing functions for converting raw responses from Google Fit into structured formats.
-  - `HDT_API.py`: Flask app exposing the following endpoints:
+  - `app.py`: Flask app exposing the following endpoints:
     - **for Model Developers**:
       - `/get_trivia_data`: Retrieves standardized trivia playthrough metrics.
       - `/get_sugarvita_data`: Retrieves standardized SugarVita playthrough metrics.
@@ -376,7 +378,11 @@ npm run openapi:ui        # Swagger UI live preview on 8089
 
 3. Install dependencies:
    ```bash
-   pip install -r requirements.txt
+   # Development (package + dev extras defined in pyproject.toml)
+   pip install -e ".[dev]"
+
+   # Or runtime only
+   # pip install -e .
    ```
 
 4. Set up the `.env` file in the root folder:
@@ -419,20 +425,20 @@ In the future, this file should be replaced by a proper ui with advanced authent
 ### Running the API
 1. Start the Flask application:
    ```bash
-   python -m HDT_CORE_INFRASTRUCTURE.HDT_API
+   python -m hdt_api.app
    ```
 
 2. The API will run on `http://localhost:5000`.
 
 3. In another terminal, start the MCP façade (stdio on Windows):
 ```powershell
-python -m HDT_MCP.server
+python -m hdt_mcp.server
 ```
 
 4. Start the MCP Inspector:
 - Simple dev mode:
 ```powershell
-mcp dev HDT_MCP/server.py
+mcp dev hdt_mcp/server.py
 ```
 - Or using the provided config:
 ```powershell
@@ -451,7 +457,7 @@ curl -X GET "http://localhost:5000/get_trivia_data?user_id=1" -H "X-API-KEY: you
 ## How Components Interact
 
 1. **Fetching Data**:
-   - `HDT_API.py` endpoints call fetch functions from `GAMEBUS_DIABETES_fetch.py`, `GAMEBUS_WALK_fetch.py` or `GOOGLE_FIT_WALK_fetch.py`, based on user permissions and connected apps (retrieved from `users.json`).
+   - `app.py` endpoints call fetch functions from `GAMEBUS_DIABETES_fetch.py`, `GAMEBUS_WALK_fetch.py` or `GOOGLE_FIT_WALK_fetch.py`, based on user permissions and connected apps (retrieved from `users.json`).
 
 2. **Parsing Data**:
    - Fetch functions parse raw API responses using `*_parse.py` files (e.g., `parse_json_trivia`).
@@ -481,19 +487,19 @@ curl -X GET "http://localhost:5000/get_trivia_data?user_id=1" -H "X-API-KEY: you
 This repository includes an MCP server (façade) that exposes the HDT API and a few convenience utilities as MCP tools and resources. You can run it over stdio (best for local tooling and the Inspector) or as an HTTP server.
 
 ### Overview
-- Location: `HDT_MCP/server.py`
+- Location: `hdt_mcp/server.py`
 - Entrypoint (Windows, stdio):
   ```powershell
-  python -m HDT_MCP.server
+  python -m hdt_mcp.server
   ```
 - Transport selection: set `MCP_TRANSPORT` environment variable to `"stdio"` (default) or `"streamable-http"`.
 - Policy file: `config/policy.json` (see Policy contract below)
-- Telemetry file: `HDT_MCP/telemetry/mcp-telemetry.jsonl`
+- Telemetry file: `hdt_mcp/telemetry/mcp-telemetry.jsonl`
 
 ### 1) Run the API first
 Start the HDT API so the MCP façade can call it:
 ```powershell
-python -m HDT_CORE_INFRASTRUCTURE.HDT_API
+python -m hdt_api.app
 ```
 The API serves on `http://localhost:5000` by default.
 
@@ -510,7 +516,7 @@ $env:HDT_API_BASE = "http://localhost:5000"
 $env:HDT_API_KEY  = "YOUR_API_KEY"
 
 # Start the server
-python -m HDT_MCP.server
+python -m hdt_mcp.server
 ```
 
 #### B. HTTP transport (for desktop agents / remote clients)
@@ -519,7 +525,7 @@ PowerShell (Windows):
 $env:MCP_TRANSPORT = "streamable-http"
 $env:HDT_API_BASE  = "http://localhost:5000"
 $env:HDT_API_KEY   = "YOUR_API_KEY"
-python -m HDT_MCP.server
+python -m hdt_mcp.server
 ```
 Notes:
 - The HTTP transport is provided by `FastMCP`. Default host/port may be printed on launch by the library. If your agent needs a specific port/host, consult `mcp.server.fastmcp` docs for environment variables or wrapper options.
@@ -538,15 +544,15 @@ npx @modelcontextprotocol/inspector --config .\config\mcp.json --server hdt-mcp
 Option 2 — Simple dev mode (no config):
 ```powershell
 # Ensure the API is running, then in another terminal:
-python -m HDT_MCP.server   # stdio server
+python -m hdt_mcp.server   # stdio server
 
 # And start Inspector in dev mode, pointing at the Python entrypoint:
-npx @modelcontextprotocol/inspector dev HDT_MCP/server.py
+npx @modelcontextprotocol/inspector dev hdt_mcp/server.py
 ```
 
 Tip: If you installed the Python `mcp` CLI, you can also use:
 ```powershell
-mcp dev HDT_MCP/server.py
+mcp dev hdt_mcp/server.py
 ```
 
 ### 4) Environment variables
@@ -707,14 +713,14 @@ In the example above:
 ## End-to-end example (Windows)
 1) Start API:
 ```powershell
-python -m HDT_CORE_INFRASTRUCTURE.HDT_API
+python -m hdt_api.app
 ```
 2) Start MCP (stdio):
 ```powershell
 $env:HDT_API_BASE = "http://localhost:5000"
 $env:HDT_API_KEY  = "YOUR_API_KEY"
 $env:HDT_ENABLE_POLICY_TOOLS = "1"
-python -m HDT_MCP.server
+python -m hdt_mcp.server
 ```
 3) Launch Inspector:
 ```powershell

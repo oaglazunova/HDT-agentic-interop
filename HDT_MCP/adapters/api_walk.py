@@ -2,8 +2,8 @@ from __future__ import annotations
 from typing import Optional, List, Callable, Dict, Any
 import requests
 
-from HDT_MCP.domain.models import WalkRecord
-from HDT_MCP.domain.ports import WalkSourcePort
+from hdt_mcp.domain.models import WalkRecord
+from hdt_mcp.domain.ports import WalkSourcePort
 
 
 class ApiWalkAdapter(WalkSourcePort):

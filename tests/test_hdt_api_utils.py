@@ -1,4 +1,4 @@
-from HDT_CORE_INFRASTRUCTURE.hdt_api_utils import paginate, _build_url_with_params
+from hdt_api.hdt_api_utils import paginate, _build_url_with_params
 
 def test_paginate_unknown_total_needs_returned_count():
     page, has_next = paginate(None, 3, 0, returned_count=3)

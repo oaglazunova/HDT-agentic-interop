@@ -14,7 +14,7 @@ def test_resolve_connected_app_unknown(monkeypatch, tmp_path):
     _write_users_cfg(tmp_path, users)
     monkeypatch.chdir(tmp_path)
 
-    from HDT_MCP.server_helpers import resolve_connected_app
+    from hdt_mcp.server_helpers import resolve_connected_app
 
     name, pid, token = resolve_connected_app(1, "walk_data")
     assert name == "Unknown"
@@ -39,7 +39,7 @@ def test_resolve_connected_app_happy_path(monkeypatch, tmp_path):
     _write_users_cfg(tmp_path, users)
     monkeypatch.chdir(tmp_path)
 
-    from HDT_MCP.server_helpers import resolve_connected_app
+    from hdt_mcp.server_helpers import resolve_connected_app
 
     name, pid, token = resolve_connected_app(2, "walk_data")
     assert name == "GameBus"

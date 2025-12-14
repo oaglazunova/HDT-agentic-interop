@@ -3,7 +3,7 @@ import types
 import pytest
 
 # Import your MCP server module (adjust if your module path differs)
-import HDT_MCP.server as srv
+import hdt_mcp.server as srv
 
 
 # ---------- helpers ----------

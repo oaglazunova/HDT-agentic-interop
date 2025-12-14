@@ -11,7 +11,7 @@ It performs:
 import json, os, sys
 from pathlib import Path
 
-# Ensure project root is on sys.path so that "HDT_MCP" package resolves
+# Ensure project root is on sys.path so that "hdt_mcp" package resolves
 _THIS_FILE = Path(__file__).resolve()
 _PROJECT_ROOT = _THIS_FILE.parents[1]
 if str(_PROJECT_ROOT) not in sys.path:
@@ -71,7 +71,7 @@ def demo_api():
 
 def demo_policy():
     # Import MCP server helpers for policy evaluation
-    import HDT_MCP.server as srv
+    import hdt_mcp.server as srv
 
     # Ensure we read the latest on disk
     srv._policy_reset_cache()
