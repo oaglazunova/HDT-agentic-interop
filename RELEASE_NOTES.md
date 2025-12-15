@@ -1,40 +1,46 @@
-}
-
-# v0.5.0 — IEEE Software Prototype Milestone (2025-12-12)
+# HDT v0.5.0 (2025-12-12)
 
 ## Highlights
 
-* **MCP-only HDT interface (Option D)**: HDT capabilities are exposed via MCP tools; REST/OpenAPI is not part of the primary contract.
-* **HDT Governor (orchestrator)**:
+* **MCP-only HDT interface**: HDT capabilities are exposed via MCP tools; REST is not part of the primary integration contract.
+* **External HDT MCP server** (`HDT_MCP.server_option_d`):
 
-  * Centralizes source selection, fallback, and error normalization across external systems.
-  * Produces consistent HDT-level responses with provenance and structured failure modes.
-* **Sources MCP façade (internal)** over external systems:
+  * Domain-first tool surface (`hdt.walk.fetch@v1`, `hdt.trivia.fetch@v1`, `hdt.sugarvita.fetch@v1`, `hdt.sources.status@v1`).
+  * Per-call instrumentation: **purpose-lane validation**, **policy pre-check (deny fast)**, **policy redaction on success**, and **telemetry logging**.
+* **HDT Governor (orchestrator)** (`HDT_MCP.mcp_governor.HDTGovernor`):
 
-  * Wraps deterministic connectors (GameBus, Google Fit, SugarVita, Trivia) as MCP tools.
-  * Enables capability discovery and uniform invocation via MCP instead of per-client glue code.
-* **Structured error envelopes** across sources:
+  * Centralizes **source selection**, **fallback**, and **error normalization** across external systems.
+  * Produces consistent HDT-level responses with:
 
-  * `not_connected`, `missing_token`, `upstream_error`, `all_sources_failed` (and similar), rather than silent empty results.
-* **Config overlay retained**: merged `config/users.json` + `config/users.secrets.json` remains the canonical way to resolve per-user source credentials and identifiers.
-* **Quickstart scripts** to validate the full chain:
+    * `selected_source`
+    * `attempts` (negotiation trace)
+    * structured failure modes
+  * Optional vault strategy via `prefer_data=auto|vault|live` and write-through behavior on successful live fetches (best effort).
+* **Sources MCP façade (internal)** (`HDT_SOURCES_MCP.server`):
+
+  * Wraps connectors as MCP tools:
+
+    * GameBus walk, Google Fit walk, GameBus Trivia, GameBus SugarVita
+  * Uniform typed errors from all source tools (`unknown_user`, `not_connected`, `missing_token`, `upstream_error`, etc.).
+* **End-to-end observability**:
+
+  * Correlation id (`corr_id`) is propagated across **MCP Server → Governor → Sources MCP** to support traceability.
+  * Telemetry is emitted as JSONL records, including governor negotiation traces.
+* **Config overlay retained**:
+
+  * Merged `config/users.json` + `config/users.secrets.json` remains the canonical way to resolve per-user source identifiers and credentials.
+* **Quickstart scripts** validate the full chain:
 
   * Sources MCP discovery/invocation, Governor fallback, and external HDT MCP tool calls.
 
 ## Breaking Changes
 
 * **REST assumptions removed**: integrations should target MCP tools (external HDT MCP server) rather than HTTP endpoints / OpenAPI.
-* **Tool-first contract**: versioned tool names and schemas define compatibility; source-specific API details are hidden behind the Sources MCP façade.
-* **Error semantics changed**: callers must handle typed error envelopes (instead of empty lists).
+* **Tool-first contract**: versioned tool names and MCP tool schemas define compatibility; source-specific API details are hidden behind the Sources MCP façade.
+* **Error semantics changed**: callers must handle typed error envelopes (instead of treating empty lists as “no data”).
 
 ## Known Issues
 
 * Upstream connectivity depends on valid per-source credentials; placeholder tokens will yield `upstream_error`.
-* The Governor’s negotiation logic is intentionally minimal (prefer one source, fallback to another). Advanced selection (quality ranking, purpose-aware minimization, source scoring) is not yet implemented.
-* Some legacy modules from the REST-bridged architecture may still exist in the repo while the migration completes; Option D entrypoint is `HDT_MCP.server_option_d`.
-
-## Upgrade Notes
-
-* Ensure `connected_application` + `player_id` pairs match between `config/users.json` and `config/users.secrets.json`; otherwise secrets will not merge onto public connectors.
-* Keep the Sources MCP server internal (stdio transport) and avoid exposing it on untrusted networks.
-* If you previously relied on policy lanes/vault/telemetry from the earlier milestone branch, reintroduce them as Governor-enforced mechanisms and/or dedicated MCP tools as the Option D migration progresses.
+* The Governor’s negotiation logic is intentionally minimal (prefer one source, fallback to another; optional vault preference/fallback). Advanced selection (quality ranking, purpose-aware minimization, source scoring) is not yet implemented.
+* Telemetry/logging is suitable for debugging and demos, but not yet hardened for production (e.g., retention, privacy guarantees beyond basic sanitization, configurable sinks).
