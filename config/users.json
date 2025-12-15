@@ -3,7 +3,11 @@
     {
       "user_id": 1,
       "connected_apps_walk_data": [
-        { "connected_application": "Placeholder Walk", "player_id": "demo-1" }
+        { "connected_application": "GameBus", "player_id": "1" },
+        { "connected_application": "Google Fit", "player_id": "me" }
+      ],
+      "connected_apps_diabetes_data": [
+        { "connected_application": "GameBus", "player_id": "1" }
       ]
     },
     {

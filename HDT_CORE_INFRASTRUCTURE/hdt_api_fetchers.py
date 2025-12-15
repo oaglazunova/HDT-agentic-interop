@@ -50,7 +50,7 @@ def fetch_walk_batch(
 ) -> FetcherResult:
     # Local import to avoid circulars
     from HDT_CORE_INFRASTRUCTURE.HDT_API import get_connected_app_info
-    app_name, player_id, auth_bearer = get_connected_app_info(user_id, "walk_data")
+    app_name, player_id, auth_bearer = get_connected_app_info(users, user_id, "walk_data")
     app_norm = (app_name or "").strip().lower()
 
     # Provider fetchers

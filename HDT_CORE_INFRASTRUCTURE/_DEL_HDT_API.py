@@ -5,7 +5,10 @@ import os, logging
 from pathlib import Path
 import hashlib
 import uuid
-from typing import Optional, Dict, List, Tuple, Any
+from typing import Optional, Dict, Any
+
+from HDT_CORE_INFRASTRUCTURE.users_store import UsersStore, get_connected_app_info
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -193,107 +196,13 @@ app.logger.info("Loaded %d user-permission entries", len(user_permissions))
 # Define the path to the static directory
 static_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'static'))
 
+
 # ---- Users loader (public + secrets overlay) --------------------------------
-config_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'config'))
-USERS_PUBLIC_FILE = os.path.join(config_dir, 'users.json')
-USERS_SECRETS_FILE = os.path.join(config_dir, 'users.secrets.json')
-
-def _load_users_file(path: str) -> List[Dict[str, Any]]:
-    with open(path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    if not isinstance(data, dict) or "users" not in data or not isinstance(data["users"], list):
-        raise ValueError(f"Invalid users file format: {path}")
-    return data["users"]
-
-def _merge_lists_by_identity(pub_list: List[Dict[str, Any]], sec_list: List[Dict[str, Any]], identity_keys=("connected_application","player_id")) -> List[Dict[str, Any]]:
-    """
-    Merge two lists of connector entries:
-    - Match items by identity_keys (connected_application + player_id).
-    - If match found, overlay secret fields (e.g., auth_bearer) onto the public item.
-    - If no secret match, keep the public item as-is.
-    """
-    merged = []
-    # Build fast lookup for secrets
-    sec_index = {}
-    for s in sec_list or []:
-        key = tuple((s.get(k) or "") for k in identity_keys)
-        sec_index.setdefault(key, []).append(s)
-
-    for p in pub_list or []:
-        key = tuple((p.get(k) or "") for k in identity_keys)
-        s = (sec_index.get(key) or [None])[0]
-        if s:
-            # Overlay – but do not let secrets change identity fields
-            over = {**p, **{k: v for k, v in s.items() if k not in {"connected_application","player_id"}}}
-            merged.append(over)
-        else:
-            merged.append(p)
-    return merged
-
-def _merge_users(public_users: List[Dict[str, Any]], secret_users: List[Dict[str, Any]]) -> Dict[int, Dict[str, Any]]:
-    # Build secret lookup by user_id
-    sec_by_uid = {int(u.get("user_id")): u for u in secret_users or [] if "user_id" in u}
-
-    merged_by_uid: Dict[int, Dict[str, Any]] = {}
-    for pu in public_users:
-        uid = int(pu["user_id"])
-        su = sec_by_uid.get(uid, {})
-        merged_entry = dict(pu)  # shallow copy
-
-        # Merge all known connector arrays you use in code
-        for key in ("connected_apps_diabetes_data", "connected_apps_walk_data", "connected_apps_nutrition_data"):
-            merged_entry[key] = _merge_lists_by_identity(
-                pu.get(key, []),
-                (su or {}).get(key, [])
-            )
-        merged_by_uid[uid] = merged_entry
-
-    return merged_by_uid
-
-try:
-    public = _load_users_file(USERS_PUBLIC_FILE)
-except FileNotFoundError:
-    app.logger.error("Users public file not found: %s", USERS_PUBLIC_FILE)
-    public = []
-except Exception as e:
-    app.logger.error("Error loading users.json: %s", e)
-    public = []
-
-try:
-    secrets = _load_users_file(USERS_SECRETS_FILE)
-    app.logger.info("Loaded users.secrets.json (overlay)")
-except FileNotFoundError:
-    secrets = []
-    app.logger.warning("users.secrets.json not found; proceeding without secrets overlay")
-except Exception as e:
-    secrets = []
-    app.logger.error("Error loading users.secrets.json: %s", e)
-
-users = _merge_users(public, secrets)
+config_dir = Path(__file__).resolve().parents[1] / "config"
+users_store = UsersStore(config_dir)
+users = users_store.load()
 app.logger.info("Loaded %d users (merged)", len(users))
 
-
-
-def get_connected_app_info(user_id, app_type):
-    """
-    Return (connected_application, player_id, auth_bearer) or ("Unknown", None, None).
-    Reads from the merged in-memory 'users' dict.
-    """
-    user = users.get(user_id)
-    if not user:
-        return "Unknown", None, None
-
-    connected_apps_key = f"connected_apps_{app_type}"
-    entries = user.get(connected_apps_key) or []
-    if not entries:
-        return "Unknown", None, None
-
-    app_data = entries[0]  # first connector is primary
-    return (
-        app_data.get("connected_application", "Unknown"),
-        app_data.get("player_id"),
-        app_data.get("auth_bearer")  # may be None if secrets missing—fetchers should handle that
-    )
 
 # Metadata Endpoint for Model Developer APIs
 @app.route("/metadata/model_developer_apis", methods=["GET"])
@@ -475,7 +384,7 @@ def get_trivia_data():
         response_data = []
 
         for user_id in accessible_user_ids:
-            app_name, player_id, auth_bearer = get_connected_app_info(user_id, "diabetes_data")
+            app_name, player_id, auth_bearer = get_connected_app_info(users, user_id, "diabetes_data")
 
             if app_name == "GameBus":
                 data, latest_activity_info = fetch_trivia_data(player_id, auth_bearer=auth_bearer)
@@ -520,7 +429,7 @@ def get_sugarvita_data():
         response_data = []
 
         for user_id in accessible_user_ids:
-            app_name, player_id, auth_bearer = get_connected_app_info(user_id, "diabetes_data")
+            app_name, player_id, auth_bearer = get_connected_app_info(users, user_id, "diabetes_data")
 
             if app_name == "GameBus":
                 data, latest_activity_info = fetch_sugarvita_data(player_id, auth_bearer=auth_bearer)
@@ -778,7 +687,7 @@ def healthz():
 def debug_effective_user(user_id: int):
     if os.getenv("DEBUG_USERS", "0") not in ("1","true","yes"):
         return api_error("disabled", "Debug endpoint is disabled", status=404, policy="info")
-    u = users.get(user_id)
+    u = users.get(int(user_id))
     return json_with_headers(u or {}, policy="info")
 
 # Correlation IDs: accept incoming or generate a new one

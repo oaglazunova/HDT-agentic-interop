@@ -13,11 +13,9 @@ authors = [{ name = "Olga Glazunova", email = "o.glazunova@tue.nl" }]
 keywords = ["Model Context Protocol", "HDT", "interoperability", "digital health", "agentic systems"]
 
 dependencies = [
-  "flask>=3.0",
   "requests>=2.31",
   "python-dotenv>=1.0",
   "mcp>=1.0.0",
-  "pydantic>=2.5",
 ]
 
 [project.optional-dependencies]
