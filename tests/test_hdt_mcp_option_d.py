@@ -24,8 +24,8 @@ async def main():
             res = await session.call_tool("hdt.sources.status@v1", {"user_id": 1})
             print(res.content[0].text)
 
-            print("\nCALL hdt.walk.fetch@v1(user_id=1, limit=5):")
-            res = await session.call_tool("hdt.walk.fetch@v1", {"user_id": 1, "limit": 5})
+            print('\nCALL hdt.walk.fetch@v1(user_id=1, limit=5, prefer_data="vault"):')
+            res = await session.call_tool("hdt.walk.fetch@v1", {"user_id": 1, "limit": 5, "prefer_data": "vault"})
             print(res.content[0].text)
 
 
