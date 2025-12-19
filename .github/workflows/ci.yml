@@ -17,16 +17,10 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install deps
+      - name: Install dependencies (project + dev extras)
         run: |
-          python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          pip install flask requests python-dotenv mcp
-
-      - name: Install dev dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements-dev.txt
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install ".[dev]"
 
       - name: Create .env (if needed)
         run: |
@@ -46,60 +40,20 @@ jobs:
           python scripts/init_sample_config.py
 
       - name: Run pytest
-        run: pytest -q
+        run: python -m pytest -q
 
-      - name: Start API server (background)
+      - name: Smoke test (MCP)
         env:
-          HDT_ALLOW_PLACEHOLDER_MOCKS: "1"
           MCP_CLIENT_ID: "MODEL_DEVELOPER_1"
-          HDT_API_KEY: "MODEL_DEVELOPER_1"
-          MODEL_DEVELOPER_1_API_KEY: "MODEL_DEVELOPER_1"
-          HDT_VAULT_ENABLE: "1"
-        run: |
-          nohup python -c "from hdt_core_infrastructure.HDT_API import app; app.run(host='127.0.0.1', port=5000, debug=False, use_reloader=False)" \
-            > /tmp/api.log 2>&1 & echo $! > /tmp/api.pid
-
-      - name: Wait for API readiness
-        run: |
-          for i in {1..30}; do
-            if curl -fsS http://127.0.0.1:5000/healthz >/dev/null; then
-              echo "API is up"; break
-            fi
-            sleep 1
-            if [ "$i" -eq 30 ]; then
-              echo "API failed to start; last 200 lines of /tmp/api.log:" >&2
-              (tail -n 200 /tmp/api.log || true) >&2
-              exit 1
-            fi
-          done
-
-      - name: Smoke test (API+MCP)
-        env:
           HDT_ALLOW_PLACEHOLDER_MOCKS: "1"
-          HDT_API_BASE: "http://127.0.0.1:5000"
-          MCP_CLIENT_ID: "MODEL_DEVELOPER_1"
-          HDT_API_KEY: "MODEL_DEVELOPER_1"
-          MODEL_DEVELOPER_1_API_KEY: "MODEL_DEVELOPER_1"
           HDT_VAULT_ENABLE: "1"
+          HDT_GATEWAY_MODULE: "hdt_mcp.gateway"
         run: |
-          python scripts/smoke_mcp.py
-
-      - name: Stop API server
-        if: always()
-        run: |
-          if [ -f /tmp/api.pid ]; then
-            kill $(cat /tmp/api.pid) 2>/dev/null || true
-            rm -f /tmp/api.pid || true
-          fi
-
-      - name: Dump API logs on failure
-        if: failure()
-        run: |
-          echo "--- API log (tail) ---"
-          tail -n 200 /tmp/api.log || true
+          python scripts/smoke_mcp.py       
 
       - name: Run tests with coverage guard
         run: |
-          pytest --maxfail=1 --disable-warnings -q \
-            --cov=hdt_mcp --cov=hdt_core_infrastructure --cov-report=term \
+          python -m pytest --maxfail=1 --disable-warnings -q \
+            --cov-config=.coveragerc.ci \
+            --cov=hdt_mcp --cov-report=term \
             --cov-fail-under=85
