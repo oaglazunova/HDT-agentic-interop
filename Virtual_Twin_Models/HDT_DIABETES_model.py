@@ -106,9 +106,7 @@ def _pick_gateway_module() -> str:
     # Reasonable defaults for your repo
     candidates = [
         "hdt_mcp.gateway",
-        "hdt_mcp.server_option_d",
-        "HDT_MCP.gateway",
-        "HDT_MCP.server_option_d",
+        "hdt_mcp.server",
     ]
     for m in candidates:
         try:
