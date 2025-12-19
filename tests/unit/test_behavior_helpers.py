@@ -2,7 +2,7 @@ from datetime import date, timedelta
 
 
 def test_avg_steps_last_days_edge_cases():
-    from HDT_MCP.models.behavior import _avg_steps_last_days
+    from hdt_mcp.models.behavior import _avg_steps_last_days
 
     # Empty -> 0
     assert _avg_steps_last_days([], days=7) == 0
@@ -24,7 +24,7 @@ def test_avg_steps_last_days_edge_cases():
 
 def test_behavior_strategy_api_fallback(monkeypatch):
     # Force vault off and stub API fetch
-    import HDT_MCP.models.behavior as B
+    import hdt_mcp.models.behavior as B
 
     monkeypatch.setenv("HDT_VAULT_ENABLE", "0")
     monkeypatch.setattr(B, "_vault", None, raising=False)

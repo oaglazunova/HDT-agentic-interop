@@ -1,17 +1,14 @@
 from __future__ import annotations
 from typing import TypedDict, List, Optional
-import os, json, time, math
-from datetime import datetime, timedelta
-from pathlib import Path
+import os
+from datetime import datetime, timedelta, timezone
 
 # Optional: read from vault if available
 try:
-    from HDT_VAULT import vault as _vault
+    from hdt_mcp import vault_store as _vault
 except Exception:
-    try:
-        from HDT_MCP import vault as _vault
-    except Exception:
-        _vault = None
+    _vault = None
+
 
 def _vault_enabled() -> bool:
     """
@@ -61,7 +58,7 @@ def _parse_date(d: str) -> Optional[datetime]:
 def _avg_steps_last_days(records: list[dict], days: int = 7) -> int:
     if not records:
         return 0
-    cutoff = datetime.utcnow().date() - timedelta(days=days-1)
+    cutoff = datetime.now(timezone.utc).date() - timedelta(days=days - 1)
     vals: list[int] = []
     for r in records:
         dt = _parse_date(str(r.get("date", "")))

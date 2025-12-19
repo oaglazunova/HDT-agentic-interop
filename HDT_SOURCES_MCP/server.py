@@ -1,28 +1,21 @@
 from __future__ import annotations
 
 import os
-import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from datetime import date, datetime
 
 from mcp.server.fastmcp import FastMCP
+from hdt_core_infrastructure.users_store import load_users_merged
+from hdt_core_infrastructure.GAMEBUS_WALK_fetch import fetch_walk_data
+from hdt_core_infrastructure.GOOGLE_FIT_WALK_fetch import fetch_google_fit_walk_data
+from hdt_core_infrastructure.GAMEBUS_DIABETES_fetch import fetch_trivia_data, fetch_sugarvita_data
+from hdt_mcp.core.context import set_request_id, get_request_id
+from hdt_mcp.core.errors import typed_error
+from hdt_mcp.core.tooling import InstrumentConfig, instrument_sync_tool
+from config.settings import init_runtime, config_dir
 
-# Ensure repo root on sys.path when run in different invocation modes
-_THIS_FILE = Path(__file__).resolve()
-_PROJECT_ROOT = _THIS_FILE.parents[1]
-if str(_PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PROJECT_ROOT))
-
-from HDT_CORE_INFRASTRUCTURE.users_store import load_users_merged
-from HDT_CORE_INFRASTRUCTURE.GAMEBUS_WALK_fetch import fetch_walk_data
-from HDT_CORE_INFRASTRUCTURE.GOOGLE_FIT_WALK_fetch import fetch_google_fit_walk_data
-from HDT_CORE_INFRASTRUCTURE.GAMEBUS_DIABETES_fetch import fetch_trivia_data, fetch_sugarvita_data
-from HDT_MCP.observability.telemetry import log_event
-from HDT_MCP.core.context import set_request_id
-
-CONFIG_DIR = _PROJECT_ROOT / "config"
 
 CORR_ID = os.getenv("HDT_CORR_ID")
 if CORR_ID:
@@ -38,15 +31,6 @@ class Connector:
     auth_bearer: str | None
 
 
-def _typed_error(code: str, message: str, *, details: dict | None = None, **extra: Any) -> dict:
-    payload: dict[str, Any] = {"error": {"code": code, "message": message}}
-    if details:
-        payload["error"]["details"] = details
-    if extra:
-        payload.update(extra)
-    return payload
-
-
 def _strip_bearer_prefix(token: str | None) -> str | None:
     if not token:
         return None
@@ -56,36 +40,35 @@ def _strip_bearer_prefix(token: str | None) -> str | None:
     return t
 
 
-def _parse_datetime_loose(s: str):
-    """Parse YYYY-MM-DD, YYYY-MM-DD HH:MM:SS, or ISO-ish timestamps."""
-    from datetime import datetime
-
+def _parse_date_loose(s: str) -> date:
+    """Parse YYYY-MM-DD or ISO-ish timestamps and return date()."""
     st = s.strip()
     if len(st) == 10 and st[4] == "-" and st[7] == "-":
-        return datetime.fromisoformat(st)
-    if " " in st and "T" not in st:
-        try:
-            return datetime.strptime(st, "%Y-%m-%d %H:%M:%S")
-        except ValueError:
-            pass
+        return date.fromisoformat(st)
     st = st.replace("Z", "+00:00")
-    return datetime.fromisoformat(st)
+    return datetime.fromisoformat(st).date()
 
 
-def _filter_and_page(records: list[dict], start_date: str | None, end_date: str | None, limit: int | None, offset: int | None) -> list[dict]:
+def _filter_and_page(
+    records: list[dict],
+    start_date: str | None,
+    end_date: str | None,
+    limit: int | None,
+    offset: int | None,
+) -> list[dict]:
     out = records
     if start_date:
-        sd = _parse_datetime_loose(start_date)
-        out = [r for r in out if r.get("date") and _parse_datetime_loose(str(r["date"])) >= sd]
+        sd = _parse_date_loose(start_date)
+        out = [r for r in out if r.get("date") and _parse_date_loose(str(r["date"])) >= sd]
     if end_date:
-        ed = _parse_datetime_loose(end_date)
-        out = [r for r in out if r.get("date") and _parse_datetime_loose(str(r["date"])) <= ed]
+        ed = _parse_date_loose(end_date)
+        out = [r for r in out if r.get("date") and _parse_date_loose(str(r["date"])) <= ed]
 
     off = max(int(offset or 0), 0)
     if limit is None:
         return out[off:]
     lim = max(int(limit), 0)
-    return out[off : off + lim]
+    return out[off: off + lim]
 
 
 def _gamebus_date_iso(date_str: str | None, *, end: bool = False) -> str | None:
@@ -98,28 +81,6 @@ def _gamebus_date_iso(date_str: str | None, *, end: bool = False) -> str | None:
     if len(s) == 10 and s[4] == "-" and s[7] == "-":
         return f"{s}T23:59:59Z" if end else f"{s}T00:00:00Z"
     return s
-
-
-def _sanitize_args(d: dict) -> dict:
-    redaction_keys = {"auth_bearer", "authorization", "token", "access_token", "api_key", "apikey"}
-    out = {}
-    for k, v in (d or {}).items():
-        out[k] = "***redacted***" if str(k).lower() in redaction_keys else v
-    return out
-
-def _log_source_tool(tool_name: str, *, args_for_log: dict, ok: bool, ms: int, error: dict | None = None) -> None:
-    payload = {"args": _sanitize_args(args_for_log)}
-    if error:
-        payload["error"] = error
-    log_event(
-        "source_tool",
-        tool_name,
-        payload,
-        ok=ok,
-        ms=ms,
-        client_id=SOURCES_CLIENT_ID,
-        corr_id=CORR_ID,
-    )
 
 
 def _load_users() -> dict[int, dict]:
@@ -158,7 +119,7 @@ def _get_user_or_error(user_id: int) -> tuple[dict | None, dict | None]:
     users = _load_users()
     u = users.get(int(user_id))
     if not u:
-        return None, _typed_error("unknown_user", f"Unknown user_id={user_id}", user_id=user_id)
+        return None, typed_error("unknown_user", f"Unknown user_id={user_id}", user_id=user_id)
     return u, None
 
 
@@ -182,6 +143,14 @@ def _gamebus_diabetes_connector(u: dict) -> Connector | None:
     return walk
 
 
+def _cfg(name: str) -> InstrumentConfig:
+    return InstrumentConfig(kind="source_tool", name=name, client_id=SOURCES_CLIENT_ID)
+
+
+def _instrument(name: str):
+    return instrument_sync_tool(_cfg(name))
+
+
 mcp = FastMCP(
     name="HDT-Sources-MCP",
     instructions="Internal MCP façade exposing external sources (GameBus, Google Fit, etc.) as tools.",
@@ -189,59 +158,59 @@ mcp = FastMCP(
 
 
 @mcp.tool(name="healthz@v1")
+@_instrument("healthz@v1")
 def healthz() -> dict:
     return {"ok": True}
 
 
+@mcp.tool(name="sources.context.set@v1")
+@_instrument("sources.context.set@v1")
+def sources_context_set(corr_id: str | None = None) -> dict:
+    """
+    Set / update the correlation id used for telemetry in this long-lived Sources MCP process.
+
+    This is useful when the parent HDT MCP server keeps a persistent stdio session and wants
+    source-level telemetry lines to be attributable to the current external request.
+    """
+    global CORR_ID
+    if corr_id:
+        CORR_ID = corr_id
+        set_request_id(CORR_ID)
+    return {"ok": True, "corr_id": get_request_id() or CORR_ID}
+
+
 @mcp.tool(name="sources.status@v1")
+@_instrument("sources.status@v1")
 def sources_status(user_id: int) -> dict:
-    t0 = time.perf_counter()
-    args_for_log = {"user_id": user_id}
+    u, err = _get_user_or_error(user_id)
+    if err:
+        return err
 
-    try:
-        u, err = _get_user_or_error(user_id)
-        if err:
-            ms = int((time.perf_counter() - t0) * 1000)
-            _log_source_tool("sources.status@v1", args_for_log=args_for_log, ok=False, ms=ms, error=err.get("error"))
-            err.setdefault("corr_id", CORR_ID)
-            return err
+    gb_walk = _find_primary_connector(u, "connected_apps_walk_data", "GameBus")
+    gf_walk = _find_primary_connector(u, "connected_apps_walk_data", "Google Fit")
+    gb_diab = _find_primary_connector(u, "connected_apps_diabetes_data", "GameBus")
 
-        gb_walk = _find_primary_connector(u, "connected_apps_walk_data", "GameBus")
-        gf_walk = _find_primary_connector(u, "connected_apps_walk_data", "Google Fit")
-        gb_diab = _find_primary_connector(u, "connected_apps_diabetes_data", "GameBus")
-
-        def _conn_state(c: Connector | None) -> dict:
-            if not c:
-                return {"configured": False}
-            return {
-                "configured": True,
-                "connected_application": c.connected_application,
-                "player_id": c.player_id,
-                "has_token": bool(c.auth_bearer and "YOUR_" not in c.auth_bearer),
-            }
-
-        out = {
-            "user_id": user_id,
-            "walk": {"gamebus": _conn_state(gb_walk), "googlefit": _conn_state(gf_walk)},
-            "diabetes": {"gamebus": _conn_state(gb_diab)},
-            "note": "Checks local config only; does not validate tokens upstream.",
+    def _conn_state(c: Connector | None) -> dict:
+        if not c:
+            return {"configured": False}
+        return {
+            "configured": True,
+            "connected_application": c.connected_application,
+            "player_id": c.player_id,
+            "has_token": bool(c.auth_bearer and "YOUR_" not in c.auth_bearer),
         }
 
-        ms = int((time.perf_counter() - t0) * 1000)
-        _log_source_tool("sources.status@v1", args_for_log=args_for_log, ok=True, ms=ms)
-        out.setdefault("corr_id", CORR_ID)
-        return out
-
-    except Exception as e:
-        ms = int((time.perf_counter() - t0) * 1000)
-        err = _typed_error("internal", str(e), user_id=user_id)
-        _log_source_tool("sources.status@v1", args_for_log=args_for_log, ok=False, ms=ms, error=err.get("error"))
-        err.setdefault("corr_id", CORR_ID)
-        return err
+    return {
+        "user_id": user_id,
+        "walk": {"gamebus": _conn_state(gb_walk), "googlefit": _conn_state(gf_walk)},
+        "diabetes": {"gamebus": _conn_state(gb_diab)},
+        "note": "Checks local config only; does not validate tokens upstream.",
+    }
 
 
 
 @mcp.tool(name="source.gamebus.walk.fetch@v1")
+@_instrument("source.gamebus.walk.fetch@v1")
 def source_gamebus_walk_fetch(
     user_id: int,
     start_date: str | None = None,
@@ -249,68 +218,43 @@ def source_gamebus_walk_fetch(
     limit: int | None = None,
     offset: int | None = None,
 ) -> dict:
-    t0 = time.perf_counter()
-    args_for_log = {"user_id": user_id, "start_date": start_date, "end_date": end_date, "limit": limit, "offset": offset}
+    u, err = _get_user_or_error(user_id)
+    if err:
+        return err
 
-    try:
-        u, err = _get_user_or_error(user_id)
-        if err:
-            ms = int((time.perf_counter() - t0) * 1000)
-            _log_source_tool("source.gamebus.walk.fetch@v1", args_for_log=args_for_log, ok=False, ms=ms, error=err.get("error"))
-            err.setdefault("corr_id", CORR_ID)
-            return err
+    c = _find_primary_connector(u, "connected_apps_walk_data", "GameBus")
+    if not c:
+        return typed_error("not_connected", "User not connected to GameBus for walk data", user_id=user_id)
 
-        c = _find_primary_connector(u, "connected_apps_walk_data", "GameBus")
-        if not c:
-            out = _typed_error("not_connected", "User not connected to GameBus for walk data", user_id=user_id)
-            ms = int((time.perf_counter() - t0) * 1000)
-            _log_source_tool("source.gamebus.walk.fetch@v1", args_for_log=args_for_log, ok=False, ms=ms, error=out.get("error"))
-            out.setdefault("corr_id", CORR_ID)
-            return out
+    if not c.auth_bearer:
+        return typed_error("missing_token", "Missing GameBus auth_bearer for walk connector", user_id=user_id)
 
-        if not c.auth_bearer:
-            out = _typed_error("missing_token", "Missing GameBus auth_bearer for walk connector", user_id=user_id)
-            ms = int((time.perf_counter() - t0) * 1000)
-            _log_source_tool("source.gamebus.walk.fetch@v1", args_for_log=args_for_log, ok=False, ms=ms, error=out.get("error"))
-            out.setdefault("corr_id", CORR_ID)
-            return out
+    raw = fetch_walk_data(
+        player_id=c.player_id,
+        auth_bearer=c.auth_bearer,
+        start_date=start_date,
+        end_date=end_date,
+    )
 
-        raw = fetch_walk_data(player_id=c.player_id, auth_bearer=c.auth_bearer)
-        if raw is None:
-            out = _typed_error("upstream_error", "GameBus walk fetch returned no data (upstream error)", user_id=user_id)
-            ms = int((time.perf_counter() - t0) * 1000)
-            _log_source_tool("source.gamebus.walk.fetch@v1", args_for_log=args_for_log, ok=False, ms=ms, error=out.get("error"))
-            out.setdefault("corr_id", CORR_ID)
-            return out
+    if raw is None:
+        return typed_error("upstream_error", "GameBus walk fetch returned no data (upstream error)", user_id=user_id)
 
-        records = _filter_and_page(list(raw), start_date, end_date, limit, offset)
-        out = {
-            "user_id": user_id,
-            "source": "GameBus",
-            "kind": "walk",
-            "records": records,
-            "provenance": {
-                "player_id": c.player_id,
-                "retrieved_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                "ms": int((time.perf_counter() - t0) * 1000),
-            },
-        }
-
-        ms = int((time.perf_counter() - t0) * 1000)
-        _log_source_tool("source.gamebus.walk.fetch@v1", args_for_log=args_for_log, ok=True, ms=ms)
-        out.setdefault("corr_id", CORR_ID)
-        return out
-
-    except Exception as e:
-        ms = int((time.perf_counter() - t0) * 1000)
-        out = _typed_error("internal", str(e), user_id=user_id)
-        _log_source_tool("source.gamebus.walk.fetch@v1", args_for_log=args_for_log, ok=False, ms=ms, error=out.get("error"))
-        out.setdefault("corr_id", CORR_ID)
-        return out
+    records = _filter_and_page(list(raw), start_date, end_date, limit, offset)
+    return {
+        "user_id": user_id,
+        "source": "GameBus",
+        "kind": "walk",
+        "records": records,
+        "provenance": {
+            "player_id": c.player_id,
+            "retrieved_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        },
+    }
 
 
 
 @mcp.tool(name="source.googlefit.walk.fetch@v1")
+@_instrument("source.googlefit.walk.fetch@v1")
 def source_googlefit_walk_fetch(
     user_id: int,
     start_date: str | None = None,
@@ -318,209 +262,120 @@ def source_googlefit_walk_fetch(
     limit: int | None = None,
     offset: int | None = None,
 ) -> dict:
-    t0 = time.perf_counter()
-    args_for_log = {"user_id": user_id, "start_date": start_date, "end_date": end_date, "limit": limit, "offset": offset}
+    u, err = _get_user_or_error(user_id)
+    if err:
+        return err
 
-    try:
-        u, err = _get_user_or_error(user_id)
-        if err:
-            ms = int((time.perf_counter() - t0) * 1000)
-            _log_source_tool("source.googlefit.walk.fetch@v1", args_for_log=args_for_log, ok=False, ms=ms, error=err.get("error"))
-            err.setdefault("corr_id", CORR_ID)
-            return err
+    c = _find_primary_connector(u, "connected_apps_walk_data", "Google Fit")
+    if not c:
+        return typed_error("not_connected", "User not connected to Google Fit for walk data", user_id=user_id)
 
-        c = _find_primary_connector(u, "connected_apps_walk_data", "Google Fit")
-        if not c:
-            out = _typed_error("not_connected", "User not connected to Google Fit for walk data", user_id=user_id)
-            ms = int((time.perf_counter() - t0) * 1000)
-            _log_source_tool("source.googlefit.walk.fetch@v1", args_for_log=args_for_log, ok=False, ms=ms, error=out.get("error"))
-            out.setdefault("corr_id", CORR_ID)
-            return out
+    if not c.auth_bearer:
+        return typed_error("missing_token", "Missing Google Fit auth_bearer for walk connector", user_id=user_id)
 
-        if not c.auth_bearer:
-            out = _typed_error("missing_token", "Missing Google Fit auth_bearer for walk connector", user_id=user_id)
-            ms = int((time.perf_counter() - t0) * 1000)
-            _log_source_tool("source.googlefit.walk.fetch@v1", args_for_log=args_for_log, ok=False, ms=ms, error=out.get("error"))
-            out.setdefault("corr_id", CORR_ID)
-            return out
+    raw = fetch_google_fit_walk_data(
+        player_id=c.player_id,
+        auth_bearer=c.auth_bearer,
+        start_date=start_date,
+        end_date=end_date,
+    )
 
-        raw = fetch_google_fit_walk_data(player_id=c.player_id, auth_bearer=c.auth_bearer)
-        if raw is None:
-            out = _typed_error("upstream_error", "Google Fit walk fetch returned no data (upstream error)", user_id=user_id)
-            ms = int((time.perf_counter() - t0) * 1000)
-            _log_source_tool("source.googlefit.walk.fetch@v1", args_for_log=args_for_log, ok=False, ms=ms, error=out.get("error"))
-            out.setdefault("corr_id", CORR_ID)
-            return out
+    if raw is None:
+        return typed_error("upstream_error", "Google Fit walk fetch returned no data (upstream error)", user_id=user_id)
 
-        records = _filter_and_page(list(raw), start_date, end_date, limit, offset)
-        out = {
-            "user_id": user_id,
-            "source": "Google Fit",
-            "kind": "walk",
-            "records": records,
-            "provenance": {
-                "player_id": c.player_id,
-                "retrieved_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                "ms": int((time.perf_counter() - t0) * 1000),
-            },
-        }
-
-        ms = int((time.perf_counter() - t0) * 1000)
-        _log_source_tool("source.googlefit.walk.fetch@v1", args_for_log=args_for_log, ok=True, ms=ms)
-        out.setdefault("corr_id", CORR_ID)
-        return out
-
-    except Exception as e:
-        ms = int((time.perf_counter() - t0) * 1000)
-        out = _typed_error("internal", str(e), user_id=user_id)
-        _log_source_tool("source.googlefit.walk.fetch@v1", args_for_log=args_for_log, ok=False, ms=ms, error=out.get("error"))
-        out.setdefault("corr_id", CORR_ID)
-        return out
+    records = _filter_and_page(list(raw), start_date, end_date, limit, offset)
+    return {
+        "user_id": user_id,
+        "source": "Google Fit",
+        "kind": "walk",
+        "records": records,
+        "provenance": {
+            "player_id": c.player_id,
+            "retrieved_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        },
+    }
 
 
 
 @mcp.tool(name="source.gamebus.trivia.fetch@v1")
+@_instrument("source.gamebus.trivia.fetch@v1")
 def source_gamebus_trivia_fetch(
     user_id: int,
     start_date: str | None = None,
     end_date: str | None = None,
 ) -> dict:
-    t0 = time.perf_counter()
-    args_for_log = {"user_id": user_id, "start_date": start_date, "end_date": end_date}
+    u, err = _get_user_or_error(user_id)
+    if err:
+        return err
 
-    try:
-        u, err = _get_user_or_error(user_id)
-        if err:
-            ms = int((time.perf_counter() - t0) * 1000)
-            _log_source_tool("source.gamebus.trivia.fetch@v1", args_for_log=args_for_log, ok=False, ms=ms, error=err.get("error"))
-            err.setdefault("corr_id", CORR_ID)
-            return err
+    c = _gamebus_diabetes_connector(u)
+    if not c:
+        return typed_error("not_connected", "User not connected to GameBus for diabetes/trivia data", user_id=user_id)
 
-        c = _gamebus_diabetes_connector(u)
-        if not c:
-            out = _typed_error("not_connected", "User not connected to GameBus for diabetes/trivia data", user_id=user_id)
-            ms = int((time.perf_counter() - t0) * 1000)
-            _log_source_tool("source.gamebus.trivia.fetch@v1", args_for_log=args_for_log, ok=False, ms=ms, error=out.get("error"))
-            out.setdefault("corr_id", CORR_ID)
-            return out
+    if not c.auth_bearer:
+        return typed_error("missing_token", "Missing GameBus auth_bearer for diabetes/trivia connector", user_id=user_id)
 
-        if not c.auth_bearer:
-            out = _typed_error("missing_token", "Missing GameBus auth_bearer for diabetes/trivia connector", user_id=user_id)
-            ms = int((time.perf_counter() - t0) * 1000)
-            _log_source_tool("source.gamebus.trivia.fetch@v1", args_for_log=args_for_log, ok=False, ms=ms, error=out.get("error"))
-            out.setdefault("corr_id", CORR_ID)
-            return out
+    data, latest = fetch_trivia_data(
+        player_id=c.player_id,
+        start_date=_gamebus_date_iso(start_date, end=False),
+        end_date=_gamebus_date_iso(end_date, end=True),
+        auth_bearer=c.auth_bearer,
+    )
+    if data is None and latest is None:
+        return typed_error("upstream_error", "GameBus trivia fetch returned no data (upstream error)", user_id=user_id)
 
-        data, latest = fetch_trivia_data(
-            player_id=c.player_id,
-            start_date=_gamebus_date_iso(start_date, end=False),
-            end_date=_gamebus_date_iso(end_date, end=True),
-            auth_bearer=c.auth_bearer,
-        )
-        if data is None and latest is None:
-            out = _typed_error("upstream_error", "GameBus trivia fetch returned no data (upstream error)", user_id=user_id)
-            ms = int((time.perf_counter() - t0) * 1000)
-            _log_source_tool("source.gamebus.trivia.fetch@v1", args_for_log=args_for_log, ok=False, ms=ms, error=out.get("error"))
-            out.setdefault("corr_id", CORR_ID)
-            return out
-
-        out = {
-            "user_id": user_id,
-            "source": "GameBus",
-            "kind": "trivia",
-            "data": data,
-            "latest_activity": latest,
-            "provenance": {
-                "player_id": c.player_id,
-                "retrieved_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                "ms": int((time.perf_counter() - t0) * 1000),
-            },
-        }
-
-        ms = int((time.perf_counter() - t0) * 1000)
-        _log_source_tool("source.gamebus.trivia.fetch@v1", args_for_log=args_for_log, ok=True, ms=ms)
-        out.setdefault("corr_id", CORR_ID)
-        return out
-
-    except Exception as e:
-        ms = int((time.perf_counter() - t0) * 1000)
-        out = _typed_error("internal", str(e), user_id=user_id)
-        _log_source_tool("source.gamebus.trivia.fetch@v1", args_for_log=args_for_log, ok=False, ms=ms, error=out.get("error"))
-        out.setdefault("corr_id", CORR_ID)
-        return out
+    return {
+        "user_id": user_id,
+        "source": "GameBus",
+        "kind": "trivia",
+        "data": data,
+        "latest_activity": latest,
+        "provenance": {
+            "player_id": c.player_id,
+            "retrieved_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        },
+    }
 
 
 
 @mcp.tool(name="source.gamebus.sugarvita.fetch@v1")
+@_instrument("source.gamebus.sugarvita.fetch@v1")
 def source_gamebus_sugarvita_fetch(
     user_id: int,
     start_date: str | None = None,
     end_date: str | None = None,
 ) -> dict:
-    t0 = time.perf_counter()
-    args_for_log = {"user_id": user_id, "start_date": start_date, "end_date": end_date}
+    u, err = _get_user_or_error(user_id)
+    if err:
+        return err
 
-    try:
-        u, err = _get_user_or_error(user_id)
-        if err:
-            ms = int((time.perf_counter() - t0) * 1000)
-            _log_source_tool("source.gamebus.sugarvita.fetch@v1", args_for_log=args_for_log, ok=False, ms=ms, error=err.get("error"))
-            err.setdefault("corr_id", CORR_ID)
-            return err
+    c = _gamebus_diabetes_connector(u)
+    if not c:
+        return typed_error("not_connected", "User not connected to GameBus for diabetes/sugarvita data", user_id=user_id)
 
-        c = _gamebus_diabetes_connector(u)
-        if not c:
-            out = _typed_error("not_connected", "User not connected to GameBus for diabetes/sugarvita data", user_id=user_id)
-            ms = int((time.perf_counter() - t0) * 1000)
-            _log_source_tool("source.gamebus.sugarvita.fetch@v1", args_for_log=args_for_log, ok=False, ms=ms, error=out.get("error"))
-            out.setdefault("corr_id", CORR_ID)
-            return out
+    if not c.auth_bearer:
+        return typed_error("missing_token", "Missing GameBus auth_bearer for diabetes/sugarvita connector", user_id=user_id)
 
-        if not c.auth_bearer:
-            out = _typed_error("missing_token", "Missing GameBus auth_bearer for diabetes/sugarvita connector", user_id=user_id)
-            ms = int((time.perf_counter() - t0) * 1000)
-            _log_source_tool("source.gamebus.sugarvita.fetch@v1", args_for_log=args_for_log, ok=False, ms=ms, error=out.get("error"))
-            out.setdefault("corr_id", CORR_ID)
-            return out
+    data, latest = fetch_sugarvita_data(
+        player_id=c.player_id,
+        start_date=_gamebus_date_iso(start_date, end=False),
+        end_date=_gamebus_date_iso(end_date, end=True),
+        auth_bearer=c.auth_bearer,
+    )
+    if data is None and latest is None:
+        return typed_error("upstream_error", "GameBus sugarvita fetch returned no data (upstream error)", user_id=user_id)
 
-        data, latest = fetch_sugarvita_data(
-            player_id=c.player_id,
-            start_date=_gamebus_date_iso(start_date, end=False),
-            end_date=_gamebus_date_iso(end_date, end=True),
-            auth_bearer=c.auth_bearer,
-        )
-        if data is None and latest is None:
-            out = _typed_error("upstream_error", "GameBus sugarvita fetch returned no data (upstream error)", user_id=user_id)
-            ms = int((time.perf_counter() - t0) * 1000)
-            _log_source_tool("source.gamebus.sugarvita.fetch@v1", args_for_log=args_for_log, ok=False, ms=ms, error=out.get("error"))
-            out.setdefault("corr_id", CORR_ID)
-            return out
-
-        out = {
-            "user_id": user_id,
-            "source": "GameBus",
-            "kind": "sugarvita",
-            "data": data,
-            "latest_activity": latest,
-            "provenance": {
-                "player_id": c.player_id,
-                "retrieved_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                "ms": int((time.perf_counter() - t0) * 1000),
-            },
-        }
-
-        ms = int((time.perf_counter() - t0) * 1000)
-        _log_source_tool("source.gamebus.sugarvita.fetch@v1", args_for_log=args_for_log, ok=True, ms=ms)
-        out.setdefault("corr_id", CORR_ID)
-        return out
-
-    except Exception as e:
-        ms = int((time.perf_counter() - t0) * 1000)
-        out = _typed_error("internal", str(e), user_id=user_id)
-        _log_source_tool("source.gamebus.sugarvita.fetch@v1", args_for_log=args_for_log, ok=False, ms=ms, error=out.get("error"))
-        out.setdefault("corr_id", CORR_ID)
-        return out
-
+    return {
+        "user_id": user_id,
+        "source": "GameBus",
+        "kind": "sugarvita",
+        "data": data,
+        "latest_activity": latest,
+        "provenance": {
+            "player_id": c.player_id,
+            "retrieved_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        },
+    }
 
 
 def main() -> None:
@@ -529,4 +384,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    init_runtime()
+    CONFIG_DIR = config_dir()
     main()

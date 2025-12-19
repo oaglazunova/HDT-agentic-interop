@@ -3,7 +3,7 @@
     "hdt-mcp": {
       "type": "stdio",
       "command": "C:/Users/sonok/Documents/Github/HDT-agentic-interop/.venv/Scripts/mcp.exe",
-      "args": ["run", "C:/Users/sonok/Documents/Github/HDT-agentic-interop/HDT_MCP/server.py"],
+      "args": ["run", "C:/Users/sonok/Documents/Github/HDT-agentic-interop/hdt_mcp/server.py"],
       "env": {
         "HDT_API_BASE": "http://localhost:5000",
         "HDT_API_KEY": "MODEL_DEVELOPER_1",

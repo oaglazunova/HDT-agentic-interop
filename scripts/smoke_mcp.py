@@ -1,121 +1,173 @@
 """
-Smoke script for both API reachability and MCP policy demo.
+Smoke script for MCP reachability + policy demo (no REST).
 
 It performs:
- 1) API health check (HTTP)
- 2) Optional API call to /get_walk_data
- 3) MCP policy demonstration: loads policy from HDT_POLICY_PATH and applies it
-    to a sample payload, showing effective allow/redact and redaction count.
+ 1) MCP Gateway health check via stdio (spawns the gateway module)
+ 2) Lists tools and calls hdt.healthz@v1
+ 3) Calls hdt.sources.status@v1 (optional but recommended)
+ 4) Policy demonstration: loads policy from HDT_POLICY_PATH (or config/policy.json)
+    and applies it to a sample payload, showing redactions.
 """
 
-import json, os, sys
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import sys
 from pathlib import Path
+from typing import Any
 
-# Ensure project root is on sys.path so that "HDT_MCP" package resolves
+# Ensure repo root is on sys.path BEFORE importing repo packages
 _THIS_FILE = Path(__file__).resolve()
-_PROJECT_ROOT = _THIS_FILE.parents[1]
-if str(_PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PROJECT_ROOT))
-from urllib.request import urlopen, Request
-from urllib.error import URLError, HTTPError
+_REPO_ROOT = _THIS_FILE.parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
-API_URL = os.environ.get("HDT_API_BASE", "http://localhost:5000").rstrip("/")
-API_KEY = os.environ.get("MODEL_DEVELOPER_1_API_KEY", "MODEL_DEVELOPER_1")
+from hdt_mcp.policy import engine as pol  # noqa: E402
 
 
-def _http_get(path, headers=None, timeout=5):
-    url = API_URL + path
-    req = Request(url, headers=headers or {})
-    with urlopen(req, timeout=timeout) as r:
-        data = r.read().decode("utf-8")
-        return r.getcode(), r.headers, data
-
-
-def demo_api():
-    print(f"[smoke] API_URL={API_URL}")
+def _pretty(x: Any) -> str:
+    if isinstance(x, str):
+        s = x.strip()
+        if s.startswith("{") or s.startswith("["):
+            try:
+                return json.dumps(json.loads(s), indent=2, ensure_ascii=False)
+            except Exception:
+                return x
+        return x
     try:
-        code, hdrs, body = _http_get("/healthz")
-        print(f"[smoke] /healthz -> {code}")
-        if code != 200:
-            print(body)
-            return False
-        payload = json.loads(body)
-        assert payload.get("status") in ("ok", "OK"), "healthz not ok"
-    except (URLError, HTTPError) as e:
-        print(f"[smoke] /healthz failed: {e}")
-        return False
+        return json.dumps(x, indent=2, ensure_ascii=False)
+    except Exception:
+        return str(x)
 
-    # Try placeholder user 2 (created by the init script)
-    headers = {"Authorization": f"Bearer {API_KEY}"}
+
+def _unwrap_tool_result(res: Any) -> Any:
+    content = getattr(res, "content", None)
+    if not content:
+        return res
+    c0 = content[0]
+    if isinstance(c0, dict) and "text" in c0:
+        return c0["text"]
+    return getattr(c0, "text", c0)
+
+
+async def demo_mcp() -> bool:
+    # Lazy import so the script remains usable even outside pre-commit envs
+    from mcp import ClientSession
+    from mcp.client.stdio import stdio_client, StdioServerParameters
+
+    gateway_module = os.getenv("HDT_GATEWAY_MODULE", "hdt_mcp.gateway")
+
+    python_cmd = os.getenv("MCP_PYTHON") or sys.executable
+    user_id = int(os.getenv("HDT_SMOKE_USER_ID", "1"))
+    purpose = os.getenv("HDT_SMOKE_PURPOSE", "analytics")
+
+    print(f"[smoke] Repo root: {_REPO_ROOT}")
+    print(f"[smoke] Gateway module: {gateway_module}")
+    print(f"[smoke] Python: {python_cmd}")
+    print(f"[smoke] user_id={user_id}, purpose={purpose}")
+
+    server = StdioServerParameters(
+        command=python_cmd,
+        args=["-m", gateway_module],
+        env=dict(os.environ, MCP_TRANSPORT="stdio"),
+    )
+
+    ok = True
+
+    async with stdio_client(server) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+
+            tools = await session.list_tools()
+            names = [t.name for t in tools.tools]
+            print("\n[smoke] TOOLS:")
+            for n in names:
+                print(f" - {n}")
+
+            # Gateway health check
+            try:
+                res = await session.call_tool("hdt.healthz@v1", {})
+                out = _unwrap_tool_result(res)
+                print("\n[smoke] CALL hdt.healthz@v1:")
+                print(_pretty(out))
+
+                if isinstance(out, str):
+                    out_obj = json.loads(out) if out.strip().startswith("{") else {"text": out}
+                else:
+                    out_obj = out
+                if not (isinstance(out_obj, dict) and out_obj.get("ok") is True):
+                    print("[smoke] WARN: hdt.healthz@v1 did not return {'ok': True}")
+                    ok = False
+            except Exception as e:
+                print(f"[smoke] ERROR: hdt.healthz@v1 failed: {e}")
+                return False
+
+            # Sources status (recommended)
+            try:
+                res = await session.call_tool(
+                    "hdt.sources.status@v1",
+                    {"user_id": user_id, "purpose": purpose},
+                )
+                out = _unwrap_tool_result(res)
+                print(f"\n[smoke] CALL hdt.sources.status@v1(user_id={user_id}):")
+                print(_pretty(out))
+            except Exception as e:
+                print(f"[smoke] WARN: hdt.sources.status@v1 failed: {e}")
+                ok = False
+
+    return ok
+
+
+def demo_policy() -> bool:
+    pol.policy_reset_cache()
+
+    pol_path = os.getenv("HDT_POLICY_PATH") or str(getattr(pol, "_POLICY_PATH", ""))
+    print(f"\n[smoke] Policy file: {pol_path or '(unknown)'}")
+
+    purpose = os.getenv("HDT_SMOKE_PURPOSE", "analytics")
+    tool_name = os.getenv("HDT_SMOKE_TOOL", "hdt.walk.fetch@v1")
+
     try:
-        code, hdrs, body = _http_get("/get_walk_data?user_id=2", headers=headers)
-        print(f"[smoke] /get_walk_data?user_id=2 -> {code}")
-        if code != 200:
-            print(body)
-            return False
-        data = json.loads(body)
-        if not isinstance(data, (list, dict)):
-            print("[smoke] unexpected JSON shape")
-            return False
-        # Show governance headers from the API
-        pol = hdrs.get("X-Policy")
-        pol_red = hdrs.get("X-Policy-Redactions")
-        if pol:
-            print(f"[smoke] API headers: X-Policy={pol}, X-Policy-Redactions={pol_red}")
-    except (URLError, HTTPError) as e:
-        print(f"[smoke] /get_walk_data failed: {e}")
-        return False
+        client_id = os.getenv("MCP_CLIENT_ID")
+        rule = pol._resolve_rule(purpose, tool_name, client_id)  # demo visibility
+        print(f"[smoke] Effective rule for purpose={purpose}, tool={tool_name}, client_id={client_id}:")
+        print(_pretty(rule))
+    except Exception as e:
+        print(f"[smoke] WARN: could not resolve rule preview: {e}")
 
-    return True
-
-
-def demo_policy():
-    # Import MCP server helpers for policy evaluation
-    import HDT_MCP.server as srv
-
-    # Ensure we read the latest on disk
-    srv._policy_reset_cache()
-
-    pol_path = os.getenv("HDT_POLICY_PATH") or str(srv._POLICY_PATH)
-    print(f"[smoke] Policy file: {pol_path}")
-
-    # Show effective analytics lane for an example tool
-    eff = srv.policy_evaluate(purpose=srv.LANE_ANALYTICS, tool="vault.integrated@v1")
-    print("[smoke] policy.evaluate (analytics, tool=vault.integrated@v1):", eff)
-
-    # Apply policy to a nested payload to demonstrate redaction
     sample = {
         "streams": {
             "walk": {
                 "records": [
                     {"date": "2025-11-01", "steps": 123, "kcalories": 1.2},
-                    {"date": "2025-11-02", "steps": 456}
+                    {"date": "2025-11-02", "steps": 456, "kcalories": 9.9},
                 ]
             }
         }
     }
-    payload = json.loads(json.dumps(sample))  # cheap deep copy
-    _, redactions = srv._apply_policy_metrics(
-        srv.LANE_ANALYTICS,
-        "vault.integrated@v1",
-        payload,
-        client_id=os.environ.get("MCP_CLIENT_ID")
+
+    result, redactions = pol.apply_policy_metrics(
+        purpose,
+        tool_name,
+        sample,
+        client_id=os.getenv("MCP_CLIENT_ID"),
     )
 
     print(f"[smoke] redactions applied: {redactions}")
     print("[smoke] payload after policy:")
-    print(json.dumps(payload, indent=2, ensure_ascii=False))
+    print(_pretty(result))
 
-    # Return True if any redactions were applied (so the demo is visible)
-    return redactions >= 0
+    return True
 
 
-def main():
-    ok_api = demo_api()
+async def main() -> int:
+    ok_mcp = await demo_mcp()
     ok_pol = demo_policy()
-    print("[smoke] OK" if (ok_api and ok_pol) else "[smoke] Completed with warnings")
-    return 0 if (ok_api and ok_pol) else 1
+    print("\n[smoke] OK" if (ok_mcp and ok_pol) else "\n[smoke] Completed with warnings")
+    return 0 if (ok_mcp and ok_pol) else 1
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(asyncio.run(main()))

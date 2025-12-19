@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Any, Dict
 
-from HDT_MCP.adapters.api_walk import ApiWalkAdapter
+from hdt_mcp.adapters.api_walk import ApiWalkAdapter
 
 
 class _FakeResp:

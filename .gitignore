@@ -66,23 +66,44 @@ config/*.log
 /config/users.secrets.json
 
 # =========================
-# Local data / results (repo-specific)
+# Telemetry output (repo-specific)
+# Note: repo uses uppercase folders; keep lowercase too for safety
 # =========================
+hdt_mcp/telemetry/
+hdt_mcp/telemetry/*.jsonl
+hdt_sources_mcp/telemetry/
+hdt_sources_mcp/telemetry/*.jsonl
+hdt_mcp/telemetry/
+hdt_mcp/telemetry/*.jsonl
+
+# =========================
+# Local data / vaults / results (repo-specific)
+# =========================
+data/
+!data/.gitkeep
+
+# If you want to keep some sample data committed, whitelist it explicitly:
+#!data/sample/
+#!data/README.md
+
+# SQLite / DuckDB / DB scratch files (anywhere, not just /data)
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+*.duckdb
+*.duckdb-wal
+*.duckdb-shm
+
+# The accidental filename created by an inline comment in .env values
+*.sqlite#*
+
+# Common exports / analysis artifacts (tighten if you want CSVs committed)
 *.csv
 digital_twin_results.csv
 trivia.json
 engagement.json
 playthrough.json
-
-# telemetry output
-hdt_mcp/telemetry/
-hdt_mcp/telemetry/*.jsonl
-
-# =========================
-# DuckDB runtime files
-# =========================
-data/*.duckdb-wal
-data/*.duckdb-shm
 
 # =========================
 # Python cache files that sometimes slip in

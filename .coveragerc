@@ -1,52 +1,57 @@
 [run]
 branch = True
 source =
-    HDT_CORE_INFRASTRUCTURE
-    HDT_MCP
+    hdt_core_infrastructure
+    hdt_mcp
+    hdt_sources_mcp
 
 # Omit integration adapters, thin shims, and non-core assets from quick-hook coverage
 omit =
     # Provider adapters/parsers (exercise with integration tests, not unit tests)
-    HDT_CORE_INFRASTRUCTURE/GAMEBUS_*_fetch.py
-    HDT_CORE_INFRASTRUCTURE/GAMEBUS_*_parse.py
-    HDT_CORE_INFRASTRUCTURE/GOOGLE_FIT_*_fetch.py
-    HDT_CORE_INFRASTRUCTURE/GOOGLE_FIT_*_parse.py
+    hdt_core_infrastructure/GAMEBUS_*_fetch.py
+    hdt_core_infrastructure/GAMEBUS_*_parse.py
+    hdt_core_infrastructure/GOOGLE_FIT_*_fetch.py
+    hdt_core_infrastructure/GOOGLE_FIT_*_parse.py
 
-    # Compatibility shims / glue modules
-    HDT_API/*
-    HDT_MCP/hdt_api.py
-    validation.py
+    # Legacy REST façade (if still present; otherwise safe to keep)
+    hdt_core_infrastructure/HDT_API.py
+    hdt_core_infrastructure/hdt_api_*.py
 
-    # Demo/CLI/scripts, docs, and models outside core runtime
+    # Compatibility shims / glue modules (if you add them)
+    hdt_mcp/server.py
+    hdt_mcp/vault.py
+
+    # Composition roots (heavy wiring; often better measured in integration/CI)
+    hdt_mcp/server_option_*.py
+    hdt_mcp/gateway.py
+    hdt_mcp/orchestrator.py
+    hdt_sources_mcp/server.py
+
+    # Demo/CLI/scripts, docs, models outside core runtime
     scripts/*
     docs/*
     Virtual_Twin_Models/*
 
-    # Heavy façade measured in CI separately
-    HDT_MCP/policy.py
-    HDT_MCP/reduction.py
-    HDT_MCP/server.py
+    # Data artifacts
+    data/*
 
-    # Heavy Flask façade (quick-run omits; still measured in CI)
-    HDT_CORE_INFRASTRUCTURE/HDT_API.py
-    HDT_CORE_INFRASTRUCTURE\\HDT_API.py
-
-    # Additional low-signal modules omitted for quick pre-commit scope
-    # (integration/edge-heavy; still measured in full CI as desired)
-    HDT_CORE_INFRASTRUCTURE/auth.py
-    HDT_CORE_INFRASTRUCTURE\\auth.py
-    HDT_CORE_INFRASTRUCTURE/hdt_api_fetchers.py
-    HDT_CORE_INFRASTRUCTURE\\hdt_api_fetchers.py
-    HDT_CORE_INFRASTRUCTURE/hdt_api_utils.py
-    HDT_CORE_INFRASTRUCTURE\\hdt_api_utils.py
+    # Python cache
+    */__pycache__/*
+    *.pyc
 
 [report]
 exclude_lines =
     # Don't complain about defensive code or no-cover markers
     pragma: no cover
-    if __name__ == .__main__.
+    if __name__ == ["']__main__["']:
+
+    # Typing-only blocks
+    if TYPE_CHECKING:
+
+    # Defensive exception handling (keep these if you use "fail-soft" boundaries)
     except Exception:
     except:
+
     raise NotImplementedError
 
 show_missing = True

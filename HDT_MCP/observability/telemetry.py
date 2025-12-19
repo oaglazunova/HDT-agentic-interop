@@ -6,8 +6,8 @@ import os
 from pathlib import Path
 from typing import Any, Dict
 
-from HDT_MCP.core.context import get_request_id
-from HDT_MCP.core.errors import REDACT_TOKEN
+from hdt_mcp.core.context import get_request_id
+from hdt_mcp.core.errors import REDACT_TOKEN
 
 _TELEMETRY_DIR = Path(os.getenv("HDT_TELEMETRY_DIR", str(Path(__file__).resolve().parents[1] / "telemetry")))
 _TELEMETRY_DIR.mkdir(parents=True, exist_ok=True)
@@ -56,7 +56,7 @@ def log_event(
     payload = {} if args is None else dict(args)
 
     rec = {
-        "ts": _dt.datetime.utcnow().isoformat() + "Z",
+        "ts": _dt.datetime.now(_dt.timezone.utc).isoformat().replace("+00:00", "Z"),
         "kind": kind,
         "name": name,
         "client_id": client_id,

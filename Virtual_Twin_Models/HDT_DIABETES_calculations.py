@@ -1,5 +1,4 @@
 from statistics import mean, pstdev
-from sklearn.preprocessing import MinMaxScaler
 
 # Manipulate initial metrics for trivia
 def manipulate_initial_metrics_trivia(metrics_cleaned):
@@ -74,12 +73,29 @@ def manipulate_initial_metrics_sugarvita(metrics_cleaned):
 
     return metrics_overview_pt_sugarvita, metrics_overview_hl_sugarvita
 
-# Normalize metrics
+
 def normalize_metrics(metrics_overview):
-    values = [[value] for value in metrics_overview.values()]
-    scaler = MinMaxScaler()
-    normalized_values = scaler.fit_transform(values)
-    return {key: normalized_value[0] for key, normalized_value in zip(metrics_overview.keys(), normalized_values)}
+    """
+    Pure-Python replacement for sklearn MinMaxScaler on a single feature.
+
+    Your previous code scaled each metric value relative to the min/max of all values
+    in the dict. This preserves that exact behavior:
+      - min -> 0.0
+      - max -> 1.0
+      - constant vector -> 0.0 for all entries (matches sklearn behavior)
+    """
+    keys = list(metrics_overview.keys())
+    vals = [float(metrics_overview[k]) for k in keys]
+
+    vmin = min(vals)
+    vmax = max(vals)
+
+    if vmax == vmin:
+        return {k: 0.0 for k in keys}
+
+    denom = (vmax - vmin)
+    return {k: (float(metrics_overview[k]) - vmin) / denom for k in keys}
+
 
 # Calculate the final scores
 def calculate_score(weights, metrics_normalized):

@@ -3,11 +3,11 @@
 ## Highlights
 
 * **MCP-only HDT interface**: HDT capabilities are exposed via MCP tools; REST is not part of the primary integration contract.
-* **External HDT MCP server** (`HDT_MCP.server_option_d`):
+* **External HDT MCP server** (`hdt_mcp.gateway`):
 
   * Domain-first tool surface (`hdt.walk.fetch@v1`, `hdt.trivia.fetch@v1`, `hdt.sugarvita.fetch@v1`, `hdt.sources.status@v1`).
   * Per-call instrumentation: **purpose-lane validation**, **policy pre-check (deny fast)**, **policy redaction on success**, and **telemetry logging**.
-* **HDT Governor (orchestrator)** (`HDT_MCP.mcp_governor.HDTGovernor`):
+* **HDT Governor (orchestrator)** (`hdt_mcp.mcp_governor.HDTGovernor`):
 
   * Centralizes **source selection**, **fallback**, and **error normalization** across external systems.
   * Produces consistent HDT-level responses with:
@@ -16,7 +16,7 @@
     * `attempts` (negotiation trace)
     * structured failure modes
   * Optional vault strategy via `prefer_data=auto|vault|live` and write-through behavior on successful live fetches (best effort).
-* **Sources MCP façade (internal)** (`HDT_SOURCES_MCP.server`):
+* **Sources MCP façade (internal)** (`hdt_sources_mcp.server`):
 
   * Wraps connectors as MCP tools:
 
@@ -32,12 +32,6 @@
 * **Quickstart scripts** validate the full chain:
 
   * Sources MCP discovery/invocation, Governor fallback, and external HDT MCP tool calls.
-
-## Breaking Changes
-
-* **REST assumptions removed**: integrations should target MCP tools (external HDT MCP server) rather than HTTP endpoints / OpenAPI.
-* **Tool-first contract**: versioned tool names and MCP tool schemas define compatibility; source-specific API details are hidden behind the Sources MCP façade.
-* **Error semantics changed**: callers must handle typed error envelopes (instead of treating empty lists as “no data”).
 
 ## Known Issues
 

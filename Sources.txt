@@ -4,7 +4,7 @@ In the **Interoperable-and-modular-HDT-system-prototype** repository, those thre
 
 **Source:** GameBus API (live, per user)
 
-**Where in code:** `HDT_CORE_INFRASTRUCTURE/GAMEBUS_DIABETES_fetch.py` → `fetch_trivia_data(...)`
+**Where in code:** `hdt_core_infrastructure/GAMEBUS_DIABETES_fetch.py` → `fetch_trivia_data(...)`
 
 **How it is retrieved:**
 
@@ -19,7 +19,7 @@ So “Trivia” here means **GameBus activity records** under the GDS descriptor
 
 **Source:** GameBus API (live, per user)
 
-**Where in code:** `HDT_CORE_INFRASTRUCTURE/GAMEBUS_DIABETES_fetch.py` → `fetch_sugarvita_data(...)`
+**Where in code:** `hdt_core_infrastructure/GAMEBUS_DIABETES_fetch.py` → `fetch_sugarvita_data(...)`
 
 **How it is retrieved:**
 
@@ -57,7 +57,7 @@ In this repo, “diabetes data” (as exposed to apps) is primarily **computed o
 
 **Where it is served from:**
 
-* `HDT_CORE_INFRASTRUCTURE/HDT_API.py`
+* `hdt_core_infrastructure/HDT_API.py`
 
   * `/get_health_literacy_diabetes` reads from `diabetes_pt_hl_storage.json`
   * `/get_sugarvita_player_types` reads from `diabetes_pt_hl_storage.json`

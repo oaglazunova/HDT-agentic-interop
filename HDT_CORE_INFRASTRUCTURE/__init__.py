@@ -1,1 +1,1 @@
-# This file makes the HDT_CORE_INFRASTRUCTURE directory a Python package
+# This file makes the hdt_core_infrastructure directory a Python package

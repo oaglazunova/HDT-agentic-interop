@@ -7,7 +7,7 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from HDT_MCP.core.errors import REDACT_TOKEN, typed_error
+from hdt_mcp.core.errors import REDACT_TOKEN, typed_error
 
 # Policy location (defaults to config/policy.json)
 CONFIG_DIR = Path(__file__).resolve().parents[2] / "config"

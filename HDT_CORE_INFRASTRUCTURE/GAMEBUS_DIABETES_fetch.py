@@ -1,79 +1,120 @@
-import requests
 import logging
-from datetime import datetime
-from HDT_CORE_INFRASTRUCTURE.GAMEBUS_DIABETES_parse import parse_json_trivia, parse_json_sugarvita
+import os
+import re
+from datetime import datetime, timezone
+
+from hdt_core_infrastructure.GAMEBUS_DIABETES_parse import parse_json_trivia, parse_json_sugarvita
+from hdt_core_infrastructure.http_client import DEFAULT_HTTP_CLIENT
 
 logger = logging.getLogger(__name__)
 
-def format_date_to_dd_mm_yyyy(date_str):
+GAMEBUS_BASE_URL = os.getenv("HDT_GAMEBUS_BASE_URL", "https://api3-new.gamebus.eu/v2").rstrip("/")
+
+
+def _auth_headers(auth_bearer: str | None) -> dict[str, str]:
+    if not auth_bearer:
+        return {}
+    t = str(auth_bearer).strip()
+    if not t.lower().startswith("bearer "):
+        t = f"Bearer {t}"
+    return {"Authorization": t}
+
+
+def format_date_to_dd_mm_yyyy(date_str: str | None) -> str | None:
+    """Convert a loose date/time string to DD-MM-YYYY (GameBus API expectation).
+
+    Accepts:
+    - DD-MM-YYYY (returned as-is)
+    - YYYY-MM-DD
+    - ISO timestamps like YYYY-MM-DDTHH:MM:SSZ or with offsets
+    - naive timestamps (treated as UTC)
     """
-    Converts an ISO 8601 date string to DD-MM-YYYY format that the GameBus API expects.
-    """
-    try:
-        return datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%SZ").strftime("%d-%m-%Y")
-    except ValueError:
-        logger.warning(f"Invalid date format: {date_str}. Skipping conversion.")
+    if not date_str:
         return None
 
-def fetch_trivia_data(player_id, start_date=None, end_date=None, auth_bearer=None):
-    """
-    Fetches trivia data for a player based on date range with proper authorization.
-    """
-    logger.info(f"Fetching trivia data for player {player_id}")
+    s = str(date_str).strip()
+    if not s:
+        return None
 
-    # Convert dates to DD-MM-YYYY format that the GameBus API expects
+    # Already in DD-MM-YYYY
+    if re.match(r"^\d{2}-\d{2}-\d{4}$", s):
+        return s
+
+    # Date-only YYYY-MM-DD
+    try:
+        if len(s) == 10 and s[4] == "-" and s[7] == "-":
+            dt = datetime.strptime(s, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            return dt.strftime("%d-%m-%Y")
+    except Exception:
+        pass
+
+    # ISO-ish timestamps
+    try:
+        iso = s.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(iso)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc).strftime("%d-%m-%Y")
+    except Exception:
+        pass
+
+    # Legacy strict pattern (last resort)
+    try:
+        return datetime.strptime(s, "%Y-%m-%dT%H:%M:%SZ").strftime("%d-%m-%Y")
+    except Exception:
+        logger.warning("Invalid date format: %s. Skipping conversion.", s)
+        return None
+
+
+def fetch_trivia_data(player_id, start_date=None, end_date=None, auth_bearer=None):
+    logger.info("Fetching trivia data for player %s", player_id)
+
     start_date = format_date_to_dd_mm_yyyy(start_date) if start_date else None
     end_date = format_date_to_dd_mm_yyyy(end_date) if end_date else None
 
-    endpoint = f"https://api3-new.gamebus.eu/v2/players/{player_id}/activities?gds=ANSWER_TRIVIA_DIABETES"
-
+    endpoint = f"{GAMEBUS_BASE_URL}/players/{player_id}/activities"
+    params: dict[str, str] = {"gds": "ANSWER_TRIVIA_DIABETES"}
     if start_date:
-        endpoint += f"&start={start_date}"
+        params["start"] = start_date
     if end_date:
-        endpoint += f"&end={end_date}"
+        params["end"] = end_date
 
-    headers = {"Authorization": f"Bearer {auth_bearer}"}
+    headers = _auth_headers(auth_bearer)
 
     try:
-        response = requests.get(endpoint, headers=headers)
-        response.raise_for_status()
+        response = DEFAULT_HTTP_CLIENT.get(endpoint, headers=headers, params=params)
         data, latest_activity_info = parse_json_trivia(response)
         return data, latest_activity_info
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Error fetching trivia data for player {player_id}: {e}")
+    except Exception as e:
+        logger.error("Error fetching trivia data for player %s: %s", player_id, e)
         return None, None
 
-def fetch_sugarvita_data(player_id, start_date=None, end_date=None, auth_bearer=None):
-    """
-    Fetches sugarvita data for a player based on date range with proper authorization.
-    """
-    logger.info(f"Fetching sugarvita data for player {player_id}")
 
-    # Convert dates to DD-MM-YYYY format that the GameBus API expects
+def fetch_sugarvita_data(player_id, start_date=None, end_date=None, auth_bearer=None):
+    logger.info("Fetching sugarvita data for player %s", player_id)
+
     start_date = format_date_to_dd_mm_yyyy(start_date) if start_date else None
     end_date = format_date_to_dd_mm_yyyy(end_date) if end_date else None
 
-    endpoint_pt = f"https://api3-new.gamebus.eu/v2/players/{player_id}/activities?gds=SUGARVITA_PLAYTHROUGH"
-    endpoint_hl = f"https://api3-new.gamebus.eu/v2/players/{player_id}/activities?gds=SUGARVITA_ENGAGEMENT_LOG_1"
+    endpoint = f"{GAMEBUS_BASE_URL}/players/{player_id}/activities"
+    params_pt: dict[str, str] = {"gds": "SUGARVITA_PLAYTHROUGH"}
+    params_hl: dict[str, str] = {"gds": "SUGARVITA_ENGAGEMENT_LOG_1"}
 
     if start_date:
-        endpoint_pt += f"&start={start_date}"
-        endpoint_hl += f"&start={start_date}"
+        params_pt["start"] = start_date
+        params_hl["start"] = start_date
     if end_date:
-        endpoint_pt += f"&end={end_date}"
-        endpoint_hl += f"&end={end_date}"
+        params_pt["end"] = end_date
+        params_hl["end"] = end_date
 
-    headers = {"Authorization": f"Bearer {auth_bearer}"}
+    headers = _auth_headers(auth_bearer)
 
     try:
-        response_pt = requests.get(endpoint_pt, headers=headers)
-        response_hl = requests.get(endpoint_hl, headers=headers)
-        response_pt.raise_for_status()
-        response_hl.raise_for_status()
+        response_pt = DEFAULT_HTTP_CLIENT.get(endpoint, headers=headers, params=params_pt)
+        response_hl = DEFAULT_HTTP_CLIENT.get(endpoint, headers=headers, params=params_hl)
 
         data, latest_activity_info = parse_json_sugarvita(response_pt, response_hl)
         return data, latest_activity_info
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Error fetching sugarvita data for player {player_id}: {e}")
+    except Exception as e:
+        logger.error("Error fetching sugarvita data for player %s: %s", player_id, e)
         return None, None
-

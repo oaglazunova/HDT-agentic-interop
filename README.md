@@ -21,15 +21,15 @@
 
 ## Architecture Overview
 
-* **External interface**: `HDT_MCP.server_option_d` (HDT MCP server)
+* **External interface**: `hdt_mcp.gateway` (HDT MCP server)
 
   * Exposes HDT-level tools to external agents/clients.
   * Delegates execution to the **HDT Governor**.
-* **Internal source interface**: `HDT_SOURCES_MCP.server` (Sources MCP server)
+* **Internal source interface**: `hdt_sources_mcp.server` (Sources MCP server)
 
   * Exposes source-specific tools (GameBus/Google Fit/SugarVita/Trivia).
   * Reads connection configuration via merged `config/users.json` + `config/users.secrets.json`.
-* **Connectors**: existing fetchers/parsers under `HDT_CORE_INFRASTRUCTURE/`
+* **Connectors**: existing fetchers/parsers under `hdt_core_infrastructure/`
 
 ## Architecture at a glance:
 ![Architecture-2025-11-20-102953.png](architecture.jpg)
@@ -76,7 +76,7 @@ python scripts\test_hdt_mcp_option_d.py
 ## Upgrade Notes
 
 * Validate `config/users.json` and `config/users.secrets.json` for consistent `connected_application`/`player_id` pairs; otherwise secrets will not merge.
-* If you previously relied on REST endpoints (Flask), migrate consumers to MCP tools exposed by `HDT_MCP.server_option_d`.
+* If you previously relied on REST endpoints (Flask), migrate consumers to MCP tools exposed by `hdt_mcp.gateway`.
 * Keep the Sources MCP server internal (stdio transport) and avoid exposing it directly to untrusted networks.
 
 
@@ -89,11 +89,11 @@ Below is a **drop-in addition/rewrite** you can paste into your README to (1) ex
 This repository implements **MCP-only** using **two MCP servers**:
 
 1. **External-facing HDT MCP server**
-   Module: `python -m HDT_MCP.server_option_d`
+   Module: `python -m hdt_mcp.gateway`
    Purpose: exposes *domain-level* HDT tools to external agents/clients.
 
 2. **Internal Sources MCP server**
-   Module: `python -m HDT_SOURCES_MCP.server`
+   Module: `python -m hdt_sources_mcp.server`
    Purpose: wraps external systems (GameBus, Google Fit, SugarVita, Trivia) as MCP tools, using fetchers.
 
 The HDT MCP server calls the Sources MCP server internally via a local stdio MCP client (it spawns it as a subprocess).
@@ -112,14 +112,14 @@ PowerShell:
 
 ```powershell
 $env:MCP_TRANSPORT="stdio"
-python -m HDT_MCP.server_option_d
+python -m hdt_mcp.gateway
 ```
 
 If you prefer `streamable-http` (optional):
 
 ```powershell
 $env:MCP_TRANSPORT="streamable-http"
-python -m HDT_MCP.server_option_d
+python -m hdt_mcp.gateway
 ```
 
 Notes:
@@ -135,7 +135,7 @@ If you want to run it explicitly (debugging):
 
 ```powershell
 $env:MCP_TRANSPORT="stdio"
-python -m HDT_SOURCES_MCP.server
+python -m hdt_sources_mcp.server
 ```
 
 ### C) Validate everything works (recommended)
@@ -177,7 +177,7 @@ This prevents the external tool surface from leaking GameBus/Google Fit/SugarVit
 
 ### Components
 
-#### 1) HDT MCP Server — `HDT_MCP.server_option_d`
+#### 1) HDT MCP Server — `hdt_mcp.gateway`
 
 Role:
 
@@ -204,7 +204,7 @@ What it does on each tool call:
    * `corr_id`
    * duration (ms)
 
-#### 2) HDT Governor — `HDT_MCP.mcp_governor.HDTGovernor`
+#### 2) HDT Governor — `hdt_mcp.mcp_governor.HDTGovernor`
 
 Role:
 
@@ -234,7 +234,7 @@ Outputs:
   * success payload includes `selected_source` and `attempts`
   * failure payload uses typed error envelope + `details` attempt list
 
-#### 3) Sources MCP Server — `HDT_SOURCES_MCP.server`
+#### 3) Sources MCP Server — `hdt_sources_mcp.server`
 
 Role:
 
@@ -250,7 +250,7 @@ What it does:
 
 1. Loads merged user config: `config/users.json` + `config/users.secrets.json`
 2. Resolves the right connector (player_id + token) for the requested user/source
-3. Calls fetchers in `HDT_CORE_INFRASTRUCTURE/`
+3. Calls fetchers in `hdt_core_infrastructure/`
 4. Returns a typed payload:
 
    * success includes `provenance` (retrieved_at, ms, player_id)
@@ -267,14 +267,14 @@ Observability:
 
   * MCP server tool call → Governor → Sources MCP tool call
 
-#### 4) Connectors — `HDT_CORE_INFRASTRUCTURE/*`
+#### 4) Connectors — `hdt_core_infrastructure/*`
 
 Role:
 
 * Existing fetchers/parsers for GameBus/Google Fit/diabetes.
 * Treated as “adapters” behind the Sources MCP tool boundary.
 
-#### 5) Policy engine — `HDT_MCP.policy.*`
+#### 5) Policy engine — `hdt_mcp.policy.*`
 
 Role:
 
@@ -288,7 +288,7 @@ Role:
   * pre-check denies fast
   * post-processing redacts successful payloads only
 
-#### 6) Telemetry — `HDT_MCP.observability.telemetry`
+#### 6) Telemetry — `hdt_mcp.observability.telemetry`
 
 Role:
 
@@ -339,7 +339,7 @@ MCP provides **built-in tool discovery**: clients can query a server to obtain t
 
 ### 1) External discovery (client → HDT) — fully automatic
 
-External agentic clients connect to the **HDT MCP server** (`HDT_MCP.server_option_d`) and can discover available HDT capabilities at runtime:
+External agentic clients connect to the **HDT MCP server** (`hdt_mcp.gateway`) and can discover available HDT capabilities at runtime:
 
 * **Tool list**: the client can request the current set of tools (e.g., `hdt.walk.fetch@v1`, `hdt.trivia.fetch@v1`, `hdt.sugarvita.fetch@v1`, etc.).
 * **Tool schemas**: the client receives the argument schema for each tool.

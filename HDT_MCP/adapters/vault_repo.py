@@ -2,14 +2,14 @@ from __future__ import annotations
 from typing import Optional, List, Any, Dict
 import time
 
-from HDT_MCP.domain.models import WalkRecord
-from HDT_MCP.domain.ports import VaultPort
+from hdt_mcp.domain.models import WalkRecord
+from hdt_mcp.domain.ports import VaultPort
 
 
 class VaultAdapter(VaultPort):
     """
     Wraps your underlying vault module (duckdb/sqlite) with a domain-friendly interface.
-    The provided `vault_mod` should be the already-imported HDT_MCP.vault module.
+    The provided `vault_mod` should be the already-imported hdt_mcp.vault module.
     """
 
     def __init__(self, vault_mod: Any) -> None:

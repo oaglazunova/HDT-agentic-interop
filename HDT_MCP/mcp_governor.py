@@ -6,10 +6,10 @@ import os
 import time
 
 from .sources_mcp_client import SourcesMCPClient
-from HDT_MCP.observability.telemetry import log_event
-from HDT_MCP.core.context import get_request_id
-from HDT_MCP.core.errors import typed_error
-from HDT_MCP import vault_store
+from hdt_mcp.observability.telemetry import log_event
+from hdt_mcp.core.context import get_request_id
+from hdt_mcp.core.errors import typed_error
+from hdt_mcp import vault_store
 
 
 def _as_json(obj: Any) -> Any:

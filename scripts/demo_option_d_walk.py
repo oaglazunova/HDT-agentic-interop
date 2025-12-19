@@ -28,7 +28,7 @@ async def _call(session: ClientSession, name: str, args: dict):
 
 async def main() -> None:
     repo_root = Path(__file__).resolve().parents[1]
-    telemetry_path = repo_root / "HDT_MCP" / "observability" / "telemetry" / "mcp-telemetry.jsonl"
+    telemetry_path = repo_root / "hdt_mcp" / "observability" / "telemetry" / "mcp-telemetry.jsonl"
     telemetry_dir = os.getenv("HDT_TELEMETRY_DIR", str(telemetry_path.parent))
 
     print("\n=== Option D Walk Demo ===")
@@ -37,7 +37,7 @@ async def main() -> None:
 
     server = StdioServerParameters(
         command="python",
-        args=["-m", "HDT_MCP.server_option_d"],
+        args=["-m", "hdt_mcp.gateway"],
         env=dict(os.environ, MCP_TRANSPORT="stdio"),
     )
 
