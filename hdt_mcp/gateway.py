@@ -14,6 +14,9 @@ from hdt_mcp.core.tooling import (
     instrument_sync_tool,
 )
 from config.settings import init_runtime
+from hdt_mcp.observability.telemetry import telemetry_recent
+from hdt_mcp.policy.engine import explain_policy
+
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +81,7 @@ async def hdt_walk_fetch(
         offset=offset,
         prefer=prefer,
         prefer_data=prefer_data,
+        purpose=purpose,
     )
 
 
@@ -89,7 +93,7 @@ async def hdt_trivia_fetch(
     end_date: Optional[str] = None,
     purpose: str = "analytics",
 ) -> dict:
-    return await gov.fetch_trivia(user_id=user_id, start_date=start_date, end_date=end_date)
+    return await gov.fetch_trivia(user_id=user_id, start_date=start_date, end_date=end_date, purpose=purpose)
 
 
 @mcp.tool(name="hdt.sugarvita.fetch@v1")
@@ -100,8 +104,51 @@ async def hdt_sugarvita_fetch(
     end_date: Optional[str] = None,
     purpose: str = "analytics",
 ) -> dict:
-    return await gov.fetch_sugarvita(user_id=user_id, start_date=start_date, end_date=end_date)
+    return await gov.fetch_sugarvita(user_id=user_id, start_date=start_date, end_date=end_date, purpose=purpose)
 
+
+@mcp.tool(name="hdt.walk.features@v1")
+@_instrument("hdt.walk.features@v1")
+async def hdt_walk_features(
+    user_id: int,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    limit: Optional[int] = None,
+    offset: Optional[int] = None,
+    prefer: str = "gamebus",
+    prefer_data: str = "auto",
+    purpose: str = "modeling",
+) -> dict:
+    return await gov.walk_features(
+        user_id=user_id,
+        start_date=start_date,
+        end_date=end_date,
+        limit=limit,
+        offset=offset,
+        prefer=prefer,
+        prefer_data=prefer_data,
+        purpose=purpose,
+    )
+
+
+@mcp.tool(name="hdt.policy.explain@v1")
+@_instrument("hdt.policy.explain@v1")
+async def hdt_policy_explain(
+    tool: str,
+    purpose: str = "analytics",
+) -> dict:
+    return explain_policy(purpose, tool, client_id=MCP_CLIENT_ID)
+
+
+@mcp.tool(name="hdt.telemetry.recent@v1")
+@_instrument("hdt.telemetry.recent@v1")
+async def hdt_telemetry_recent(
+    n: int = 50,
+    purpose: str = "analytics",
+) -> dict:
+    # purpose is accepted to satisfy lane validation + consistent auditing,
+    # but telemetry is already redacted on read (secrets + PII).
+    return telemetry_recent(n=n)
 
 def main() -> None:
     transport = os.environ.get("MCP_TRANSPORT", "stdio")

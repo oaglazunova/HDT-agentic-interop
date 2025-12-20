@@ -17,6 +17,14 @@ _DISABLE_TELEMETRY = (os.getenv("HDT_DISABLE_TELEMETRY", "0").strip().lower() in
 
 _SECRET_KEYS = {"authorization", "auth_bearer", "access_token", "token", "api_key", "apikey"}
 
+_PII_KEYS = {
+    "user_id",
+    "email",
+    "player_id",
+    "account_user_id",
+    "external_user_id",
+}
+
 
 def _redact_secrets(obj: Any) -> Any:
     if isinstance(obj, dict):
@@ -32,6 +40,20 @@ def _redact_secrets(obj: Any) -> Any:
         return out
     if isinstance(obj, list):
         return [_redact_secrets(x) for x in obj]
+    return obj
+
+
+def _redact_pii(obj: Any) -> Any:
+    if isinstance(obj, dict):
+        out = {}
+        for k, v in obj.items():
+            if isinstance(k, str) and k.strip().lower() in _PII_KEYS:
+                out[k] = REDACT_TOKEN
+            else:
+                out[k] = _redact_pii(v)
+        return out
+    if isinstance(obj, list):
+        return [_redact_pii(x) for x in obj]
     return obj
 
 
@@ -74,8 +96,34 @@ def log_event(
 
 
 def telemetry_recent(n: int = 50, telemetry_file: str = "mcp-telemetry.jsonl") -> dict:
+    """
+    Return last N telemetry records (bounded) with secrets + PII redacted.
+    """
     p = _TELEMETRY_DIR / telemetry_file
     if not p.exists():
         return {"records": []}
-    lines = p.read_text(encoding="utf-8").splitlines()[-int(n):]
-    return {"records": [json.loads(x) for x in lines]}
+
+    # hard bounds (avoid huge reads)
+    try:
+        n_int = int(n)
+    except Exception:
+        n_int = 50
+    n_int = max(1, min(n_int, 200))
+
+    # Read a tail window larger than n to tolerate filtering/malformed lines later if needed
+    tail_window = max(500, n_int * 5)
+    lines = p.read_text(encoding="utf-8").splitlines()[-tail_window:]
+
+    out = []
+    for line in lines[-n_int:]:
+        try:
+            rec = json.loads(line)
+        except Exception:
+            continue
+        # defense in depth: redact again on read
+        rec = _redact_secrets(rec)
+        rec = _redact_pii(rec)
+        out.append(rec)
+
+    return {"records": out}
+

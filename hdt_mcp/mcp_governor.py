@@ -11,6 +11,51 @@ from hdt_mcp.core.context import get_request_id
 from hdt_mcp.core.errors import typed_error
 from hdt_mcp import vault_store
 
+def _shape_for_purpose(payload: dict, purpose: str) -> dict:
+    purpose_norm = (purpose or "").strip().lower()
+
+    if not isinstance(payload, dict) or "error" in payload:
+        return payload
+
+    # Base envelope fields that are safe and useful for traceability
+    shaped = {
+        "user_id": payload.get("user_id"),
+        "kind": payload.get("kind"),
+        "selected_source": payload.get("selected_source"),
+        "attempts": payload.get("attempts", []),
+        "purpose": purpose_norm,
+    }
+
+    records = payload.get("records", [])
+    provenance = payload.get("provenance", {})
+
+    if purpose_norm == "coaching":
+        shaped["records"] = records
+        shaped["provenance"] = provenance
+        return shaped
+
+    if purpose_norm == "modeling":
+        # Defense in depth: raw records should not be returned for modeling
+        return typed_error(
+            "not_supported",
+            "Raw fetch tools are not available for modeling. Use a modeling-safe features tool.",
+            user_id=payload.get("user_id"),
+            purpose=purpose_norm,
+        )
+
+    # Default / analytics: minimize connector identifiers
+    shaped["records"] = records
+
+    if isinstance(provenance, dict):
+        redacted_prov = dict(provenance)
+        for k in ("player_id", "email", "token", "account_user_id", "external_user_id"):
+            redacted_prov.pop(k, None)
+        shaped["provenance"] = redacted_prov
+    else:
+        shaped["provenance"] = provenance
+
+    return shaped
+
 
 def _as_json(obj: Any) -> Any:
     """Parse JSON text responses coming from MCP content."""
@@ -78,6 +123,31 @@ def _vault_try_write_walk(
         attempts.append({"source": "vault_write", "ok": False, "error": {"code": "vault_write_failed", "message": str(e)}})
 
 
+def _walk_features_from_records(records: list[dict]) -> dict:
+    steps = []
+    for r in records or []:
+        if isinstance(r, dict):
+            v = r.get("steps")
+            if v is not None:
+                try:
+                    steps.append(int(v))
+                except Exception:
+                    continue
+
+    n = len(steps)
+    if n == 0:
+        return {"days": 0, "total_steps": 0, "avg_steps": 0}
+
+    total = sum(steps)
+    return {
+        "days": n,
+        "total_steps": total,
+        "avg_steps": int(total / n),
+        "min_steps": min(steps),
+        "max_steps": max(steps),
+    }
+
+
 class HDTGovernor:
     """
     Governing orchestrator:
@@ -102,6 +172,7 @@ class HDTGovernor:
             offset: Optional[int] = None,
             prefer: str = "gamebus",
             prefer_data: str = "auto",
+            purpose: str = "analytics"
     ) -> Dict[str, Any]:
         t0 = time.perf_counter()
 
@@ -126,8 +197,9 @@ class HDTGovernor:
                 "prefer_data must be one of: auto, vault, live",
                 user_id=user_id,
                 prefer_data=prefer_data,
+                purpose=(purpose or "").strip().lower(),
             )
-            return result
+            return _shape_for_purpose(result, purpose)
 
         # 1) Vault-first (auto|vault)
         if prefer_data_norm in {"auto", "vault"}:
@@ -146,7 +218,8 @@ class HDTGovernor:
                 v["selected_source"] = "vault"
                 v["attempts"] = attempts
                 result = v
-                return result
+                return _shape_for_purpose(result, purpose)
+
 
         # Explicit vault-only request and vault had no data.
         if prefer_data_norm == "vault":
@@ -155,8 +228,9 @@ class HDTGovernor:
                 "prefer_data=vault requested but vault had no matching data",
                 user_id=user_id,
                 details=attempts,
+                purpose=(purpose or "").strip().lower(),
             )
-            return result
+            return _shape_for_purpose(result, purpose)
 
         try:
             # Live sources
@@ -217,7 +291,7 @@ class HDTGovernor:
                         v["attempts"] = attempts
                         result = v
 
-            return result
+            return _shape_for_purpose(result, purpose)
 
         except Exception as e:
             exc = str(e)
@@ -232,6 +306,7 @@ class HDTGovernor:
                 "user_id": user_id,
                 "prefer": prefer,
                 "prefer_data": prefer_data_norm,
+                "purpose": (purpose or "").strip().lower(),
                 "selected_source": selected_source,
                 "attempts": attempts,
             }
@@ -253,11 +328,14 @@ class HDTGovernor:
             user_id: int,
             start_date: Optional[str] = None,
             end_date: Optional[str] = None,
+            purpose: str = "analytics"
     ) -> Dict[str, Any]:
         t0 = time.perf_counter()
         cid = os.getenv("MCP_CLIENT_ID", "MODEL_DEVELOPER_1")
 
         args = {"user_id": user_id, "start_date": start_date, "end_date": end_date}
+        attempts: list[dict] = []
+        selected_source: str | None = None
         result: Dict[str, Any] | None = None
         exc: str | None = None
 
@@ -265,12 +343,26 @@ class HDTGovernor:
             raw = await self.sources.call_tool("source.gamebus.trivia.fetch@v1", args)
             payload = _as_json(raw)
 
-            if isinstance(payload, dict):
+            selected_source = "gamebus"
+
+            if isinstance(payload, dict) and "error" not in payload:
+                attempts.append({"source": "gamebus", "ok": True})
+                payload["selected_source"] = "gamebus"
+                payload["attempts"] = attempts
                 result = payload
             else:
-                result = {"error": {"code": "unknown", "message": str(payload)}, "user_id": user_id}
+                err = payload.get("error", {}) if isinstance(payload, dict) else {"code": "unknown",
+                                                                                  "message": str(payload)}
+                attempts.append({"source": "gamebus", "ok": False, "error": err})
+                result = {
+                    "error": {"code": err.get("code", "unknown"), "message": err.get("message", "unknown error"),
+                              "details": attempts},
+                    "user_id": user_id,
+                    "selected_source": selected_source,
+                    "attempts": attempts,
+                }
 
-            return result
+            return _shape_for_purpose(result, purpose)
 
         except Exception as e:
             exc = str(e)
@@ -282,7 +374,9 @@ class HDTGovernor:
 
             log_payload = {
                 "user_id": user_id,
-                "source": "gamebus",
+                "purpose": (purpose or "").strip().lower(),
+                "selected_source": selected_source,
+                "attempts": attempts,
                 "tool": "source.gamebus.trivia.fetch@v1",
                 "args": args,
             }
@@ -296,7 +390,7 @@ class HDTGovernor:
                 ok=ok,
                 ms=ms,
                 client_id=cid,
-                corr_id=get_request_id(),
+                corr_id=get_request_id()
             )
 
     async def fetch_sugarvita(
@@ -304,11 +398,14 @@ class HDTGovernor:
             user_id: int,
             start_date: Optional[str] = None,
             end_date: Optional[str] = None,
+            purpose: str = "analytics",
     ) -> Dict[str, Any]:
         t0 = time.perf_counter()
         cid = os.getenv("MCP_CLIENT_ID", "MODEL_DEVELOPER_1")
 
         args = {"user_id": user_id, "start_date": start_date, "end_date": end_date}
+        attempts: list[dict] = []
+        selected_source: str | None = None
         result: Dict[str, Any] | None = None
         exc: str | None = None
 
@@ -316,12 +413,29 @@ class HDTGovernor:
             raw = await self.sources.call_tool("source.gamebus.sugarvita.fetch@v1", args)
             payload = _as_json(raw)
 
-            if isinstance(payload, dict):
+            selected_source = "gamebus"
+
+            if isinstance(payload, dict) and "error" not in payload:
+                attempts.append({"source": "gamebus", "ok": True})
+                payload["selected_source"] = "gamebus"
+                payload["attempts"] = attempts
                 result = payload
             else:
-                result = {"error": {"code": "unknown", "message": str(payload)}, "user_id": user_id}
+                err = payload.get("error", {}) if isinstance(payload, dict) else {"code": "unknown",
+                                                                                  "message": str(payload)}
+                attempts.append({"source": "gamebus", "ok": False, "error": err})
+                result = {
+                    "error": {
+                        "code": err.get("code", "unknown"),
+                        "message": err.get("message", "unknown error"),
+                        "details": attempts,
+                    },
+                    "user_id": user_id,
+                    "selected_source": selected_source,
+                    "attempts": attempts,
+                }
 
-            return result
+            return _shape_for_purpose(result, purpose)
 
         except Exception as e:
             exc = str(e)
@@ -333,7 +447,9 @@ class HDTGovernor:
 
             log_payload = {
                 "user_id": user_id,
-                "source": "gamebus",
+                "purpose": (purpose or "").strip().lower(),
+                "selected_source": selected_source,
+                "attempts": attempts,
                 "tool": "source.gamebus.sugarvita.fetch@v1",
                 "args": args,
             }
@@ -349,4 +465,84 @@ class HDTGovernor:
                 client_id=cid,
                 corr_id=get_request_id(),
             )
+
+    async def walk_features(
+            self,
+            user_id: int,
+            start_date: Optional[str] = None,
+            end_date: Optional[str] = None,
+            limit: Optional[int] = None,
+            offset: Optional[int] = None,
+            prefer: str = "gamebus",
+            prefer_data: str = "auto",
+            purpose: str = "modeling",
+    ) -> Dict[str, Any]:
+        t0 = time.perf_counter()
+        cid = os.getenv("MCP_CLIENT_ID", "MODEL_DEVELOPER_1")
+        exc: str | None = None
+        result: Dict[str, Any] | None = None
+
+        try:
+            # Enforce purpose for this tool (defense-in-depth)
+            if (purpose or "").strip().lower() != "modeling":
+                result = typed_error("bad_request", "purpose must be modeling for hdt.walk.features@v1",
+                                     user_id=user_id, purpose=purpose)
+                return result
+
+            # Reuse existing fetch logic to get records, but request coaching internally
+            # so the governor gets full records regardless of external lane shaping.
+            raw = await self.fetch_walk(
+                user_id=user_id,
+                start_date=start_date,
+                end_date=end_date,
+                limit=limit,
+                offset=offset,
+                prefer=prefer,
+                prefer_data=prefer_data,
+                purpose="coaching",
+            )
+
+            if not isinstance(raw, dict) or "error" in raw:
+                result = raw if isinstance(raw, dict) else {"error": {"code": "unknown", "message": str(raw)},
+                                                            "user_id": user_id}
+                return result
+
+            feats = _walk_features_from_records(raw.get("records", []))
+            result = {
+                "user_id": user_id,
+                "kind": "walk_features",
+                "purpose": "modeling",
+                "features": feats,
+                "selected_source": raw.get("selected_source"),
+                "attempts": raw.get("attempts", []),
+                # Provenance-lite: do NOT include connector IDs; only report source choice
+                "provenance": {"selected_source": raw.get("selected_source")},
+            }
+            return result
+
+        except Exception as e:
+            exc = str(e)
+            raise
+
+        finally:
+            ms = int((time.perf_counter() - t0) * 1000)
+            ok = bool(result) and isinstance(result, dict) and ("error" not in result)
+            log_payload = {
+                "user_id": user_id,
+                "purpose": "modeling",
+                "prefer": prefer,
+                "prefer_data": (prefer_data or "").strip().lower(),
+            }
+            if exc:
+                log_payload["exception"] = exc
+            log_event(
+                "governor",
+                "walk.features",
+                log_payload,
+                ok=ok,
+                ms=ms,
+                client_id=cid,
+                corr_id=get_request_id(),
+            )
+
 

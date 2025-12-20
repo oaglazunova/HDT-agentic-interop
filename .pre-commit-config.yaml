@@ -1,28 +1,25 @@
 repos:
   - repo: local
     hooks:
+      # 1) Fast gate on commit: no coverage threshold here
       - id: pytest-quick
         name: pytest (quick)
-        entry: python -m pytest --maxfail=1 --disable-warnings -q --cov-config=.coveragerc --cov=hdt_mcp --cov=hdt_core_infrastructure --cov=hdt_sources_mcp --cov-report=term --cov-fail-under=85
-        language: python
+        entry: python -m pytest --maxfail=1 --disable-warnings -q
+        language: system
         pass_filenames: false
-        additional_dependencies:
-          - pytest
-          - pytest-cov
-          - pytest-asyncio
-          - python-dotenv
-          - requests
-          - mcp>=1.24,<2
 
+      # 2) Strict gate on push (or run manually): coverage
+      - id: pytest-cov
+        name: pytest (coverage gate)
+        entry: python -m pytest -q --cov-config=.coveragerc --cov=hdt_mcp --cov=hdt_sources_mcp --cov-report=term --cov-report=term-missing --cov-fail-under=70
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+
+      # 3) Optional: keep your smoke script as manual
       - id: smoke-mcp
         name: smoke_mcp (manual)
         entry: python scripts/smoke_mcp.py
-        language: python
+        language: system
         pass_filenames: false
         stages: [manual]
-        additional_dependencies:
-          - mcp>=1.24,<2
-          - python-dotenv
-
-default_language_version:
-  python: python

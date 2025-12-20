@@ -144,3 +144,34 @@ def apply_policy_metrics(purpose: str, tool_name: str, payload: dict, *, client_
     result = apply_policy_safe(purpose, tool_name, payload, client_id=client_id)
     meta = policy_last_meta() or {}
     return result, int(meta.get("redactions", 0))
+
+
+def explain_policy(purpose: str, tool_name: str, *, client_id: str | None = None) -> dict:
+    """
+    Explain the resolved policy rule for (purpose, tool, client_id).
+
+    Returns:
+      - resolved rule (allow + redact)
+      - contributing layers (defaults/client/tool)
+    """
+    pol = _policy() or {}
+    defaults_layer = ((pol.get("defaults", {}) or {}).get(purpose) or {})
+    client_layer = {}
+    if client_id:
+        client_layer = (((pol.get("clients", {}) or {}).get(client_id, {}) or {}).get(purpose) or {})
+    tool_layer = (((pol.get("tools", {}) or {}).get(tool_name, {}) or {}).get(purpose) or {})
+
+    resolved = _resolve_rule(purpose, tool_name, client_id)
+
+    return {
+        "purpose": purpose,
+        "tool": tool_name,
+        "client_id": client_id,
+        "resolved": resolved,
+        "layers": {
+            "defaults": defaults_layer,
+            "client": client_layer,
+            "tool": tool_layer,
+        },
+    }
+

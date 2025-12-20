@@ -36,6 +36,21 @@
       "analytics": { "allow": true },
       "coaching":  { "allow": true },
       "modeling":  { "allow": false }
+    },
+    "hdt.walk.features@v1": {
+      "analytics": { "allow": true },
+      "coaching":  { "allow": true },
+      "modeling":  { "allow": true }
+    },
+    "hdt.policy.explain@v1": {
+      "analytics": { "allow": true },
+      "coaching":  { "allow": true },
+      "modeling":  { "allow": true }
+    },
+    "hdt.telemetry.recent@v1": {
+      "analytics": { "allow": true },
+      "coaching":  { "allow": true },
+      "modeling":  { "allow": true }
     }
   }
 }
