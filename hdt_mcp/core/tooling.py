@@ -105,8 +105,8 @@ class PolicyConfig:
     """Optional policy enforcement configuration for instrumented tools."""
     lanes: set[str]
     # policy engine hooks
-    apply_policy: Callable[[str, str, dict, str], dict]
-    apply_policy_safe: Callable[[str, str, dict, str], dict]
+    apply_policy: Callable[..., dict]
+    apply_policy_safe: Callable[..., dict]
     policy_last_meta: Callable[[], dict | None]
     purpose_param: str = "purpose"
 
