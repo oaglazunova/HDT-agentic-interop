@@ -145,7 +145,7 @@ def instrument_async_tool(cfg: InstrumentConfig, *, policy: PolicyConfig | None 
                     return payload
 
                 # deny-fast: avoid downstream calls
-                probe = policy.apply_policy(purpose_value, cfg.name, {}, cfg.client_id)
+                probe = policy.apply_policy(purpose_value, cfg.name, {}, client_id=cfg.client_id)
                 if isinstance(probe, dict) and probe.get("error", {}).get("code") == "denied_by_policy":
                     ms = int((time.perf_counter() - t0) * 1000)
                     meta = policy.policy_last_meta() or {}
@@ -161,7 +161,7 @@ def instrument_async_tool(cfg: InstrumentConfig, *, policy: PolicyConfig | None 
 
                 # Apply redaction only on successful payloads
                 if policy is not None and isinstance(payload, dict) and "error" not in payload:
-                    payload = policy.apply_policy_safe(purpose_value or "", cfg.name, payload, cfg.client_id)
+                    payload = policy.apply_policy_safe(purpose_value or "", cfg.name, payload, client_id=cfg.client_id)
 
             except Exception as e:
                 payload = typed_error("internal", str(e))
