@@ -1,30 +1,15 @@
 [run]
 branch = True
 source =
-    hdt_core_infrastructure
     hdt_mcp
     hdt_sources_mcp
 
-# Omit integration adapters, thin shims, and non-core assets from quick-hook coverage
 omit =
     # Provider adapters/parsers (exercise with integration tests, not unit tests)
-    hdt_core_infrastructure/GAMEBUS_*_fetch.py
-    hdt_core_infrastructure/GAMEBUS_*_parse.py
-    hdt_core_infrastructure/GOOGLE_FIT_*_fetch.py
-    hdt_core_infrastructure/GOOGLE_FIT_*_parse.py
+    hdt_sources_mcp/core_infrastructure/*
 
-    # Legacy REST façade (if still present; otherwise safe to keep)
-    hdt_core_infrastructure/HDT_API.py
-    hdt_core_infrastructure/hdt_api_*.py
-
-    # Compatibility shims / glue modules (if you add them)
-    hdt_mcp/server.py
-    hdt_mcp/vault.py
-
-    # Composition roots (heavy wiring; often better measured in integration/CI)
-    hdt_mcp/server_option_*.py
+    # Composition roots (heavy wiring; better measured in integration/CI)
     hdt_mcp/gateway.py
-    hdt_mcp/orchestrator.py
     hdt_sources_mcp/server.py
 
     # Demo/CLI/scripts, docs, models outside core runtime
@@ -41,17 +26,11 @@ omit =
 
 [report]
 exclude_lines =
-    # Don't complain about defensive code or no-cover markers
     pragma: no cover
     if __name__ == ["']__main__["']:
-
-    # Typing-only blocks
     if TYPE_CHECKING:
-
-    # Defensive exception handling (keep these if you use "fail-soft" boundaries)
-    except Exception:
+    except Exception
     except:
-
     raise NotImplementedError
 
 show_missing = True

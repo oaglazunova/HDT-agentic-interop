@@ -1,9 +1,9 @@
 import logging
 import os
 
-from hdt_core_infrastructure.GAMEBUS_WALK_parse import parse_walk_activities
-from hdt_core_infrastructure.http_client import DEFAULT_HTTP_CLIENT
-from hdt_core_infrastructure.GAMEBUS_DIABETES_fetch import format_date_to_dd_mm_yyyy
+from .GAMEBUS_WALK_parse import parse_walk_activities
+from .http_client import DEFAULT_HTTP_CLIENT
+from .GAMEBUS_DIABETES_fetch import format_date_to_dd_mm_yyyy
 
 logger = logging.getLogger(__name__)
 

@@ -7,14 +7,17 @@ from pathlib import Path
 from datetime import date, datetime
 
 from mcp.server.fastmcp import FastMCP
-from hdt_core_infrastructure.users_store import load_users_merged
-from hdt_core_infrastructure.GAMEBUS_WALK_fetch import fetch_walk_data
-from hdt_core_infrastructure.GOOGLE_FIT_WALK_fetch import fetch_google_fit_walk_data
-from hdt_core_infrastructure.GAMEBUS_DIABETES_fetch import fetch_trivia_data, fetch_sugarvita_data
 from hdt_mcp.core.context import set_request_id, get_request_id
 from hdt_mcp.core.errors import typed_error
 from hdt_mcp.core.tooling import InstrumentConfig, instrument_sync_tool
 from config.settings import init_runtime, config_dir
+from hdt_sources_mcp.core_infrastructure.users_store import load_users_merged
+from hdt_sources_mcp.core_infrastructure.GAMEBUS_WALK_fetch import fetch_walk_data
+from hdt_sources_mcp.core_infrastructure.GOOGLE_FIT_WALK_fetch import fetch_google_fit_walk_data
+from hdt_sources_mcp.core_infrastructure.GAMEBUS_DIABETES_fetch import (
+    fetch_trivia_data,
+    fetch_sugarvita_data,
+)
 
 
 CORR_ID = os.getenv("HDT_CORR_ID")

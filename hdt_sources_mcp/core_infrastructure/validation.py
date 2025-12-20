@@ -1,4 +1,4 @@
-from datetime import datetime, date as _date
+from datetime import datetime
 import re
 
 _DURATION_RE = re.compile(r"^\d{2}:\d{2}:\d{2}$")

@@ -3,8 +3,8 @@ import os
 import re
 from datetime import datetime, timezone
 
-from hdt_core_infrastructure.GAMEBUS_DIABETES_parse import parse_json_trivia, parse_json_sugarvita
-from hdt_core_infrastructure.http_client import DEFAULT_HTTP_CLIENT
+from .GAMEBUS_DIABETES_parse import parse_json_trivia, parse_json_sugarvita
+from .http_client import DEFAULT_HTTP_CLIENT
 
 logger = logging.getLogger(__name__)
 

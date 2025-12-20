@@ -3,8 +3,8 @@ import os
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 
-from hdt_core_infrastructure.GOOGLE_FIT_WALK_parse import parse_google_fit_walk_data
-from hdt_core_infrastructure.http_client import DEFAULT_HTTP_CLIENT
+from .GOOGLE_FIT_WALK_parse import parse_google_fit_walk_data
+from .http_client import DEFAULT_HTTP_CLIENT
 
 logger = logging.getLogger(__name__)
 

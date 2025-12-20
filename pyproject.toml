@@ -55,7 +55,6 @@ where = ["."]
 include = [
   "hdt_mcp*",
   "hdt_sources_mcp*",
-  "hdt_core_infrastructure*",
   "config*",
 ]
 exclude = [

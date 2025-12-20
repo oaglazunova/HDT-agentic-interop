@@ -4,83 +4,131 @@
 
 * **MCP-only architecture**: the HDT is exposed exclusively via MCP tools; REST is no longer a required integration surface.
 * **HDT Governor (orchestrator)**:
-
   * Central decision point for source selection, fallback, and error normalization.
   * Executes tool calls; returns structured results with provenance.
 * **Sources MCP façade (internal)**:
-
   * External systems are wrapped as MCP tools (e.g., GameBus, Google Fit, SugarVita, Trivia) using the existing fetchers/parsers.
   * Enables capability discovery and uniform invocation via MCP rather than bespoke per-client glue.
 * **Domain-first tool surface (external)**:
-
   * HDT-level tools expose capabilities (e.g., walking, diabetes/trivia) without leaking source-specific API details.
 * **Structured errors and observability**:
-
   * All source failures are returned as typed error envelopes (e.g., `not_connected`, `missing_token`, `upstream_error`, `all_sources_failed`) instead of silent empty results.
   * Basic provenance included in tool responses to support debugging and auditing.
 
 ## Architecture Overview
 
 * **External interface**: `hdt_mcp.gateway` (HDT MCP server)
-
   * Exposes HDT-level tools to external agents/clients.
   * Delegates execution to the **HDT Governor**.
 * **Internal source interface**: `hdt_sources_mcp.server` (Sources MCP server)
-
   * Exposes source-specific tools (GameBus/Google Fit/SugarVita/Trivia).
   * Reads connection configuration via merged `config/users.json` + `config/users.secrets.json`.
-* **Connectors**: existing fetchers/parsers under `hdt_core_infrastructure/`
+* **Connectors** (internal implementation detail): provider-specific fetch/parse code lives inside `hdt_sources_mcp` (e.g., `hdt_sources_mcp/core_infrastructure/*`). The external HDT surface remains MCP-only.
 
-## Architecture at a glance:
+## Architecture at a glance
 ![Architecture-2025-11-20-102953.png](architecture.jpg)
 
-## Quickstart (Windows / PowerShell)
+---
 
-### 1) Configure users and secrets
+## Quickstart (reproducible local run)
 
-* Edit `config/users.json` and `config/users.secrets.json`.
-* Ensure identity fields match between public and secrets entries:
+### Prerequisites
+- Python **3.11+** (tested locally with Python 3.14)
+- Git
+- (Windows) `py` launcher recommended
 
-  * `connected_application` + `player_id` must match for secrets overlay to merge.
+### 1) Create and activate a virtual environment
 
-### 2) Test Sources MCP (internal)
-
+**Windows (PowerShell):**
 ```powershell
-python scripts\test_sources_mcp.py
+py -V:3.14 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python --version
+````
+
+**Windows (Git Bash):**
+
+```bash
+py -V:3.14 -m venv .venv
+source .venv/Scripts/activate
+python --version
 ```
 
-### 3) Test the Governor (selection + fallback)
+**macOS / Linux:**
 
-```powershell
-python tests\test_governor.py
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python --version
 ```
 
-### 4) Test external HDT MCP
+### 2) Install dependencies (editable + dev tools)
 
-```powershell
-python scripts\test_hdt_mcp_option_d.py
+```bash
+python -m pip install -U pip
+python -m pip install -e ".[dev]"
 ```
 
-## Breaking Changes
+### 3) Configure users and secrets
 
-* **REST API are no longer the primary integration contract**. The primary interface is now MCP tools.
-* **Tool-first contracts**: clients and integrations should target MCP tool schemas and versioned tool names.
-* **Error semantics changed**: failures are expressed as typed error envelopes (not empty lists).
+This repository expects:
 
-## Known Issues
+* `config/users.json` (non-secret configuration)
+* `config/users.secrets.json` (tokens/credentials; **do not commit**)
 
-* Upstream connectivity depends on valid per-source credentials; placeholder tokens will produce `upstream_error`.
-* The Governor’s negotiation policy is currently minimal (prefer one source, fallback to another). More advanced selection (quality ranking, latency/cost signals, purpose-aware minimization) is planned.
-* Some legacy domain/tools may still exist from the REST-bridged MCP approach.
+If you don’t have configs yet, generate templates:
 
-## Upgrade Notes
+```bash
+python scripts/init_sample_config.py
+```
 
-* Validate `config/users.json` and `config/users.secrets.json` for consistent `connected_application`/`player_id` pairs; otherwise secrets will not merge.
-* If you previously relied on REST endpoints (Flask), migrate consumers to MCP tools exposed by `hdt_mcp.gateway`.
-* Keep the Sources MCP server internal (stdio transport) and avoid exposing it directly to untrusted networks.
+Then edit:
 
+* `config/users.json`
+* `config/users.secrets.json`
 
-Below is a **drop-in addition/rewrite** you can paste into your README to (1) explain the architecture in more detail and (2) show exactly how to run the MCP servers (MCP external + Sources MCP internal), including what “stdio” means and how to validate it works.
+Important merge rule:
+
+* Identity fields must match across public and secret entries (e.g., `connected_application` + `player_id`) so the overlay merges correctly.
+[demo_quickstart.ps1](scripts/demo_quickstart.ps1)
+### 4) Run the test suite (canonical validation)
+
+```bash
+python -m pytest -q
+```
+
+If this passes, your local environment and tool contracts are consistent.
+
+### 5) Run a local end-to-end demo
+
+Run the Option D walk demo:
+
+```bash
+python scripts/demo_option_d_walk.py
+```
+
+(Optional) Run the MCP smoke script:
+
+```bash
+python scripts/smoke_mcp.py
+```
+
+### 6) Enable repo quality gates (recommended for contributors)
+
+Install hooks:
+
+```bash
+python -m pip install pre-commit
+pre-commit install
+pre-commit install --hook-type pre-push
+```
+
+Run locally once:
+
+```bash
+pre-commit run -a
+pre-commit run -a --hook-stage pre-push
+```
 
 ---
 
@@ -102,7 +150,6 @@ The HDT MCP server calls the Sources MCP server internally via a local stdio MCP
 
 * `stdio` (recommended for local dev and demos): MCP messages flow over standard input/output.
   This is ideal for “spawn a server as a subprocess” (internal Sources MCP) and for local testing.
-
 * `streamable-http` (optional): used if you want a network-accessible MCP endpoint.
   Only use this for the **external-facing** server, and only after adding authentication.
 
@@ -125,11 +172,11 @@ python -m hdt_mcp.gateway
 Notes:
 
 * In `stdio` mode you typically do not “see” a friendly banner. It is meant to be driven by an MCP client (scripts/tests).
-* The recommended way to validate behavior is to run the demo script (`scripts/demo_option_d_walk.py`).
+* The recommended way to validate behavior is to run `python scripts/demo_option_d_walk.py`.
 
 ### B) Start the internal Sources MCP server (usually not started manually)
 
-You normally do **not** run Sources MCP directly, because MCP server spawns it automatically.
+You normally do **not** run Sources MCP directly, because the HDT MCP client spawns it automatically.
 
 If you want to run it explicitly (debugging):
 
@@ -146,12 +193,10 @@ Run the demo:
 python scripts\demo_option_d_walk.py
 ```
 
-Run the tests:
+Run the full test suite:
 
 ```powershell
-python scripts\test_sources_mcp.py
-python tests\test_governor.py
-python tests\test_hdt_mcp_option_d.py
+python -m pytest -q
 ```
 
 ### D) Common environment variables
@@ -160,6 +205,7 @@ python tests\test_hdt_mcp_option_d.py
 * `MCP_CLIENT_ID`: identifier for policy/telemetry attribution (e.g., `MODEL_DEVELOPER_1`)
 * `HDT_VAULT_ENABLE`: `1` to enable vault read-through/write-through
 * `HDT_VAULT_PATH`: location of the vault DB file (e.g., `./data/hdt_vault.sqlite`)
+* `HDT_TELEMETRY_DIR`: directory for telemetry JSONL output
 * `HDT_DISABLE_TELEMETRY`: `1` to disable telemetry logging
 
 ---
@@ -267,12 +313,12 @@ Observability:
 
   * MCP server tool call → Governor → Sources MCP tool call
 
-#### 4) Connectors — `hdt_core_infrastructure/*`
+#### 4) Connectors (internal to Sources MCP)
 
 Role:
 
-* Existing fetchers/parsers for GameBus/Google Fit/diabetes.
-* Treated as “adapters” behind the Sources MCP tool boundary.
+* Provider-specific HTTP/OAuth calls and parsing logic.
+* Not part of the external interoperability contract; only exposed through `hdt_sources_mcp.server` tools.
 
 #### 5) Policy engine — `hdt_mcp.policy.*`
 
@@ -349,7 +395,7 @@ This is the primary interoperability surface.
 
 ### 2) Internal discovery (HDT → Sources) — available, not enabled (yet)
 
-In the future, this will be realized via A2A and agent-orchestrator. 
+In the future, this will be realized via A2A and agent-orchestrator.
 
 ### What “negotiation” means in v0.5.0
 
@@ -359,7 +405,3 @@ In this prototype, “negotiation” is implemented as **deterministic orchestra
 * source outcomes are normalized into a single response envelope,
 * the full attempt sequence is recorded for observability.
 
-### Future work
-
-A later iteration can enable **true internal discovery** by having the Governor/Orchestrator call `list_tools()` on Sources MCP and build a capability map at runtime (e.g., discover all `*.walk.fetch@v*` tools). This would allow adding a new source by registering a new Sources MCP tool, without modifying Governor selection logic (beyond naming/metadata conventions).
-In the future Governor will be replaced by Orchestrator AI agent.
