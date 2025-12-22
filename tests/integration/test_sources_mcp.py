@@ -1,56 +1,14 @@
 from __future__ import annotations
 
-import json
-import os
-import sys
-
 import pytest
 
-pytest.importorskip("mcp")
-from mcp.client.stdio import stdio_client, StdioServerParameters
-from mcp import ClientSession
-
-
-def _unwrap_json(res) -> dict:
-    # FastMCP/mcp typically returns a CallToolResult with a content list.
-    content = getattr(res, "content", None)
-    if content:
-        c0 = content[0]
-        if isinstance(c0, dict) and "text" in c0:
-            return json.loads(c0["text"])
-        text = getattr(c0, "text", None)
-        if isinstance(text, str):
-            return json.loads(text)
-    # Fallback if a dict is returned directly
-    if isinstance(res, dict):
-        return res
-    raise AssertionError(f"Unexpected tool result shape: {type(res)} {res!r}")
+from tests.helpers.mcp_runtime import assert_tools_present, call_tool_json
 
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_hdt_sources_mcp_server_healthz_and_tools(tmp_path):
-    env = dict(os.environ)
-    env["MCP_TRANSPORT"] = "stdio"
-    env["HDT_TELEMETRY_DIR"] = str(tmp_path / "telemetry")
+async def test_sources_mcp_healthz_and_tools(sources_session):
+    await assert_tools_present(sources_session, ["healthz@v1", "sources.status@v1"])
 
-    server = StdioServerParameters(
-        command=sys.executable,
-        args=["-m", "hdt_sources_mcp.server"],
-        env=env,
-    )
-
-    async with stdio_client(server) as (read, write):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-
-            tools = await session.list_tools()
-            tool_names = [t.name for t in tools.tools]
-            assert "healthz@v1" in tool_names
-
-            for expected in ['sources.status@v1']:
-                assert expected in tool_names
-
-            res = await session.call_tool("healthz@v1", {})
-            payload = _unwrap_json(res)
-            assert payload.get("ok") is True
+    payload = await call_tool_json(sources_session, "healthz@v1", {})
+    assert payload.get("ok") is True

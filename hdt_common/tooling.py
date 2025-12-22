@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import inspect
 import time
+import functools
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Optional
+from typing import Any, Awaitable, Callable
 
-from hdt_mcp.core.context import get_request_id, new_request_id, set_request_id
-from hdt_mcp.core.errors import typed_error
-from hdt_mcp.observability.telemetry import log_event
+from hdt_common.context import get_request_id, new_request_id, set_request_id
+from hdt_common.errors import typed_error
+from hdt_common.telemetry import log_event
 
 
 # ---------------------------------------------------------------------------
@@ -111,10 +112,15 @@ class PolicyConfig:
     purpose_param: str = "purpose"
 
 
+# uses existing helpers: get_request_id, new_request_id, set_request_id
+# _bound_args, sanitize_args_for_log, typed_error, log_event
 def instrument_async_tool(cfg: InstrumentConfig, *, policy: PolicyConfig | None = None):
     """Decorator for async tools (e.g., HDT MCP Option D)."""
 
     def decorator(fn: Callable[..., Awaitable[Any]]):
+        fn_sig = inspect.signature(fn)
+
+        @functools.wraps(fn)
         async def wrapper(*args: Any, **kwargs: Any):
             corr_id = get_request_id()
             if cfg.new_corr_id_per_call or not corr_id:
@@ -122,20 +128,25 @@ def instrument_async_tool(cfg: InstrumentConfig, *, policy: PolicyConfig | None 
                 set_request_id(corr_id)
 
             t0 = time.perf_counter()
-            bound = _bound_args(fn, args, kwargs)
-            args_for_log = {"args": sanitize_args_for_log(bound)}
+
+            # Bind for logging AND for robust purpose extraction
+            bound = fn_sig.bind_partial(*args, **kwargs)
+            bound.apply_defaults()
+
+            args_for_log: dict[str, Any] = {"args": sanitize_args_for_log(bound)}
 
             # Policy: validate purpose and pre-check deny
-            purpose_value = None
+            purpose_value: str | None = None
             if policy is not None:
-                purpose_value = (kwargs.get(policy.purpose_param) or "").strip().lower()
+                raw_purpose = bound.arguments.get(policy.purpose_param, "")
+                purpose_value = (str(raw_purpose) if raw_purpose is not None else "").strip().lower()
                 args_for_log["purpose"] = purpose_value
 
                 if purpose_value not in policy.lanes:
                     payload = typed_error(
                         "bad_request",
                         f"{policy.purpose_param} must be one of: {', '.join(sorted(policy.lanes))}",
-                        **{policy.purpose_param: kwargs.get(policy.purpose_param)},
+                        **{policy.purpose_param: raw_purpose},
                     )
                     ms = int((time.perf_counter() - t0) * 1000)
                     args_for_log["error"] = payload.get("error")
@@ -164,6 +175,7 @@ def instrument_async_tool(cfg: InstrumentConfig, *, policy: PolicyConfig | None 
                     payload = policy.apply_policy_safe(purpose_value or "", cfg.name, payload, client_id=cfg.client_id)
 
             except Exception as e:
+                # Consider: avoid leaking raw exception messages in production
                 payload = typed_error("internal", str(e))
 
             ms = int((time.perf_counter() - t0) * 1000)
@@ -181,6 +193,9 @@ def instrument_async_tool(cfg: InstrumentConfig, *, policy: PolicyConfig | None 
                 payload.setdefault("corr_id", corr_id)
             return payload
 
+        # Preserve signature for schema generation
+        wrapper.__signature__ = fn_sig  # type: ignore[attr-defined]
         return wrapper
 
     return decorator
+

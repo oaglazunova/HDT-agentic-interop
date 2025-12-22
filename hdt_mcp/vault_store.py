@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from config.settings import repo_root
 
 _LOCK = threading.Lock()
 _INIT = False
@@ -19,12 +20,16 @@ def enabled() -> bool:
 
 
 def _default_db_path() -> Path:
-    repo_root = Path(__file__).resolve().parents[1]
-    data_dir = repo_root / "data"
-    data_dir.mkdir(parents=True, exist_ok=True)
-    # Prefer HDT_VAULT_PATH (your .env), fallback to HDT_VAULT_DB if you ever add it
-    p = os.getenv("HDT_VAULT_PATH") or os.getenv("HDT_VAULT_DB") or str(data_dir / "hdt_vault.sqlite")
-    return (repo_root / p).resolve() if not Path(p).is_absolute() else Path(p)
+    root = repo_root()
+
+    # Default to a gitignored runtime directory to avoid accidental commits.
+    # You can override with HDT_VAULT_PATH (or HDT_VAULT_DB).
+    default_rel = Path("artifacts") / "vault" / "hdt_vault.sqlite"
+    p = os.getenv("HDT_VAULT_PATH") or os.getenv("HDT_VAULT_DB") or str(default_rel)
+
+    db_path = (root / p).resolve() if not Path(p).is_absolute() else Path(p).expanduser().resolve()
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    return db_path
 
 
 def init(db_path: str | None = None) -> str:

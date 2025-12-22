@@ -1,5 +1,5 @@
 import pytest
-from hdt_mcp.core.context import set_request_id
+from hdt_common.context import set_request_id
 
 
 class _FakeResult:

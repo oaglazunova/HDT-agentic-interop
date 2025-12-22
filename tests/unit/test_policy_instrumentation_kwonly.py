@@ -1,6 +1,6 @@
 import pytest
 
-from hdt_mcp.core.tooling import InstrumentConfig, PolicyConfig, instrument_async_tool
+from hdt_common.tooling import InstrumentConfig, PolicyConfig, instrument_async_tool
 from hdt_mcp.policy import engine as policy_engine
 
 

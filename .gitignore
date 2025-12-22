@@ -116,3 +116,6 @@ playthrough.json
 *.tmp
 *.swp
 *.bak
+
+# Runtime artifacts (telemetry, vault DB, tmp)
+artifacts/

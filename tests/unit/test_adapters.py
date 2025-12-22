@@ -1,6 +1,8 @@
 import sys
 import types
 
+from hdt_sources_mcp.connectors.gamebus import fetch_walk
+from hdt_sources_mcp.connectors.google_fit import fetch_walk
 
 def test_gamebus_adapter_monkeypatched_module(monkeypatch):
     # Create a fake provider module with expected function
@@ -12,8 +14,6 @@ def test_gamebus_adapter_monkeypatched_module(monkeypatch):
     # Install it under the expected absolute name
     sys.modules["hdt_sources_mcp.core_infrastructure.GAMEBUS_WALK_fetch"] = mod
 
-
-    from hdt_mcp.adapters.gamebus import fetch_walk
     out = fetch_walk("p-1", auth_bearer=None)
     assert out and out[0]["steps"] == 321
 
@@ -25,7 +25,5 @@ def test_google_fit_adapter_monkeypatched_module(monkeypatch):
     mod.fetch_google_fit_walk_data = fetch_google_fit_walk_data
 
     sys.modules["hdt_sources_mcp.core_infrastructure.GOOGLE_FIT_WALK_fetch"] = mod
-
-    from hdt_mcp.adapters.google_fit import fetch_walk
     out = fetch_walk("p-2", auth_bearer=None)
     assert out and out[0]["steps"] == 654

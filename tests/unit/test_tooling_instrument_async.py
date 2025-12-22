@@ -1,14 +1,13 @@
 import pytest
 
-from hdt_mcp.core.tooling import InstrumentConfig, PolicyConfig, instrument_async_tool
-
+import hdt_common.tooling as tooling
+from hdt_common.tooling import InstrumentConfig, PolicyConfig, instrument_async_tool
 
 @pytest.mark.asyncio
 async def test_instrument_async_tool_rejects_bad_purpose(monkeypatch):
     # capture telemetry calls without writing files
     events = []
 
-    import hdt_mcp.core.tooling as tooling
     monkeypatch.setattr(tooling, "log_event", lambda *a, **k: events.append((a, k)))
 
     cfg = InstrumentConfig(kind="tool", name="hdt.test@v1", client_id="C1", new_corr_id_per_call=True)
@@ -42,7 +41,6 @@ async def test_instrument_async_tool_rejects_bad_purpose(monkeypatch):
 @pytest.mark.asyncio
 async def test_instrument_async_tool_denies_fast(monkeypatch):
     events = []
-    import hdt_mcp.core.tooling as tooling
     monkeypatch.setattr(tooling, "log_event", lambda *a, **k: events.append((a, k)))
 
     cfg = InstrumentConfig(kind="tool", name="hdt.walk.fetch@v1", client_id="C1", new_corr_id_per_call=True)

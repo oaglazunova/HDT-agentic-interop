@@ -1,11 +1,12 @@
 import importlib
 import json
 
+import hdt_common.telemetry as t
+
 def test_telemetry_recent_redacts_pii_and_secrets(tmp_path, monkeypatch):
     monkeypatch.setenv("HDT_TELEMETRY_DIR", str(tmp_path))
     monkeypatch.delenv("HDT_DISABLE_TELEMETRY", raising=False)
 
-    import hdt_mcp.observability.telemetry as t
     importlib.reload(t)
 
     p = tmp_path / "mcp-telemetry.jsonl"

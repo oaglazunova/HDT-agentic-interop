@@ -6,9 +6,9 @@ import os
 import time
 
 from .sources_mcp_client import SourcesMCPClient
-from hdt_mcp.observability.telemetry import log_event
-from hdt_mcp.core.context import get_request_id
-from hdt_mcp.core.errors import typed_error
+from hdt_common.telemetry import log_event
+from hdt_common.context import get_request_id
+from hdt_common.errors import typed_error
 from hdt_mcp import vault_store
 
 def _shape_for_purpose(payload: dict, purpose: str) -> dict:

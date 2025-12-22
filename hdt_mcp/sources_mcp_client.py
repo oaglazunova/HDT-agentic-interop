@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, Optional, TYPE_CHECKING
 
+from config.settings import repo_root
 from hdt_mcp.core.context import get_request_id, new_request_id
 
 if TYPE_CHECKING:
@@ -28,10 +29,9 @@ class SourcesMCPClient:
         # Use the active interpreter (venv-safe). You can override via MCP_SOURCES_PYTHON.
         self._command = os.getenv("MCP_SOURCES_PYTHON") or sys.executable
         self._args = ["-m", "hdt_sources_mcp.server"]
-
-        # Put sources telemetry in its own directory to avoid Windows file contention.
-        repo_root = Path(__file__).resolve().parents[1]
-        self._sources_telemetry_dir = str(repo_root / "hdt_sources_mcp" / "telemetry")
+        # Put Sources telemetry in its own directory to avoid Windows file contention.
+        root = repo_root()
+        self._sources_telemetry_dir = str((root / "artifacts" / "telemetry" / "sources_mcp").resolve())
 
         # Long-lived connection state
         self._stdio_cm = None  # async context manager from stdio_client(...)

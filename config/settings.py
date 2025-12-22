@@ -86,7 +86,7 @@ def telemetry_dir() -> Path:
     p = os.getenv("HDT_TELEMETRY_DIR")
     if p:
         return Path(p).expanduser().resolve()
-    return (repo_root() / "telemetry").resolve()
+    return (repo_root() / "artifacts" / "telemetry").resolve()
 
 
 def configure_logging() -> None:

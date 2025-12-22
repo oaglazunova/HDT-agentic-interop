@@ -1,20 +1,22 @@
 from __future__ import annotations
 
 import os
-from typing import Optional
 import logging
+import functools
+import inspect
+from typing import Optional, Callable, TypeVar, ParamSpec
 
 from mcp.server.fastmcp import FastMCP
 from hdt_mcp.mcp_governor import HDTGovernor
 from hdt_mcp.policy.engine import apply_policy, apply_policy_safe, policy_last_meta
-from hdt_mcp.core.tooling import (
+from hdt_common.tooling import (
     InstrumentConfig,
     PolicyConfig,
     instrument_async_tool,
     instrument_sync_tool,
 )
+from hdt_common.telemetry import telemetry_recent
 from config.settings import init_runtime
-from hdt_mcp.observability.telemetry import telemetry_recent
 from hdt_mcp.policy.engine import explain_policy
 
 
@@ -37,6 +39,9 @@ _POLICY_CFG = PolicyConfig(
     policy_last_meta=policy_last_meta,
 )
 
+P = ParamSpec("P")
+R = TypeVar("R")
+
 def _cfg(tool_name: str) -> InstrumentConfig:
     return InstrumentConfig(
         kind="tool",
@@ -49,20 +54,85 @@ def _instrument(tool_name: str):
     return instrument_async_tool(_cfg(tool_name), policy=_POLICY_CFG)
 
 
-@mcp.tool(name="hdt.healthz@v1")
-@instrument_sync_tool(_cfg("hdt.healthz@v1"))  # remove if you don't want telemetry for healthz
+def hdt_tool(name: str, *, sync: bool = False, instrument: bool = True):
+    """
+    Registers an MCP tool and applies instrumentation (+ policy for async).
+    Keeps tool signature stable for MCP schema generation.
+    """
+    def decorator(fn: Callable[P, R]) -> Callable[P, R]:
+        sig = inspect.signature(fn)
+
+        wrapped = fn
+        if instrument:
+            wrapped = instrument_sync_tool(_cfg(name))(wrapped) if sync else _instrument(name)(wrapped)
+
+        # Defensive: keep signature even if wrappers change
+        registered = mcp.tool(name=name)(wrapped)
+        try:
+            registered.__signature__ = sig  # type: ignore[attr-defined]
+        except Exception:
+            pass
+        return registered
+
+    return decorator
+
+
+def delegate_to_gov(method_name: str):
+    """
+    Replaces tool implementation with a call to gov.<method_name>(**bound_args),
+    filtering out extra tool params not accepted by the gov method.
+    """
+    def decorator(fn):
+        tool_sig = inspect.signature(fn)
+
+        @functools.wraps(fn)
+        async def wrapper(*args, **kwargs):
+            bound = tool_sig.bind(*args, **kwargs)
+            bound.apply_defaults()
+
+            method = getattr(gov, method_name)
+            method_sig = inspect.signature(method)
+
+            accepts_varkw = any(
+                p.kind == inspect.Parameter.VAR_KEYWORD
+                for p in method_sig.parameters.values()
+            )
+
+            if accepts_varkw:
+                call_kwargs = dict(bound.arguments)
+            else:
+                allowed = set(method_sig.parameters.keys())
+                call_kwargs = {k: v for k, v in bound.arguments.items() if k in allowed}
+
+            return await method(**call_kwargs)
+
+        # Preserve schema signature for MCP
+        try:
+            wrapper.__signature__ = tool_sig  # type: ignore[attr-defined]
+        except Exception:
+            pass
+
+        return wrapper
+
+    return decorator
+
+
+@hdt_tool("hdt.healthz@v1", sync=True)  # set instrument=False if you want no telemetry here
 def hdt_healthz() -> dict:
     return {"ok": True}
 
 
-@mcp.tool(name="hdt.sources.status@v1")
-@_instrument("hdt.sources.status@v1")
-async def hdt_sources_status(user_id: int, purpose: str = "analytics") -> dict:
-    return await gov.sources_status(user_id)
+@hdt_tool("hdt.sources.status@v1")
+@delegate_to_gov("sources_status")
+async def hdt_sources_status(
+    user_id: int,
+    purpose: str = "analytics",  # kept for lane validation + consistent auditing; governor ignores it
+) -> dict:
+    ...
 
 
-@mcp.tool(name="hdt.walk.fetch@v1")
-@_instrument("hdt.walk.fetch@v1")
+@hdt_tool("hdt.walk.fetch@v1")
+@delegate_to_gov("fetch_walk")
 async def hdt_walk_fetch(
     user_id: int,
     start_date: Optional[str] = None,
@@ -73,42 +143,33 @@ async def hdt_walk_fetch(
     prefer_data: str = "auto",
     purpose: str = "analytics",
 ) -> dict:
-    return await gov.fetch_walk(
-        user_id=user_id,
-        start_date=start_date,
-        end_date=end_date,
-        limit=limit,
-        offset=offset,
-        prefer=prefer,
-        prefer_data=prefer_data,
-        purpose=purpose,
-    )
+    ...
 
 
-@mcp.tool(name="hdt.trivia.fetch@v1")
-@_instrument("hdt.trivia.fetch@v1")
+@hdt_tool("hdt.trivia.fetch@v1")
+@delegate_to_gov("fetch_trivia")
 async def hdt_trivia_fetch(
     user_id: int,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     purpose: str = "analytics",
 ) -> dict:
-    return await gov.fetch_trivia(user_id=user_id, start_date=start_date, end_date=end_date, purpose=purpose)
+    ...
 
 
-@mcp.tool(name="hdt.sugarvita.fetch@v1")
-@_instrument("hdt.sugarvita.fetch@v1")
+@hdt_tool("hdt.sugarvita.fetch@v1")
+@delegate_to_gov("fetch_sugarvita")
 async def hdt_sugarvita_fetch(
     user_id: int,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     purpose: str = "analytics",
 ) -> dict:
-    return await gov.fetch_sugarvita(user_id=user_id, start_date=start_date, end_date=end_date, purpose=purpose)
+    ...
 
 
-@mcp.tool(name="hdt.walk.features@v1")
-@_instrument("hdt.walk.features@v1")
+@hdt_tool("hdt.walk.features@v1")
+@delegate_to_gov("walk_features")
 async def hdt_walk_features(
     user_id: int,
     start_date: Optional[str] = None,
@@ -119,36 +180,19 @@ async def hdt_walk_features(
     prefer_data: str = "auto",
     purpose: str = "modeling",
 ) -> dict:
-    return await gov.walk_features(
-        user_id=user_id,
-        start_date=start_date,
-        end_date=end_date,
-        limit=limit,
-        offset=offset,
-        prefer=prefer,
-        prefer_data=prefer_data,
-        purpose=purpose,
-    )
+    ...
 
-
-@mcp.tool(name="hdt.policy.explain@v1")
-@_instrument("hdt.policy.explain@v1")
-async def hdt_policy_explain(
-    tool: str,
-    purpose: str = "analytics",
-) -> dict:
+# internal (non-governor), still goes through instrumentation + policy for consistency
+@hdt_tool("hdt.policy.explain@v1")
+async def hdt_policy_explain(tool: str, purpose: str = "analytics") -> dict:
     return explain_policy(purpose, tool, client_id=MCP_CLIENT_ID)
 
 
-@mcp.tool(name="hdt.telemetry.recent@v1")
-@_instrument("hdt.telemetry.recent@v1")
-async def hdt_telemetry_recent(
-    n: int = 50,
-    purpose: str = "analytics",
-) -> dict:
-    # purpose is accepted to satisfy lane validation + consistent auditing,
-    # but telemetry is already redacted on read (secrets + PII).
+# internal (non-governor), still instrumented for auditing; payload already redacted on read
+@hdt_tool("hdt.telemetry.recent@v1")
+async def hdt_telemetry_recent(n: int = 50, purpose: str = "analytics") -> dict:
     return telemetry_recent(n=n)
+
 
 def main() -> None:
     transport = os.environ.get("MCP_TRANSPORT", "stdio")

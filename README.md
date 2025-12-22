@@ -204,7 +204,7 @@ python -m pytest -q
 * `MCP_TRANSPORT`: `stdio` (default) or `streamable-http`
 * `MCP_CLIENT_ID`: identifier for policy/telemetry attribution (e.g., `MODEL_DEVELOPER_1`)
 * `HDT_VAULT_ENABLE`: `1` to enable vault read-through/write-through
-* `HDT_VAULT_PATH`: location of the vault DB file (e.g., `./data/hdt_vault.sqlite`)
+* `HDT_VAULT_PATH`: location of the vault DB file (e.g., `./artifacts/vault/hdt_vault.sqlite`)
 * `HDT_TELEMETRY_DIR`: directory for telemetry JSONL output
 * `HDT_DISABLE_TELEMETRY`: `1` to disable telemetry logging
 

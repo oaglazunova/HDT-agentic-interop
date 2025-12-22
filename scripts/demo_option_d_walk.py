@@ -28,7 +28,7 @@ async def _call(session: ClientSession, name: str, args: dict):
 
 async def main() -> None:
     repo_root = Path(__file__).resolve().parents[1]
-    telemetry_path = repo_root / "hdt_mcp" / "observability" / "telemetry" / "mcp-telemetry.jsonl"
+    telemetry_path = repo_root / "artifacts" / "telemetry" / "mcp-telemetry.jsonl"
     telemetry_dir = os.getenv("HDT_TELEMETRY_DIR", str(telemetry_path.parent))
 
     print("\n=== Option D Walk Demo ===")
