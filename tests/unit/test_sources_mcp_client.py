@@ -20,7 +20,7 @@ class _FakeSessionFailOnceGlobal:
         self.calls.append((name, args))
 
         # corr-id sync tool should always succeed
-        if name == "sources.context.set@v1":
+        if name == "sources.context.set.v1":
             return _FakeResult("ok")
 
         # fail exactly once overall
@@ -59,7 +59,7 @@ async def test_call_tool_reconnects_once(monkeypatch):
     monkeypatch.setattr(client, "_close", fake_close)
     monkeypatch.setattr(client, "_connect", fake_connect)
 
-    out = await client.call_tool("source.gamebus.walk.fetch@v1", {"user_id": 1})
+    out = await client.call_tool("source.gamebus.walk.fetch.v1", {"user_id": 1})
     assert isinstance(out, str)
     assert '"ok"' in out
 

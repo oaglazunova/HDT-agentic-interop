@@ -6,7 +6,7 @@ from hdt_mcp.policy import engine as policy_engine
 
 @pytest.mark.asyncio
 async def test_instrument_async_tool_passes_client_id_as_keyword():
-    cfg = InstrumentConfig(kind="tool", name="hdt.walk.fetch@v1", client_id="MODEL_DEVELOPER_1", attach_corr_id=False)
+    cfg = InstrumentConfig(kind="tool", name="hdt.walk.fetch.v1", client_id="MODEL_DEVELOPER_1", attach_corr_id=False)
 
     pol = PolicyConfig(
         lanes={"analytics", "coaching", "modeling"},

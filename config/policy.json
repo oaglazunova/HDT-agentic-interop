@@ -12,42 +12,42 @@
     }
   },
   "tools": {
-    "hdt.healthz@v1": {
+    "hdt.healthz.v1": {
       "analytics": { "allow": true },
       "coaching":  { "allow": true },
       "modeling":  { "allow": true }
     },
-    "hdt.sources.status@v1": {
+    "hdt.sources.status.v1": {
       "analytics": { "allow": true },
       "coaching":  { "allow": true },
       "modeling":  { "allow": true }
     },
-    "hdt.walk.fetch@v1": {
+    "hdt.walk.fetch.v1": {
       "analytics": { "allow": true },
       "coaching":  { "allow": true },
       "modeling":  { "allow": false }
     },
-    "hdt.trivia.fetch@v1": {
+    "hdt.trivia.fetch.v1": {
       "analytics": { "allow": true },
       "coaching":  { "allow": true },
       "modeling":  { "allow": false }
     },
-    "hdt.sugarvita.fetch@v1": {
+    "hdt.sugarvita.fetch.v1": {
       "analytics": { "allow": true },
       "coaching":  { "allow": true },
       "modeling":  { "allow": false }
     },
-    "hdt.walk.features@v1": {
+    "hdt.walk.features.v1": {
       "analytics": { "allow": true },
       "coaching":  { "allow": true },
       "modeling":  { "allow": true }
     },
-    "hdt.policy.explain@v1": {
+    "hdt.policy.explain.v1": {
       "analytics": { "allow": true },
       "coaching":  { "allow": true },
       "modeling":  { "allow": true }
     },
-    "hdt.telemetry.recent@v1": {
+    "hdt.telemetry.recent.v1": {
       "analytics": { "allow": true },
       "coaching":  { "allow": true },
       "modeling":  { "allow": true }

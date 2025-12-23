@@ -230,10 +230,10 @@ Role:
 * The **only** supported integration surface for external clients.
 * Exposes **domain-level tools** such as:
 
-  * `hdt.walk.fetch@v1`
-  * `hdt.trivia.fetch@v1`
-  * `hdt.sugarvita.fetch@v1`
-  * `hdt.sources.status@v1`
+  * `hdt.walk.fetch.v1`
+  * `hdt.trivia.fetch.v1`
+  * `hdt.sugarvita.fetch.v1`
+  * `hdt.sources.status.v1`
 
 What it does on each tool call:
 
@@ -286,11 +286,11 @@ Role:
 
 * Internal façade that wraps external systems as tools:
 
-  * `source.gamebus.walk.fetch@v1`
-  * `source.googlefit.walk.fetch@v1`
-  * `source.gamebus.trivia.fetch@v1`
-  * `source.gamebus.sugarvita.fetch@v1`
-  * `sources.status@v1`
+  * `source.gamebus.walk.fetch.v1`
+  * `source.googlefit.walk.fetch.v1`
+  * `source.gamebus.trivia.fetch.v1`
+  * `source.gamebus.sugarvita.fetch.v1`
+  * `sources.status.v1`
 
 What it does:
 
@@ -354,9 +354,9 @@ Records include:
 
 ---
 
-## Data Flow Example: `hdt.walk.fetch@v1`
+## Data Flow Example: `hdt.walk.fetch.v1`
 
-1. External client calls `hdt.walk.fetch@v1(user_id=1, prefer=gamebus, prefer_data=auto)`.
+1. External client calls `hdt.walk.fetch.v1(user_id=1, prefer=gamebus, prefer_data=auto)`.
 2. MCP server:
 
    * sets `corr_id`
@@ -365,7 +365,7 @@ Records include:
 3. Governor:
 
    * may try vault first (depending on `prefer_data`)
-   * calls Sources MCP tools in order (`source.gamebus.walk.fetch@v1`, then fallback `source.googlefit.walk.fetch@v1`)
+   * calls Sources MCP tools in order (`source.gamebus.walk.fetch.v1`, then fallback `source.googlefit.walk.fetch.v1`)
    * writes attempts to telemetry
    * on success, upserts records into vault (best effort)
 4. MCP server:
@@ -387,9 +387,9 @@ MCP provides **built-in tool discovery**: clients can query a server to obtain t
 
 External agentic clients connect to the **HDT MCP server** (`hdt_mcp.gateway`) and can discover available HDT capabilities at runtime:
 
-* **Tool list**: the client can request the current set of tools (e.g., `hdt.walk.fetch@v1`, `hdt.trivia.fetch@v1`, `hdt.sugarvita.fetch@v1`, etc.).
+* **Tool list**: the client can request the current set of tools (e.g., `hdt.walk.fetch.v1`, `hdt.trivia.fetch.v1`, `hdt.sugarvita.fetch.v1`, etc.).
 * **Tool schemas**: the client receives the argument schema for each tool.
-* **Versioning via tool names**: tools are versioned (e.g., `...@v1`) so clients can safely target stable contracts.
+* **Versioning via tool names**: tools are versioned (e.g., `....v1`) so clients can safely target stable contracts.
 
 This is the primary interoperability surface.
 

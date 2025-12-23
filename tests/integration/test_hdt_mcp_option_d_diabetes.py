@@ -10,8 +10,8 @@ from tests.helpers.mcp_runtime import assert_tools_present, call_tool_json
 async def test_hdt_mcp_gateway_healthz_and_tools(gateway_session):
     await assert_tools_present(
         gateway_session,
-        ["hdt.healthz@v1", "hdt.trivia.fetch@v1", "hdt.sugarvita.fetch@v1"],
+        ["hdt.healthz.v1", "hdt.trivia.fetch.v1", "hdt.sugarvita.fetch.v1"],
     )
 
-    payload = await call_tool_json(gateway_session, "hdt.healthz@v1", {})
+    payload = await call_tool_json(gateway_session, "hdt.healthz.v1", {})
     assert payload.get("ok") is True

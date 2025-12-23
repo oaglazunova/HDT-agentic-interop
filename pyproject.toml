@@ -25,7 +25,7 @@ dev = [
   "pytest-asyncio",
   "python-dotenv",
   "requests",
-  "mcp>=1.24,<2",
+  "tzdata",
 ]
 
 [project.urls]
@@ -48,15 +48,18 @@ markers = [
 ]
 
 [tool.setuptools]
+package-dir = {"" = "src"}
 include-package-data = true
 
 [tool.setuptools.packages.find]
-where = ["."]
+where = ["src"]
 include = [
   "hdt_mcp*",
   "hdt_sources_mcp*",
-  "config*",
+  "hdt_config*",
+  "hdt_common*",
 ]
+
 exclude = [
   "data*",
   "Virtual_Twin_Models*",

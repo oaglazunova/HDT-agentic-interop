@@ -24,6 +24,9 @@ __pycache__/
 .pyre/
 .cache/
 
+# Jupyter
+.ipynb_checkpoints/
+
 # =========================
 # Virtual environments
 # =========================
@@ -55,7 +58,6 @@ pytest.xml
 # Logs
 # =========================
 *.log
-config/*.log
 
 # =========================
 # Environment / secrets
@@ -63,18 +65,31 @@ config/*.log
 .env
 .env.*
 !.env.example
-/config/users.secrets.json
+
+# repo-specific secrets (keep only examples)
+config/users.secrets.json
+config/users.secrets.*.json
+
+# common key/cert formats (avoid accidental commits)
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+*.der
 
 # =========================
-# Telemetry output (repo-specific)
-# Note: repo uses uppercase folders; keep lowercase too for safety
+# Runtime artifacts (repo-specific)
+# Prefer a single sink directory like ./artifacts/
 # =========================
+artifacts/
+
+# Legacy telemetry locations (keep in case old paths still used)
 hdt_mcp/telemetry/
-hdt_mcp/telemetry/*.jsonl
 hdt_sources_mcp/telemetry/
-hdt_sources_mcp/telemetry/*.jsonl
-hdt_mcp/telemetry/
-hdt_mcp/telemetry/*.jsonl
+src/hdt_mcp/telemetry/
+src/hdt_sources_mcp/telemetry/
 
 # =========================
 # Local data / vaults / results (repo-specific)
@@ -82,11 +97,13 @@ hdt_mcp/telemetry/*.jsonl
 data/
 !data/.gitkeep
 
-# If you want to keep some sample data committed, whitelist it explicitly:
-#!data/sample/
-#!data/README.md
+# If you want sample data committed, keep it under examples/
+# (do not whitelist under /data)
+# examples/sample_data/ is intended to be committed
 
-# SQLite / DuckDB / DB scratch files (anywhere, not just /data)
+# =========================
+# Databases / scratch files (anywhere)
+# =========================
 *.sqlite
 *.sqlite-journal
 *.sqlite-wal
@@ -95,20 +112,8 @@ data/
 *.duckdb-wal
 *.duckdb-shm
 
-# The accidental filename created by an inline comment in .env values
+# Weird accidental filename created by inline comments in .env values
 *.sqlite#*
-
-# Common exports / analysis artifacts (tighten if you want CSVs committed)
-*.csv
-digital_twin_results.csv
-trivia.json
-engagement.json
-playthrough.json
-
-# =========================
-# Python cache files that sometimes slip in
-# =========================
-*.pyc
 
 # =========================
 # Temporary files
@@ -116,6 +121,3 @@ playthrough.json
 *.tmp
 *.swp
 *.bak
-
-# Runtime artifacts (telemetry, vault DB, tmp)
-artifacts/

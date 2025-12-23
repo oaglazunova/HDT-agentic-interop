@@ -10,7 +10,7 @@ async def test_instrument_async_tool_rejects_bad_purpose(monkeypatch):
 
     monkeypatch.setattr(tooling, "log_event", lambda *a, **k: events.append((a, k)))
 
-    cfg = InstrumentConfig(kind="tool", name="hdt.test@v1", client_id="C1", new_corr_id_per_call=True)
+    cfg = InstrumentConfig(kind="tool", name="hdt.test.v1", client_id="C1", new_corr_id_per_call=True)
 
     def apply_policy(purpose, tool, payload, client_id):
         return {}
@@ -43,7 +43,7 @@ async def test_instrument_async_tool_denies_fast(monkeypatch):
     events = []
     monkeypatch.setattr(tooling, "log_event", lambda *a, **k: events.append((a, k)))
 
-    cfg = InstrumentConfig(kind="tool", name="hdt.walk.fetch@v1", client_id="C1", new_corr_id_per_call=True)
+    cfg = InstrumentConfig(kind="tool", name="hdt.walk.fetch.v1", client_id="C1", new_corr_id_per_call=True)
 
     def apply_policy(purpose, tool, payload, client_id):
         return {"error": {"code": "denied_by_policy", "message": "no"}}

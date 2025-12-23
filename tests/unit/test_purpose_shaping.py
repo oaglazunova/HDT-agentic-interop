@@ -33,7 +33,7 @@ def test_shape_for_purpose_modeling_returns_not_supported_error_for_raw():
     payload = {
         "user_id": 1,
         "kind": "walk",
-        "tool": "hdt.walk.fetch@v1",
+        "tool": "hdt.walk.fetch.v1",
         "records": [{"steps": 1000}],
     }
     out = _shape_for_purpose(payload, "modeling")

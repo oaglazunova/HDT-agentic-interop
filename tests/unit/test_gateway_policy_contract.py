@@ -3,7 +3,7 @@ import pytest
 @pytest.mark.asyncio
 async def test_gateway_denies_modeling_on_raw_fetch(monkeypatch):
     """
-    modeling + hdt.walk.fetch@v1 must be denied before calling the governor.
+    modeling + hdt.walk.fetch.v1 must be denied before calling the governor.
     """
     import hdt_mcp.gateway as gw
 
@@ -26,7 +26,7 @@ async def test_gateway_denies_modeling_on_raw_fetch(monkeypatch):
 @pytest.mark.asyncio
 async def test_gateway_allows_analytics_and_calls_governor(monkeypatch):
     """
-    analytics + hdt.walk.fetch@v1 must call the governor and return its payload (post policy-safe step).
+    analytics + hdt.walk.fetch.v1 must call the governor and return its payload (post policy-safe step).
     """
     import hdt_mcp.gateway as gw
 
@@ -57,7 +57,7 @@ async def test_gateway_allows_analytics_and_calls_governor(monkeypatch):
 @pytest.mark.asyncio
 async def test_gateway_allows_modeling_on_features_tool(monkeypatch):
     """
-    modeling + hdt.walk.features@v1 must be allowed (and should not expose raw records).
+    modeling + hdt.walk.features.v1 must be allowed (and should not expose raw records).
     """
     import hdt_mcp.gateway as gw
 

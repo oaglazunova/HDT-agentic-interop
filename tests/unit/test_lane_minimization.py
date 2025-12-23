@@ -1,4 +1,3 @@
-import pytest
 from hdt_mcp.mcp_governor import _shape_for_purpose
 
 

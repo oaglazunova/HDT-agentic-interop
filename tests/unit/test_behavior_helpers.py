@@ -1,9 +1,8 @@
 from datetime import date, timedelta
 
+from hdt_mcp.models.behavior import _avg_steps_last_days
 
 def test_avg_steps_last_days_edge_cases():
-    from hdt_mcp.models.behavior import _avg_steps_last_days
-
     # Empty -> 0
     assert _avg_steps_last_days([], days=7) == 0
 
