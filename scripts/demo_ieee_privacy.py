@@ -103,22 +103,40 @@ async def main() -> None:
 
                 # 1) Deny-fast: modeling on raw fetch
                 print("\n1) Deny-fast: modeling + hdt.walk.fetch.v1")
-                out = await _call(session, "hdt.walk.fetch.v1", {"user_id": 1, "purpose": "modeling", "prefer": "mock", "prefer_data": "live"})
+                # NOTE: In the baseline v0.5.x code, the governor does not implement a "mock" live source.
+                # For deterministic offline demos (and to avoid calling external systems), use the seeded vault.
+                out = await _call(
+                    session,
+                    "hdt.walk.fetch.v1",
+                    {"user_id": 1, "purpose": "modeling", "prefer": "gamebus", "prefer_data": "vault"},
+                )
                 print(_pretty(out))
 
                 # 2) Allow modeling-safe output via features tool
                 print("\n2) Modeling-safe: modeling + hdt.walk.features.v1")
-                out = await _call(session, "hdt.walk.features.v1", {"user_id": 1, "purpose": "modeling", "prefer": "mock", "prefer_data": "live"})
+                out = await _call(
+                    session,
+                    "hdt.walk.features.v1",
+                    {"user_id": 1, "purpose": "modeling", "prefer": "gamebus", "prefer_data": "vault"},
+                )
                 print(_pretty(out))
 
                 # 3) Coaching: more sensitive view; policy redacts provenance.email
-                print("\n3) Coaching lane: coaching + hdt.walk.fetch.v1 (live mock source)")
-                out = await _call(session, "hdt.walk.fetch.v1", {"user_id": 1, "purpose": "coaching", "prefer": "mock", "prefer_data": "live"})
+                print("\n3) Coaching lane: coaching + hdt.walk.fetch.v1 (vault-only)")
+                out = await _call(
+                    session,
+                    "hdt.walk.fetch.v1",
+                    {"user_id": 1, "purpose": "coaching", "prefer": "gamebus", "prefer_data": "vault"},
+                )
                 print(_pretty(out))
 
                 # 4) Analytics: minimized view; policy redacts kcalories across records
-                print("\n4) Analytics lane: analytics + hdt.walk.fetch.v1 (live mock source)")
-                out = await _call(session, "hdt.walk.fetch.v1", {"user_id": 1, "purpose": "analytics", "prefer": "mock", "prefer_data": "live"})
+                print("\n4) Analytics lane: analytics + hdt.walk.fetch.v1 (vault-only)")
+                out = await _call(
+                    session,
+                    "hdt.walk.fetch.v1",
+                    {"user_id": 1, "purpose": "analytics", "prefer": "gamebus", "prefer_data": "vault"},
+                )
                 print(_pretty(out))
 
                 # 5) Vault-only: deterministic offline (no external sources)
@@ -131,7 +149,7 @@ async def main() -> None:
                 out = await _call(session, "hdt.policy.explain.v1", {"tool": "hdt.walk.fetch.v1", "purpose": "analytics"})
                 print(_pretty(out))
 
-                print("\nNext step: run scripts/demo_ieee_transparency.py to see the trace across gateway/governor/sources.")
+                print("\nNext step: run scripts/demo_ieee_transparency.py to see the trace (gateway/governor; sources when enabled).")
     except BaseExceptionGroup as eg:  # Python 3.11+
         if not _benign_stdio_shutdown_error(eg):
             raise

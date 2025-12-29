@@ -91,7 +91,7 @@ def main() -> int:
     print(f"Wrote (or kept existing): {secrets_path}")
     print("\nNotes:")
     print("- These are placeholders only.")
-    print("- For deterministic offline demos, prefer the built-in mock source (prefer=mock).")
+    print("- For deterministic offline demos (and to avoid external systems), use the seeded vault (prefer_data=vault).")
     return 0
 
 

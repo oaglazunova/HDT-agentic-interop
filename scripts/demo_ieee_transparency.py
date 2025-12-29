@@ -3,41 +3,42 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
+from datetime import datetime
 
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 
 from hdt_config.settings import repo_root
 
-
-def _pretty(obj) -> str:
-    return json.dumps(obj, indent=2, ensure_ascii=False)
+CALL_TIMEOUT_SEC = float(os.getenv("HDT_DEMO_TIMEOUT_SEC", "30"))
 
 
-def _benign_stdio_shutdown_error(exc: BaseException) -> bool:
-    # anyio/mcp shutdown edge-case (seen with mcp==1.25.x)
-    s = str(exc)
-    return "Attempted to exit" in s and "cancel scope" in s
+def _pretty(x) -> str:
+    if isinstance(x, str):
+        try:
+            x = json.loads(x)
+        except Exception:
+            return x
+    return json.dumps(x, indent=2, ensure_ascii=False)
 
 
-async def _call(session: ClientSession, name: str, args: dict):
-    try:
-        res = await asyncio.wait_for(session.call_tool(name, args), timeout=CALL_TIMEOUT_SEC)
-    except asyncio.TimeoutError:
-        return {"error": {"code": "timeout", "message": f"Tool call timed out after {CALL_TIMEOUT_SEC}s", "tool": name}}
+async def _call(session: ClientSession, tool: str, args: dict):
+    # Ensure the demo cannot hang indefinitely
+    res = await asyncio.wait_for(session.call_tool(tool, args), timeout=CALL_TIMEOUT_SEC)
     if getattr(res, "content", None):
         c0 = res.content[0]
         return getattr(c0, "text", c0)
     return res
 
 
-def _tail_jsonl(path: Path, n: int = 50) -> list[dict]:
+def _tail_jsonl(path: Path, n: int = 200) -> list[dict]:
     if not path.exists():
         return []
-    lines = path.read_text(encoding="utf-8").splitlines()[-max(50, n):]
+    lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
     out: list[dict] = []
     for ln in lines[-n:]:
         try:
@@ -47,118 +48,125 @@ def _tail_jsonl(path: Path, n: int = 50) -> list[dict]:
     return out
 
 
-def _filter_by_corr(records: list[dict], corr_id: str) -> list[dict]:
-    return [r for r in records if str(r.get("corr_id")) == corr_id]
+def _summarize(records: list[dict], corr_id: str | None) -> dict:
+    if corr_id:
+        records = [r for r in records if r.get("corr_id") == corr_id]
+
+    def one(r: dict) -> dict:
+        return {
+            "ts": r.get("ts"),
+            "corr_id": r.get("corr_id"),
+            "client_id": r.get("client_id"),
+            "tool": r.get("tool"),
+            "purpose": r.get("purpose"),
+            "status": r.get("status"),
+            "policy": r.get("policy"),
+        }
+
+    return {"n": len(records), "records": [one(r) for r in records[-12:]]}
+
+
+def _ensure_seeded_vault(root: Path, vault_db: Path) -> None:
+    if vault_db.exists():
+        return
+    # Seed vault deterministically (offline demo)
+    script = root / "scripts" / "init_sample_vault.py"
+    if not script.exists():
+        raise RuntimeError(f"Missing vault seeding script: {script}")
+
+    env = dict(os.environ)
+    env["HDT_VAULT_ENABLE"] = "1"
+    env["HDT_VAULT_PATH"] = str(vault_db)
+
+    subprocess.check_call([sys.executable, str(script)], env=env)
 
 
 async def main() -> None:
     root = repo_root()
-    policy_path = (root / "config" / "policy_ieee_demo.json").resolve()
-    if not policy_path.exists():
-        raise SystemExit(f"Policy file not found: {policy_path}.\n"                         f"Tip: run from repo root or set HDT_REPO_ROOT / HDT_POLICY_PATH.")
-
-    # Use a new per-run directory so the trace is easy to interpret.
-    telemetry_dir = (root / "artifacts" / "telemetry" / f"demo_ieee_trace_{time.strftime('%Y%m%d_%H%M%S')}").resolve()
-    telemetry_dir.mkdir(parents=True, exist_ok=True)
 
     print("\n=== IEEE Demo: Transparency / Traceability (Telemetry) ===")
+
+    telemetry_dir = (root / "artifacts" / "telemetry" / f"demo_ieee_trace_{datetime.now():%Y%m%d_%H%M%S}").resolve()
+    telemetry_dir.mkdir(parents=True, exist_ok=True)
     print(f"Telemetry dir: {telemetry_dir}")
 
+    policy_path = (root / "config" / "policy_ieee_demo.json").resolve()
+    if not policy_path.exists():
+        raise SystemExit(f"Policy file not found: {policy_path}")
+
+    vault_db = (root / "artifacts" / "vault" / "hdt_vault_ieee_demo.sqlite").resolve()
+    vault_db.parent.mkdir(parents=True, exist_ok=True)
+    _ensure_seeded_vault(root, vault_db)
+
+    # Start the gateway server over stdio
     server = StdioServerParameters(
         command=sys.executable,
         args=["-m", "hdt_mcp.gateway"],
         env=dict(
             os.environ,
             MCP_TRANSPORT="stdio",
+            MCP_CLIENT_ID=os.getenv("MCP_CLIENT_ID", "AUDITOR_AGENT"),
             HDT_POLICY_PATH=str(policy_path),
             HDT_TELEMETRY_DIR=str(telemetry_dir),
-            HDT_ENABLE_MOCK_SOURCES="1",
-            MCP_CLIENT_ID=os.getenv("MCP_CLIENT_ID", "AUDITOR_AGENT"),
+            HDT_VAULT_ENABLE="1",
+            HDT_VAULT_PATH=str(vault_db),
         ),
     )
 
     corr_id: str | None = None
 
-    try:
-        async with stdio_client(server) as (read, write):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
+    async with stdio_client(server) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
 
-                # Generate a short trace with one gateway tool that triggers internal Sources calls.
-                print("\nCalling hdt.walk.fetch.v1 (analytics, prefer=mock)...")
-                out = await _call(
-                    session,
-                    "hdt.walk.fetch.v1",
-                    {"user_id": 1, "purpose": "analytics", "prefer": "mock", "prefer_data": "live"},
-                )
-                print("Result (excerpt):")
-                try:
-                    parsed = json.loads(out) if isinstance(out, str) else out
-                except Exception:
-                    parsed = out
-                if isinstance(parsed, dict) and "records" in parsed:
-                    parsed = {k: parsed[k] for k in parsed.keys() if k != "records"}
-                print(_pretty(parsed))
+            # Generate one correlated trace using vault-only execution
+            print("\nCalling hdt.walk.fetch.v1 (analytics, prefer_data=vault) ...")
+            out = await _call(
+                session,
+                "hdt.walk.fetch.v1",
+                {"user_id": 1, "purpose": "analytics", "prefer_data": "vault"},
+            )
+            print("Result (excerpt):")
+            try:
+                parsed = json.loads(out) if isinstance(out, str) else out
+            except Exception:
+                parsed = out
+            if isinstance(parsed, dict) and "records" in parsed:
+                parsed = {k: v for k, v in parsed.items() if k != "records"}
+            print(_pretty(parsed))
 
-                # Pull telemetry via tool (redacted) and extract corr_id.
-                recent = await _call(session, "hdt.telemetry.recent.v1", {"n": 20, "purpose": "analytics"})
-                recent_obj = json.loads(recent) if isinstance(recent, str) else recent
-                last = (recent_obj.get("records") or [])[-1] if isinstance(recent_obj, dict) else None
-                corr_id = (last or {}).get("corr_id")
-                if not corr_id:
-                    print("\nCould not extract corr_id from telemetry; check telemetry files directly.")
-                    return
+            # Read telemetry via tool (most robust; avoids guessing file paths)
+            print("\nTelemetry via hdt.telemetry.recent.v1:")
+            recent = await _call(session, "hdt.telemetry.recent.v1", {"n": 50, "purpose": "analytics"})
+            recent_obj = json.loads(recent) if isinstance(recent, str) else recent
+            print(_pretty(recent_obj))
 
-                print(f"\nCorrelation id (corr_id): {corr_id}")
-                print("\nTelemetry (gateway) via hdt.telemetry.recent.v1 (already redacted):")
-                print(_pretty(recent_obj))
+            # Extract a corr_id from recent telemetry if present
+            if isinstance(recent_obj, dict):
+                recs = recent_obj.get("records") or []
+                if recs:
+                    corr_id = recs[-1].get("corr_id")
 
-    except BaseExceptionGroup as eg:  # Python 3.11+
-        if not _benign_stdio_shutdown_error(eg):
-            raise
-    except RuntimeError as e:
-        if not _benign_stdio_shutdown_error(e):
-            raise
+    # Give Windows a moment to flush file buffers
+    time.sleep(0.1)
 
-    # After server shuts down, read telemetry JSONL files for a compact end-to-end trace.
-    gw_jsonl = telemetry_dir / "mcp-telemetry.jsonl"
-    src_jsonl = telemetry_dir / "sources_mcp" / "mcp-telemetry.jsonl"
-
-    if not corr_id:
-        print("\nNo corr_id captured; nothing to filter.")
+    # Also show the JSONL telemetry files produced (for paper appendix/screenshots)
+    jsonl_files = sorted(telemetry_dir.rglob("mcp-telemetry.jsonl"))
+    if not jsonl_files:
+        print("\nNo mcp-telemetry.jsonl files found under telemetry dir.")
         return
 
-    gw_recs = _filter_by_corr(_tail_jsonl(gw_jsonl, n=200), corr_id)
-    src_recs = _filter_by_corr(_tail_jsonl(src_jsonl, n=200), corr_id)
+    print(f"\nFound {len(jsonl_files)} telemetry file(s):")
+    for p in jsonl_files:
+        print(f" - {p}")
 
-    print("\n--- End-to-end trace (filtered by corr_id) ---")
-    print(f"Gateway telemetry file: {gw_jsonl}")
-    print(f"Sources telemetry file: {src_jsonl}")
+    if corr_id:
+        print(f"\nCorrelation id (corr_id): {corr_id}")
 
-    def _summarize(rs: list[dict]) -> list[dict]:
-        out = []
-        for r in rs:
-            out.append(
-                {
-                    "ts": r.get("ts"),
-                    "corr_id": r.get("corr_id"),
-                    "kind": r.get("kind"),
-                    "tool": r.get("tool"),
-                    "ok": r.get("ok"),
-                    "ms": r.get("ms"),
-                    "args": r.get("args"),
-                }
-            )
-        return out
-
-    print("\nGateway events:")
-    print(_pretty(_summarize(gw_recs)))
-    print("\nSources events:")
-    print(_pretty(_summarize(src_recs)))
-
-    print("\nNotes:")
-    print("- Telemetry is redacted at capture for secrets and common PII keys (user_id, email, player_id).")
-    print("- corr_id is shared across gateway and sources for traceability.")
+    for p in jsonl_files:
+        recs = _tail_jsonl(p, n=300)
+        print(f"\nSummary for {p.name} (filtered by corr_id if available):")
+        print(_pretty(_summarize(recs, corr_id=corr_id)))
 
 
 if __name__ == "__main__":

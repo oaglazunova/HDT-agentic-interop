@@ -86,7 +86,9 @@ def _gamebus_date_iso(date_str: str | None, *, end: bool = False) -> str | None:
 
 
 def _load_users() -> dict[int, dict]:
-    return load_users_merged(CONFIG_DIR)
+    # Resolve config directory lazily so that init_runtime() (dotenv loading)
+    # can influence HDT_CONFIG_DIR/HDT_POLICY_PATH.
+    return load_users_merged(config_dir())
 
 
 def _find_primary_connector(user: dict, connector_key: str, app: str) -> Connector | None:
@@ -381,11 +383,12 @@ def source_gamebus_sugarvita_fetch(
 
 
 def main() -> None:
+    # Entry points (console_scripts) call main() directly, so we must perform
+    # runtime initialization here (dotenv + logging).
+    init_runtime()
     transport = os.environ.get("MCP_TRANSPORT", "stdio")
     mcp.run(transport=transport)
 
 
 if __name__ == "__main__":
-    init_runtime()
-    CONFIG_DIR = config_dir()
     main()

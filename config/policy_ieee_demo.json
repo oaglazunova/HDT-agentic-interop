@@ -1,0 +1,85 @@
+{
+  "defaults": {
+    "analytics": {
+      "allow": true,
+      "redact": [
+        "records.kcalories",
+        "provenance.player_id",
+        "provenance.email"
+      ]
+    },
+    "coaching": {
+      "allow": true,
+      "redact": [
+        "provenance.email"
+      ]
+    },
+    "modeling": {
+      "allow": true,
+      "redact": []
+    }
+  },
+  "clients": {
+    "MODEL_DEVELOPER_1": {
+      "analytics": { "allow": true },
+      "coaching": { "allow": true },
+      "modeling": { "allow": true }
+    },
+    "AUDITOR_AGENT": {
+      "analytics": { "allow": true },
+      "coaching": { "allow": false },
+      "modeling": { "allow": true }
+    },
+    "COACH_APP": {
+      "analytics": { "allow": false },
+      "coaching": { "allow": true },
+      "modeling": { "allow": false }
+    }
+  },
+  "tools": {
+    "hdt.walk.fetch.v1": {
+      "analytics": {
+        "allow": true,
+        "redact": [
+          "records.kcalories",
+          "provenance.player_id",
+          "provenance.email"
+        ]
+      },
+      "coaching": {
+        "allow": true,
+        "redact": [
+          "provenance.email"
+        ]
+      },
+      "modeling": {
+        "allow": false
+      }
+    },
+    "hdt.walk.features.v1": {
+      "modeling": {
+        "allow": true
+      }
+    },
+    "hdt.trivia.fetch.v1": {
+      "modeling": {
+        "allow": false
+      }
+    },
+    "hdt.sugarvita.fetch.v1": {
+      "modeling": {
+        "allow": false
+      }
+    },
+    "hdt.telemetry.recent.v1": {
+      "analytics": { "allow": true },
+      "coaching": { "allow": true },
+      "modeling": { "allow": true }
+    },
+    "hdt.policy.explain.v1": {
+      "analytics": { "allow": true },
+      "coaching": { "allow": true },
+      "modeling": { "allow": true }
+    }
+  }
+}

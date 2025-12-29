@@ -194,10 +194,12 @@ async def hdt_telemetry_recent(n: int = 50, purpose: str = "analytics") -> dict:
 
 
 def main() -> None:
+    # Entry points (console_scripts) call main() directly, so we must perform
+    # runtime initialization here (dotenv + logging).
+    init_runtime()
     transport = os.environ.get("MCP_TRANSPORT", "stdio")
     mcp.run(transport=transport)
 
 
 if __name__ == "__main__":
-    init_runtime()
     main()

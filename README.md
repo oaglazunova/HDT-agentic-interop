@@ -210,6 +210,126 @@ python -m pytest -q
 
 ---
 
+## Test and debug with MCP Inspector (Windows + Git Bash)
+
+The MCP Inspector is an interactive UI for exploring an MCP server: list tools, call them with JSON inputs, and inspect responses. It runs a local web UI (default `http://localhost:6274`) and a local proxy server (default port `6277`). :contentReference[oaicite:0]{index=0}
+
+### Prerequisites
+- Node.js (for `npx`)
+- This repo installed in a Python virtualenv:
+  ```bash
+  python -m pip install -e ".[dev]"
+```
+
+### Recommended: offline / deterministic mode (seeded vault)
+
+This mode does not require live GameBus credentials and is suitable for demos and reviewers.
+
+1. Initialize sample config + seeded vault:
+
+   ```bash
+   python scripts/init_sample_config.py
+   python scripts/init_sample_vault.py
+   ```
+
+2. Launch the Inspector against the HDT gateway (STDIO transport):
+
+   ```bash
+   npx @modelcontextprotocol/inspector \
+     -e MCP_TRANSPORT=stdio \
+     -e HDT_VAULT_ENABLE=1 \
+     -e HDT_VAULT_PATH=artifacts/vault/hdt_vault_ieee_demo.sqlite \
+     -- python -m hdt_mcp.gateway
+   ```
+
+   Notes:
+
+   * `--` separates Inspector arguments from the server command/args. ([GitHub][1])
+   * Ensure you run this from an *activated* venv so `python -m hdt_mcp.gateway` uses the correct environment.
+
+3. Open the Inspector UI:
+
+   * Navigate to `http://localhost:6274` in your browser. ([GitHub][1])
+
+### Suggested tool calls to try
+
+In the Inspector UI, open the **Tools** panel and call:
+
+* **Policy explain (why a tool is allowed/denied in a lane)**
+
+  * Tool: `hdt.policy.explain.v1`
+  * Input:
+
+    ```json
+    { "tool": "hdt.walk.fetch.v1", "purpose": "modeling" }
+    ```
+
+* **Raw walk fetch (allowed in coaching/analytics; denied in modeling by policy)**
+
+  * Tool: `hdt.walk.fetch.v1`
+  * Input (analytics):
+
+    ```json
+    {
+      "user_id": 1,
+      "start_date": "2025-11-01",
+      "end_date": "2025-11-03",
+      "prefer_data": "vault",
+      "purpose": "analytics"
+    }
+    ```
+  * Input (modeling; expected deny):
+
+    ```json
+    {
+      "user_id": 1,
+      "start_date": "2025-11-01",
+      "end_date": "2025-11-03",
+      "prefer_data": "vault",
+      "purpose": "modeling"
+    }
+    ```
+
+* **Modeling-safe features**
+
+  * Tool: `hdt.walk.features.v1`
+  * Input:
+
+    ```json
+    {
+      "user_id": 1,
+      "start_date": "2025-11-01",
+      "end_date": "2025-11-03",
+      "prefer_data": "vault",
+      "purpose": "modeling"
+    }
+    ```
+
+* **Telemetry (recent calls)**
+
+  * Tool: `hdt.telemetry.recent.v1`
+  * Input:
+
+    ```json
+    { "n": 50 }
+    ```
+
+### Optional: inspect the sources server directly
+
+If you want to run the internal sources MCP server alone:
+
+```bash
+npx @modelcontextprotocol/inspector -e MCP_TRANSPORT=stdio -- python -m hdt_sources_mcp.server
+```
+
+### Troubleshooting
+
+* **Port conflicts:** Inspector uses ports `6274` (UI) and `6277` (proxy) by default; free those ports if they are occupied. ([GitHub][1])
+* **Nothing “prints” from the server:** with STDIO, servers often don’t show a typical “listening” banner; validate by listing tools and calling `hdt.sources.status.v1` / `hdt.healthz`-type tools in the UI.
+
+---
+
+
 ## Architecture (Detailed)
 
 ### Why two MCP servers?
