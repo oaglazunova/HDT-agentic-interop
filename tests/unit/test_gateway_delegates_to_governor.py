@@ -1,5 +1,6 @@
 import pytest
 
+
 @pytest.mark.asyncio
 async def test_hdt_walk_fetch_delegates_and_filters_args(monkeypatch):
     import hdt_mcp.gateway as gw
@@ -17,11 +18,12 @@ async def test_hdt_walk_fetch_delegates_and_filters_args(monkeypatch):
     out = await gw.hdt_walk_fetch(
         user_id=1,
         prefer_data="vault",
-        purpose="analytics",          # should be filtered out (FakeGov doesn't accept it)
-        start_date="2025-01-01",      # should be filtered out
-        end_date="2025-01-31",        # should be filtered out
+        purpose="analytics",     # should be filtered out
+        start_date="2025-01-01", # should be filtered out
+        end_date="2025-01-31",   # should be filtered out
     )
 
+    assert isinstance(out, dict)
     assert out["ok"] is True
     assert called["fetch_walk"] == {"user_id": 1, "prefer_data": "vault"}
 
@@ -39,12 +41,11 @@ async def test_hdt_sources_status_delegates_and_filters_args(monkeypatch):
 
     monkeypatch.setattr(gw, "gov", FakeGov())
 
-    out = await gw.hdt_sources_status(user_id=7, purpose="coaching")  # purpose should be ignored/filtered
+    out = await gw.hdt_sources_status(user_id=7, purpose="coaching")  # should be filtered out
+    assert isinstance(out, dict)
     assert out["ok"] is True
     assert called["sources_status"] == {"user_id": 7}
 
-
-import pytest
 
 @pytest.mark.asyncio
 async def test_hdt_trivia_fetch_delegates_with_varkw(monkeypatch):
@@ -66,8 +67,8 @@ async def test_hdt_trivia_fetch_delegates_with_varkw(monkeypatch):
         purpose="analytics",
     )
 
+    assert isinstance(out, dict)
     assert out["ok"] is True
-    assert "fetch_trivia" in called
 
     # With **kwargs, the delegate passes all bound tool args (including purpose)
     assert called["fetch_trivia"]["user_id"] == 3

@@ -52,15 +52,55 @@ def _summarize(records: list[dict], corr_id: str | None) -> dict:
     if corr_id:
         records = [r for r in records if r.get("corr_id") == corr_id]
 
+    def _get_tool(r: dict) -> str | None:
+        # New schema: "name" (tool name). Back-compat: "tool".
+        return r.get("name") or r.get("tool")
+
+    def _get_purpose(r: dict) -> str | None:
+        # New schema usually stores purpose under args.purpose
+        if r.get("purpose") is not None:
+            return r.get("purpose")
+
+        a = r.get("args") or {}
+        if isinstance(a, dict):
+            if a.get("purpose") is not None:
+                return a.get("purpose")
+            # Some payloads may nest under args.args
+            inner = a.get("args")
+            if isinstance(inner, dict) and inner.get("purpose") is not None:
+                return inner.get("purpose")
+        return None
+
+    def _get_policy(r: dict):
+        # New schema: args.policy
+        if r.get("policy") is not None:
+            return r.get("policy")
+        a = r.get("args") or {}
+        if isinstance(a, dict):
+            return a.get("policy")
+        return None
+
+    def _get_status(r: dict) -> str | None:
+        # New schema: ok boolean. Back-compat: status string.
+        if r.get("status") is not None:
+            return r.get("status")
+        if r.get("ok") is True:
+            return "ok"
+        if r.get("ok") is False:
+            return "error"
+        return None
+
     def one(r: dict) -> dict:
         return {
             "ts": r.get("ts"),
             "corr_id": r.get("corr_id"),
             "client_id": r.get("client_id"),
-            "tool": r.get("tool"),
-            "purpose": r.get("purpose"),
-            "status": r.get("status"),
-            "policy": r.get("policy"),
+            "tool": _get_tool(r),
+            "purpose": _get_purpose(r),
+            "status": _get_status(r),
+            "policy": _get_policy(r),
+            "ms": r.get("ms"),
+            "request_id": r.get("request_id"),
         }
 
     return {"n": len(records), "records": [one(r) for r in records[-12:]]}
@@ -135,14 +175,17 @@ async def main() -> None:
                 parsed = {k: v for k, v in parsed.items() if k != "records"}
             print(_pretty(parsed))
 
+            if isinstance(parsed, dict) and parsed.get("corr_id"):
+                corr_id = parsed["corr_id"]
+
             # Read telemetry via tool (most robust; avoids guessing file paths)
             print("\nTelemetry via hdt.telemetry.recent.v1:")
             recent = await _call(session, "hdt.telemetry.recent.v1", {"n": 50, "purpose": "analytics"})
             recent_obj = json.loads(recent) if isinstance(recent, str) else recent
             print(_pretty(recent_obj))
 
-            # Extract a corr_id from recent telemetry if present
-            if isinstance(recent_obj, dict):
+            # Extract a corr_id from recent telemetry only if we didn't already get it from the tool result
+            if corr_id is None and isinstance(recent_obj, dict):
                 recs = recent_obj.get("records") or []
                 if recs:
                     corr_id = recs[-1].get("corr_id")
