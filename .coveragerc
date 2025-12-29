@@ -2,7 +2,6 @@
 branch = True
 source =
     hdt_mcp
-    hdt_sources_mcp
 
 omit =
     # Provider adapters/parsers (exercise with integration tests, not unit tests)

@@ -74,7 +74,7 @@ def hdt_tool(name: str, *, sync: bool = False, instrument: bool = True):
 
     return decorator
 
-
+# All domain tools must delegate to HDTGovernor; gateway contains no domain logic
 def delegate_to_gov(method_name: str):
     """
     Replaces tool implementation with a call to gov.<method_name>(**bound_args),
