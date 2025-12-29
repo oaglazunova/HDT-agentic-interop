@@ -370,7 +370,7 @@ What it does on each tool call:
    * `corr_id`
    * duration (ms)
 
-#### 2) HDT Governor — `hdt_mcp.mcp_governor.HDTGovernor`
+#### 2) HDT Governor — `hdt_mcp.governor.HDTGovernor`
 
 Role:
 

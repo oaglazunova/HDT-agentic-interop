@@ -5,7 +5,7 @@ import inspect
 from typing import Callable, TypeVar, ParamSpec
 from mcp.server.fastmcp import FastMCP
 
-from .mcp_governor import HDTGovernor
+from .governor import HDTGovernor
 from .policy.engine import apply_policy, apply_policy_safe, policy_last_meta
 from hdt_common.tooling import (
     InstrumentConfig,

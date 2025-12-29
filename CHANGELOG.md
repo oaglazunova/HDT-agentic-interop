@@ -7,7 +7,7 @@
 
   * Domain-first tool surface (`hdt.walk.fetch.v1`, `hdt.trivia.fetch.v1`, `hdt.sugarvita.fetch.v1`, `hdt.sources.status.v1`).
   * Per-call instrumentation: **purpose-lane validation**, **policy pre-check (deny fast)**, **policy redaction on success**, and **telemetry logging**.
-* **HDT Governor (orchestrator)** (`hdt_mcp.mcp_governor.HDTGovernor`):
+* **HDT Governor (orchestrator)** (`hdt_mcp.governor.HDTGovernor`):
 
   * Centralizes **source selection**, **fallback**, and **error normalization** across external systems.
   * Produces consistent HDT-level responses with:

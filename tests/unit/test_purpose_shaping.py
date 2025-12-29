@@ -1,4 +1,4 @@
-from hdt_mcp.mcp_governor import _shape_for_purpose
+from hdt_mcp.governor import _shape_for_purpose
 
 def test_shape_for_purpose_analytics_redacts_connector_ids():
     payload = {

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from hdt_mcp.mcp_governor import HDTGovernor
+from hdt_mcp.governor import HDTGovernor
 
 
 class FakeSourcesClient:
@@ -27,7 +27,7 @@ class FakeSourcesClient:
 async def test_sources_status_passthrough(monkeypatch):
     # Patch the SourcesMCPClient constructor used inside HDTGovernor
     fake = FakeSourcesClient({"sources.status.v1": {"ok": True, "user_id": 1}})
-    monkeypatch.setattr("hdt_mcp.mcp_governor.SourcesMCPClient", lambda: fake)
+    monkeypatch.setattr("hdt_mcp.governor.SourcesMCPClient", lambda: fake)
 
     gov = HDTGovernor()
     out = await gov.sources_status(1)
@@ -48,7 +48,7 @@ async def test_fetch_walk_prefers_gamebus(monkeypatch):
             "source.googlefit.walk.fetch.v1": {"records": [{"date": "2025-12-10", "steps": 999}]},
         }
     )
-    monkeypatch.setattr("hdt_mcp.mcp_governor.SourcesMCPClient", lambda: fake)
+    monkeypatch.setattr("hdt_mcp.governor.SourcesMCPClient", lambda: fake)
 
     gov = HDTGovernor()
     out = await gov.fetch_walk(user_id=1, limit=5, prefer="gamebus", prefer_data="live")
@@ -72,7 +72,7 @@ async def test_fetch_walk_falls_back_to_second_source(monkeypatch):
             "source.googlefit.walk.fetch.v1": {"records": [{"date": "2025-12-10", "steps": 2222}]},
         }
     )
-    monkeypatch.setattr("hdt_mcp.mcp_governor.SourcesMCPClient", lambda: fake)
+    monkeypatch.setattr("hdt_mcp.governor.SourcesMCPClient", lambda: fake)
 
     gov = HDTGovernor()
     out = await gov.fetch_walk(user_id=1, limit=5, prefer="gamebus", prefer_data="live")

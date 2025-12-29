@@ -1,7 +1,7 @@
 import inspect
 import pytest
 
-import hdt_mcp.mcp_governor as mg
+import hdt_mcp.governor as mg
 
 
 async def _acall(obj, method: str, **kwargs):
