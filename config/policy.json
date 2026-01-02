@@ -1,19 +1,56 @@
 {
   "defaults": {
     "analytics": { "allow": true, "redact": [] },
-    "modeling":  { "allow": true, "redact": ["user.email","user.name"] },
-    "coaching":  { "allow": true, "redact": [] }
+    "coaching":  { "allow": true, "redact": [] },
+    "modeling":  { "allow": true, "redact": [] }
   },
   "clients": {
     "MODEL_DEVELOPER_1": {
-      "analytics": { "allow": true, "redact": ["user.email"] },
-      "modeling":  { "allow": false }
+      "analytics": { "allow": true },
+      "coaching":  { "allow": true },
+      "modeling":  { "allow": true }
     }
   },
   "tools": {
-    "hdt.get_walk_data@v1": { "analytics": { "allow": true, "redact": [] }, "modeling": { "allow": false } },
-    "vault.integrated@v1":  { "analytics": { "allow": true, "redact": ["streams.walk.records.*.kcalories"] } },
-    "behavior_strategy@v1": { "coaching": { "allow": true, "redact": [] }
+    "hdt.healthz.v1": {
+      "analytics": { "allow": true },
+      "coaching":  { "allow": true },
+      "modeling":  { "allow": true }
+    },
+    "hdt.sources.status.v1": {
+      "analytics": { "allow": true },
+      "coaching":  { "allow": true },
+      "modeling":  { "allow": true }
+    },
+    "hdt.walk.fetch.v1": {
+      "analytics": { "allow": true },
+      "coaching":  { "allow": true },
+      "modeling":  { "allow": false }
+    },
+    "hdt.trivia.fetch.v1": {
+      "analytics": { "allow": true },
+      "coaching":  { "allow": true },
+      "modeling":  { "allow": false }
+    },
+    "hdt.sugarvita.fetch.v1": {
+      "analytics": { "allow": true },
+      "coaching":  { "allow": true },
+      "modeling":  { "allow": false }
+    },
+    "hdt.walk.features.v1": {
+      "analytics": { "allow": true },
+      "coaching":  { "allow": true },
+      "modeling":  { "allow": true }
+    },
+    "hdt.policy.explain.v1": {
+      "analytics": { "allow": true },
+      "coaching":  { "allow": true },
+      "modeling":  { "allow": true }
+    },
+    "hdt.telemetry.recent.v1": {
+      "analytics": { "allow": true },
+      "coaching":  { "allow": true },
+      "modeling":  { "allow": true }
     }
   }
 }

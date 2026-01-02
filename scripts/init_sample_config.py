@@ -1,102 +1,99 @@
-# creates any missing files above (and a minimal static/index.html) so the repo "just works"
+"""Initialize sample config files for local runs and paper demos.
 
-from __future__ import annotations
-import json, os
-from pathlib import Path
+This script creates/updates:
+  - config/users.json
+  - config/users.secrets.json
 
-ROOT = Path(__file__).resolve().parents[1]
-CFG  = ROOT / "config"
-STATIC = ROOT / "static"
-CFG.mkdir(parents=True, exist_ok=True)
-STATIC.mkdir(parents=True, exist_ok=True)
+The generated files contain placeholders only and are safe to share.
+In real deployments, secrets should be stored outside the repository.
 
-files = {
-    CFG / "external_parties.json": {
-        "external_parties": [
-            {
-                "client_id": "MODEL_DEVELOPER_1",
-                "api_key": "MODEL_DEVELOPER_1",
-                "permissions": [
-                    "get_walk_data",
-                    "get_trivia_data",
-                    "get_sugarvita_data",
-                    "get_sugarvita_player_types",
-                    "get_health_literacy_diabetes"
-                ]
-            }
-        ]
-    },
-    CFG / "user_permissions.json": {
-        "2": {
-            "allowed_clients": {
-                "MODEL_DEVELOPER_1": [
-                    "get_walk_data",
-                    "get_trivia_data",
-                    "get_sugarvita_data",
-                    "get_sugarvita_player_types",
-                    "get_health_literacy_diabetes"
-                ]
-            }
-        },
-        "3": {
-            "allowed_clients": {
-                "MODEL_DEVELOPER_1": [
-                    "get_walk_data"
-                ]
-            }
-        }
-    },
-    CFG / "users.json": {
-        "users": [
-            {
-                "user_id": 2,
-                "connected_apps_walk_data": [
-                    { "connected_application": "Placeholder Walk", "player_id": "demo-1" }
-                ]
-            },
-            {
-                "user_id": 3,
-                "connected_apps_walk_data": [
-                    { "connected_application": "Placeholder Walk", "player_id": "demo" }
-                ]
-            }
-        ]
-    },
-    CFG / "users.secrets.json": { "users": [] },
-    CFG / "policy.json": {
-        "defaults": {
-            "analytics": { "allow": True, "redact": [] },
-            "modeling":  { "allow": True, "redact": [] },
-            "coaching":  { "allow": True, "redact": [] }
-        },
-        "clients": {},
-        "tools": {}
-    },
-}
-
-index_html = STATIC / "index.html"
-index_html_contents = """<!doctype html>
-<html><head><meta charset="utf-8"><title>HDT API</title></head>
-<body><h1>HDT API</h1><p>Try <code>/healthz</code> or <code>/metadata/model_developer_apis</code>.</p></body></html>
+Usage:
+  python scripts/init_sample_config.py
+  python scripts/init_sample_config.py --force
 """
 
-def write_json(path: Path, obj) -> None:
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+
+from hdt_config.settings import repo_root, config_dir
+
+
+def _write_json(path: Path, obj: dict, *, force: bool) -> None:
+    if path.exists() and not force:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(obj, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
-def main():
-    created = []
-    for p, obj in files.items():
-        if not p.exists():
-            write_json(p, obj)
-            created.append(p.name)
-    if not index_html.exists():
-        index_html.write_text(index_html_contents, encoding="utf-8")
-        created.append(index_html.relative_to(ROOT).as_posix())
 
-    if created:
-        print("Created:", ", ".join(created))
-    else:
-        print("All sample config files already exist – nothing to do.")
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--force", action="store_true", help="Overwrite existing files")
+    args = ap.parse_args()
+
+    root = repo_root()
+    cfg = config_dir()
+
+    users_path = cfg / "users.json"
+    secrets_path = cfg / "users.secrets.json"
+
+    users = {
+        "users": [
+            {
+                "user_id": 1,
+                "email": "synthetic.user@example.org",
+                "note": "Synthetic demo user (no real data)",
+                "connected_apps_walk_data": [
+                    {"connected_application": "GameBus", "player_id": "MOCK_PLAYER_123"},
+                    {"connected_application": "Google Fit", "player_id": "MOCK_PLAYER_123"}
+                ],
+                "connected_apps_diabetes_data": [
+                    {"connected_application": "GameBus", "player_id": "MOCK_PLAYER_123"}
+                ]
+            }
+        ]
+    }
+
+    secrets = {
+        "users": [
+            {
+                "user_id": 1,
+                "connected_apps_walk_data": [
+                    {
+                        "connected_application": "GameBus",
+                        "player_id": "MOCK_PLAYER_123",
+                        "auth_bearer": "YOUR_GAMEBUS_TOKEN_HERE"
+                    },
+                    {
+                        "connected_application": "Google Fit",
+                        "player_id": "MOCK_PLAYER_123",
+                        "auth_bearer": "YOUR_GOOGLE_FIT_TOKEN_HERE"
+                    }
+                ],
+                "connected_apps_diabetes_data": [
+                    {
+                        "connected_application": "GameBus",
+                        "player_id": "MOCK_PLAYER_123",
+                        "auth_bearer": "YOUR_GAMEBUS_DIABETES_TOKEN_HERE"
+                    }
+                ]
+            }
+        ]
+    }
+
+    _write_json(users_path, users, force=args.force)
+    _write_json(secrets_path, secrets, force=args.force)
+
+    print(f"Repo root: {root}")
+    print(f"Wrote (or kept existing): {users_path}")
+    print(f"Wrote (or kept existing): {secrets_path}")
+    print("\nNotes:")
+    print("- These are placeholders only.")
+    print("- For deterministic offline demos (and to avoid external systems), use the seeded vault (prefer_data=vault).")
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

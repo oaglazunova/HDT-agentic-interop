@@ -1,711 +1,527 @@
-# HDT-Agentic-Interop
+# HDT v0.5.0 (2025-12-12)
 
-Façade and developer API for an **agentic Human Digital Twin (HDT)** stack:
+## Highlights
 
-- **Flask API** exposing domain data (walk, SugarVita, trivia) with governance headers.
-- **MCP façade** adding policy redaction, telemetry, and a read-mostly **integrated view**.
-- Optional local **vault** (SQLite/DuckDB-ready) for caching records.
+* **MCP-only architecture**: the HDT is exposed exclusively via MCP tools; REST is no longer a required integration surface.
+* **HDT Governor (orchestrator)**:
+  * Central decision point for source selection, fallback, and error normalization.
+  * Executes tool calls; returns structured results with provenance.
+* **Sources MCP façade (internal)**:
+  * External systems are wrapped as MCP tools (e.g., GameBus, Google Fit, SugarVita, Trivia) using the existing fetchers/parsers.
+  * Enables capability discovery and uniform invocation via MCP rather than bespoke per-client glue.
+* **Domain-first tool surface (external)**:
+  * HDT-level tools expose capabilities (e.g., walking, diabetes/trivia) without leaking source-specific API details.
+* **Structured errors and observability**:
+  * All source failures are returned as typed error envelopes (e.g., `not_connected`, `missing_token`, `upstream_error`, `all_sources_failed`) instead of silent empty results.
+  * Basic provenance included in tool responses to support debugging and auditing.
 
-## Prerequisites
+## Architecture Overview
 
-- **Python 3.11+**
-- **Git**
-- (Optional) `curl` (Bash) or `Invoke-RestMethod` (PowerShell)
+* **External interface**: `hdt_mcp.gateway` (HDT MCP server)
+  * Exposes HDT-level tools to external agents/clients.
+  * Delegates execution to the **HDT Governor**.
+* **Internal source interface**: `hdt_sources_mcp.server` (Sources MCP server)
+  * Exposes source-specific tools (GameBus/Google Fit/SugarVita/Trivia).
+  * Reads connection configuration via merged `config/users.json` + `config/users.secrets.json`.
+* **Connectors** (internal implementation detail): provider-specific fetch/parse code lives inside `hdt_sources_mcp` (e.g., `hdt_sources_mcp/core_infrastructure/*`). The external HDT surface remains MCP-only.
+
+## Architecture at a glance
+![Architecture-2025-11-20-102953.png](architecture.jpg)
 
 ---
 
-## 1) Clone & create a virtualenv
+## Quickstart (reproducible local run)
 
-**Bash**
-```bash
-git clone https://github.com/<your-gh-user>/HDT-agentic-interop.git
-cd HDT-agentic-interop
-python -m venv .venv
-source .venv/bin/activate
-```
+### Prerequisites
+- Python **3.11+** (tested locally with Python 3.14)
+- Git
+- (Windows) `py` launcher recommended
 
-**PowerShell**
-```
-git clone https://github.com/<your-gh-user>/HDT-agentic-interop.git
-cd HDT-agentic-interop
-python -m venv .venv
+### 1) Create and activate a virtual environment
+
+**Windows (PowerShell):**
+```powershell
+py -V:3.14 -m venv .venv
 .\.venv\Scripts\Activate.ps1
+python --version
+````
+
+**Windows (Git Bash):**
+
+```bash
+py -V:3.14 -m venv .venv
+source .venv/Scripts/activate
+python --version
 ```
 
-> Note: The repository includes a `.python-version` file pinned to `3.14` and a `pyproject.toml` with `requires-python = ">=3.14,<3.15"` to ensure the correct interpreter is used.
+**macOS / Linux:**
 
-## 2) Install dependencies
-```
-pip install -r requirements.txt
-# optional (tests, hooks, lint):
-pip install -r requirements-dev.txt
-```
-
-## 3) Create `.env` (from example)
-```
-cp .env.example .env
-# edit values as needed
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python --version
 ```
 
-### Common variables:
-```
-# Client & API
-MODEL_DEVELOPER_1_API_KEY=MODEL_DEVELOPER_1
-MCP_CLIENT_ID=MODEL_DEVELOPER_1
+### 2) Install dependencies (editable + dev tools)
 
-# Flask API base (where MCP reads from)
-HDT_API_BASE=http://localhost:5000
-
-# Demo flags
-HDT_ALLOW_PLACEHOLDER_MOCKS=1
-HDT_ENABLE_POLICY_TOOLS=1
-
-# Vault (optional cache)
-HDT_VAULT_ENABLE=1
-HDT_VAULT_PATH=./data/lifepod.sqlite     # preferred; HDT_VAULT_DB is deprecated
-
-# Policy file location
-HDT_POLICY_PATH=./config/policy.json
-
+```bash
+python -m pip install -U pip
+python -m pip install -e ".[dev]"
 ```
 
-## 4) Seed minimal config (one-time)
-Creates tiny defaults so a clean clone works immediately.
-```
+### 3) Configure users and secrets
+
+This repository expects:
+
+* `config/users.json` (non-secret configuration)
+* `config/users.secrets.json` (tokens/credentials; **do not commit**)
+
+If you don’t have configs yet, generate templates:
+
+```bash
 python scripts/init_sample_config.py
 ```
 
-It writes:
-`config/users.json` – test users (incl. one “Placeholder Walk” source).
-`config/user_permissions.json` – grants MODEL_DEVELOPER_1 the needed rights.
-`config/external_parties.json` – registers MODEL_DEVELOPER_1 + API key.
-`config/policy.json` – permissive analytics lane (allow + no redaction).
+Then edit:
 
-Prefer running the script. If you’d rather create files manually, see Appendix: Sample config below.
+* `config/users.json`
+* `config/users.secrets.json`
 
-## Quick end-to-end demo (two terminals)
+Important merge rule:
 
-If you just want to see everything work end-to-end with one demo script:
+* Identity fields must match across public and secret entries (e.g., `connected_application` + `player_id`) so the overlay merges correctly.
+[demo_quickstart.ps1](scripts/demo_quickstart.ps1)
+### 4) Run the test suite (canonical validation)
 
-In one terminal: start the API (localhost:5000)
-```
-python -m HDT_CORE_INFRASTRUCTURE.HDT_API
+```bash
+python -m pytest -q
 ```
 
-In another terminal: run the end-to-end demo
-```
-python scripts/demo_end_to_end.py
+If this passes, your local environment and tool contracts are consistent.
+
+### 5) Run a local end-to-end demo
+
+Run the Option D walk demo:
+
+```bash
+python scripts/demo_option_d_walk.py
 ```
 
-The demo will:
-- Fetch walk data from the API (showing ETag/304 behavior),
-- Call MCP tools in-process, and
-- Print the last few telemetry lines (policy/redactions) if enabled.
+(Optional) Run the MCP smoke script:
 
-## 5) Run the API (terminal #1)
-```
-python HDT_CORE_INFRASTRUCTURE/HDT_API.py
-```
-You should see:
-```
-Starting the HDT API server on http://localhost:5000
-```
-## 6) Smoke the API
-
-Note on auth headers:
-- Canonical client header is `Authorization: Bearer <API_KEY>`.
-- `X-API-KEY: <API_KEY>` is still accepted by the server for compatibility/migration and may be removed later.
-
-### PowerShell
-```
-$apiKey = $env:MODEL_DEVELOPER_1_API_KEY
-if (-not $apiKey) { $apiKey = "MODEL_DEVELOPER_1" }  # local fallback
-$headers = @{ Authorization = "Bearer $apiKey"; "X-API-KEY" = $apiKey }  # both work; Authorization is preferred
-
-Invoke-RestMethod -Uri "http://localhost:5000/healthz" -Headers $headers -Method GET
-Invoke-RestMethod -Uri "http://localhost:5000/get_walk_data?user_id=2" -Headers $headers -Method GET
-```
-
-### Bash
-```
-APIKEY="${MODEL_DEVELOPER_1_API_KEY:-MODEL_DEVELOPER_1}"
-# Prefer Authorization; X-API-KEY also accepted
-curl -sf "http://localhost:5000/healthz" -H "Authorization: Bearer $APIKEY"
-curl -sf "http://localhost:5000/get_walk_data?user_id=2" \
-  -H "Authorization: Bearer $APIKEY" -H "X-API-KEY: $APIKEY"
-```
-
-If `HDT_ALLOW_PLACEHOLDER_MOCKS=1, user_id=2` returns a small list of fake step counts.
-Responses include governance headers:
-```
-X-Client-Id: MODEL_DEVELOPER_1
-X-Users-Count: 1
-X-Policy: passthrough|info|error
-```
-## 7) Run the MCP façade (terminal #2)
-```
-python -m HDT_MCP.server
-```
-Exposes MCP tools/resources (e.g., `hdt.get_walk_data@v1`, `policy.evaluate@v1`).
-`vault://user/{id}/integrated` returns the integrated HDT view (reads from vault first, falls back to live, applies policy).
-Telemetry is appended to `HDT_MCP/telemetry/mcp-telemetry.jsonl`.
-
-Optional single-file smoke:
-```
+```bash
 python scripts/smoke_mcp.py
 ```
-## 8) Tests & pre-commit (optional)
-```
-pytest -q
+
+### 6) Enable repo quality gates (recommended for contributors)
+
+Install hooks:
+
+```bash
+python -m pip install pre-commit
 pre-commit install
+pre-commit install --hook-type pre-push
+```
+
+Run locally once:
+
+```bash
 pre-commit run -a
+pre-commit run -a --hook-stage pre-push
 ```
-
-If your system default Python is older, ensure `language_version: python3.11` in `.pre-commit-config.yaml`.
-
-## Architecture at a glance:
-![Architecture-2025-11-20-102953.png](Architecture-2025-11-20-102953.png)
-
-Governance headers are attached at the API boundary.
-Policy (`config/policy.json`) can allow/deny and redact paths (e.g., `"user.email"`).
-Vault is a read-mostly cache; integrated view reads from vault first, then falls back to the API.
-Walk records are returned in `HDT_WALK_ORDER` (env; default `asc`, i.e., oldest→newest).
-
-## Troubleshooting
-
-- No module named 'HDT_MCP':
-Run from repo root and use module invocation: `python -m HDT_MCP.server`.
-- 401/403 or empty results:
-`.env` must define `MODEL_DEVELOPER_1_API_KEY`; configs in `config/*.json` must match your client id and permissions (the init script sets this).
-- Want data without real integrations?
-Set `HDT_ALLOW_PLACEHOLDER_MOCKS=1` and use `user_id=2` (Placeholder Walk).
-- Vault file not created:
-Ensure `HDT_VAULT_ENABLE=1` and `HDT_VAULT_PATH` points to a writable location. Parent directories are created automatically.
-
-Note: `HDT_VAULT_DB` is deprecated and will be removed in a future release. Use `HDT_VAULT_PATH` instead.
-- CORS / JS apps:
-The API exposes `Access-Control-Expose-Headers: X-Client-Id, X-Users-Count, X-Policy`. If calling from a browser, ensure your `Origin` is acceptable (dev defaults are permissive).
-
-## Appendix: Sample config (what the init script writes)
-`config/users.json`
-```
-{
-  "users": [
-    {
-      "user_id": 1,
-      "connected_apps_walk_data": [
-        { "connected_application": "GameBus", "player_id": "1" }
-      ]
-    },
-    {
-      "user_id": 2,
-      "connected_apps_walk_data": [
-        { "connected_application": "Placeholder Walk", "player_id": "demo-1" }
-      ]
-    },
-    {
-      "user_id": 3,
-      "connected_apps_walk_data": [
-        { "connected_application": "Placeholder Walk", "player_id": "demo" }
-      ]
-    }
-  ]
-}
-```
-`config/user_permissions.json`
-```
-{
-  "1": { "allowed_clients": { "MODEL_DEVELOPER_1": ["get_walk_data"] } },
-  "2": { "allowed_clients": { "MODEL_DEVELOPER_1": ["get_walk_data"] } },
-  "3": { "allowed_clients": { "MODEL_DEVELOPER_1": ["get_walk_data"] } }
-}
-```
-`config/external_parties.json`
-```
-{
-  "external_parties": [
-    {
-      "client_id": "MODEL_DEVELOPER_1",
-      "api_key": "MODEL_DEVELOPER_1",
-      "permissions": [
-        "get_walk_data",
-        "get_sugarvita_data",
-        "get_trivia_data",
-        "get_sugarvita_player_types",
-        "get_health_literacy_diabetes"
-      ]
-    }
-  ]
-}
-```
-`config/policy.json`
-```
-{
-  "defaults": {
-    "analytics": { "allow": true, "redact": [] },
-    "modeling":  { "allow": true, "redact": [] },
-    "coaching":  { "allow": true, "redact": [] }
-  },
-  "clients": {},
-  "tools": {}
-}
-```
-
-## Appendix: Example governance headers (API)
-
-Example Flask helper (already present):
-```
-def json_with_headers(payload, *, policy: str | None = None, status: int = 200):
-    resp = jsonify(payload)
-    resp.status_code = status
-    cid = (getattr(request, "client", {}) or {}).get("client_id", "unknown")
-    users_count = len(payload) if isinstance(payload, list) else 1
-    resp.headers["X-Client-Id"] = str(cid)
-    resp.headers["X-Users-Count"] = str(users_count)
-    if policy is not None:
-        resp.headers["X-Policy"] = policy
-    resp.headers["Access-Control-Allow-Origin"] = request.headers.get("Origin", "*")
-    resp.headers["Vary"] = "Origin"
-    resp.headers["Access-Control-Expose-Headers"] = "X-Client-Id, X-Users-Count, X-Policy"
-    return resp
-```
-
-
-====================Old ReadMe=========
-## Table of Contents
-- [System Architecture](#system-architecture)
-  - [Subfolder Dependencies and Functions](#subfolder-dependencies-and-functions)
-- [API Documentation](#api-documentation)
-- [Setup and Installation](#setup-and-installation)
-  - [Prerequisites](#prerequisites)
-  - [Environment Setup](#environment-setup)
-- [Configuration](#configuration)
-  - [External APIs (GameBus, Google Fit)](#external-apis-gamebus-google-fit)
-  - [User Permissions](#user-permissions)
-- [Usage](#usage)
-  - [Running the API](#running-the-api)
-  - [Interacting with the API](#interacting-with-the-api)
-- [How Components Interact](#how-components-interact)
-- [Troubleshooting](#troubleshooting)
-- [Contributing](#contributing)
-- [License](#license)
 
 ---
 
-## System Architecture
+## Running the MCP Servers
 
-### Subfolder Dependencies and Functions
+This repository implements **MCP-only** using **two MCP servers**:
 
-#### **`config` Subfolder**
-- **Purpose**: Centralizes configurations, API keys, external party definitions, and user permissions.
-- **Key Files**:
-  - `.env`: Stores API keys for secure access.
-  - `config.py`: Loads API keys and permissions, with error handling for missing configurations.
-  - `external_parties.json`: Defines external clients with their `client_id`s.
-  - `user_permissions.json`: Maps user IDs to allowed external clients and their permitted actions.
-  - `users.json`: Provides details about users, including their connected apps for each health domain and the associated authentication tokens.
+1. **External-facing HDT MCP server**
+   Module: `python -m hdt_mcp.gateway`
+   Purpose: exposes *domain-level* HDT tools to external agents/clients.
 
-#### **`HDT_CORE_INFRASTRUCTURE` Subfolder**
-- **Purpose**: Handles data fetching, parsing, authentication, and API exposure (to be extended with more available data sources and API endpoints).
-- **Key Files**:
-  - `auth.py`: Implements an authentication and authorization decorator based on API keys, user permissions, and required actions.
-  - `GAMEBUS_DIABETES_fetch.py`: Fetches Trivia and SugarVita from the GameBus API.
-  - `GAMEBUS_DIABETES_parse.py`: Contains parsing functions for converting raw responses from GameBus into structured formats.
-  - `GAMEBUS_WALK_fetch.py`: Fetches walk from the GameBus API.
-  - `GAMEBUS_WALK_parse.py`: Contains parsing functions for converting raw responses from GameBus into structured formats.
-  - `GOOGLE_FIT_WALK_fetch`: Fetches Google Fit step count data.
-  - `GOOGLE_FIT_WALK_parse`:Contains parsing functions for converting raw responses from Google Fit into structured formats.
-  - `HDT_API.py`: Flask app exposing the following endpoints:
-    - **for Model Developers**:
-      - `/get_trivia_data`: Retrieves standardized trivia playthrough metrics.
-      - `/get_sugarvita_data`: Retrieves standardized SugarVita playthrough metrics.
-      - `/get_walk_data`: Retrieves standardized walk-related metrics.
-    - **for App Developers**:
-      - `/get_sugarvita_player_types`: Retrieves SugarVita player type scores.
-      - `/get_health_literacy_diabetes`: Retrieves diabetes-related health literacy scores.
+2. **Internal Sources MCP server**
+   Module: `python -m hdt_sources_mcp.server`
+   Purpose: wraps external systems (GameBus, Google Fit, SugarVita, Trivia) as MCP tools, using fetchers.
 
-#### **`Virtual_Twin_Models` Subfolder**
-- **Purpose**: Calculate health literacy and player type scores (to be extended with more diverse models).
-- **Key Files**:
-  - `HDT_DIABETES_calculations.py`: Contains functions for metric manipulation, normalization, scoring, and player-type determination.
-  - `HDT_DIABETES_model.py`: Orchestrates fetching data from APIs, calculating scores, and storing results in `diabetes_pt_hl_storage.json`.
+The HDT MCP server calls the Sources MCP server internally via a local stdio MCP client (it spawns it as a subprocess).
 
-#### **`diabetes_pt_hl_storage.json`**
-- **Purpose**: Acts as persistent storage for the model results, including health literacy scores and player types. (In the future, the collection of trained models and resulting outputs will be stored in the cloud, forming the main "Virtual Twin".)
+### Transport modes
+
+* `stdio` (recommended for local dev and demos): MCP messages flow over standard input/output.
+  This is ideal for “spawn a server as a subprocess” (internal Sources MCP) and for local testing.
+* `streamable-http` (optional): used if you want a network-accessible MCP endpoint.
+  Only use this for the **external-facing** server, and only after adding authentication.
+
+### A) Start the external HDT MCP server
+
+PowerShell:
+
+```powershell
+$env:MCP_TRANSPORT="stdio"
+python -m hdt_mcp.gateway
+```
+
+If you prefer `streamable-http` (optional):
+
+```powershell
+$env:MCP_TRANSPORT="streamable-http"
+python -m hdt_mcp.gateway
+```
+
+Notes:
+
+* In `stdio` mode you typically do not “see” a friendly banner. It is meant to be driven by an MCP client (scripts/tests).
+* The recommended way to validate behavior is to run `python scripts/demo_option_d_walk.py`.
+
+### B) Start the internal Sources MCP server (usually not started manually)
+
+You normally do **not** run Sources MCP directly, because the HDT MCP client spawns it automatically.
+
+If you want to run it explicitly (debugging):
+
+```powershell
+$env:MCP_TRANSPORT="stdio"
+python -m hdt_sources_mcp.server
+```
+
+### C) Validate everything works (recommended)
+
+Run the demo:
+
+```powershell
+python scripts\demo_option_d_walk.py
+```
+
+Run the full test suite:
+
+```powershell
+python -m pytest -q
+```
+
+### D) Common environment variables
+
+* `MCP_TRANSPORT`: `stdio` (default) or `streamable-http`
+* `MCP_CLIENT_ID`: identifier for policy/telemetry attribution (e.g., `MODEL_DEVELOPER_1`)
+* `HDT_VAULT_ENABLE`: `1` to enable vault read-through/write-through
+* `HDT_VAULT_PATH`: location of the vault DB file (e.g., `./artifacts/vault/hdt_vault.sqlite`)
+* `HDT_TELEMETRY_DIR`: directory for telemetry JSONL output
+* `HDT_DISABLE_TELEMETRY`: `1` to disable telemetry logging
 
 ---
 
-## API Documentation
+## Test and debug with MCP Inspector (Windows + Git Bash)
 
-#TODO: Add link to docs
-
-## Setup and Installation
+The MCP Inspector is an interactive UI for exploring an MCP server: list tools, call them with JSON inputs, and inspect responses. It runs a local web UI (default `http://localhost:6274`) and a local proxy server (default port `6277`). :contentReference[oaicite:0]{index=0}
 
 ### Prerequisites
-1. Python 3.11+.
-2. A virtual environment tool like `venv` or `conda`.
-3. [Postman](https://www.postman.com/) or cURL (optional, for testing the API).
-
-### Environment Setup
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/YourUsername/HDT-agentic-interop.git
-   cd HDT-agentic-interop
-   ```
-
-2. Set up a virtual environment:
-   ```bash
-   python -m venv venv
-   .\.venv\Scripts\Activate.ps1
-   ```
-
-3. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-4. Set up the `.env` file in the root folder:
-   ```plaintext
-   HDT_API_BASE=http://localhost:5000 
-   HDT_API_KEY=your_key_here
-   MCP_TRANSPORT=stdio
-   HDT_ALLOW_PLACEHOLDER_MOCKS=1
-   HDT_ENABLE_POLICY_TOOLS=1
-   MCP_CLIENT_ID=your_client_ID_here
-   HDT_CACHE_TTL=60
-   HDT_RETRY_MAX=3
-   ```
-
----
-
-## Configuration
-
-### External APIs (GameBus, Google Fit)
-To fetch data from external sources, you must populate the `player_id` and `auth_bearer` fields in the `users.json` file (located in the `config` folder). 
-
-- **GameBus API**:
-  - Follow the instructions here to obtain your credentials: [GameBus Get Started Guide](https://devdocs.gamebus.eu/get-started/)
-
-- **Google Fit API**:
-  - Set up access and retrieve credentials following this guide: [Google Fit API Get Started](https://developers.google.com/fit/rest/v1/get-started)
-
-These credentials are essential for the second round of API calls inside the HDT_API to fetch user-specific data.
-
----
-
-### User Permissions
-The file `user_permissions.json` defines the access permissions for different clients and endpoints. Modify this file to customize access levels.
-In the future, this file should be replaced by a proper ui with advanced authentication measures, which each user can use to control access to their data and models.
-
----
-
-## Usage
-
-### Running the API
-1. Start the Flask application:
-   ```bash
-   python -m HDT_CORE_INFRASTRUCTURE.HDT_API
-   ```
-
-2. The API will run on `http://localhost:5000`.
-
-3. In another terminal, start the MCP façade (stdio on Windows):
-```powershell
-python -m HDT_MCP.server
+- Node.js (for `npx`)
+- This repo installed in a Python virtualenv:
+  ```bash
+  python -m pip install -e ".[dev]"
 ```
 
-4. Start the MCP Inspector:
-- Simple dev mode:
-```powershell
-mcp dev HDT_MCP/server.py
-```
-- Or using the provided config:
-```powershell
-npx @modelcontextprotocol/inspector --config .\config\mcp.json --server hdt-mcp
-```
+### Recommended: offline / deterministic mode (seeded vault)
 
+This mode does not require live GameBus credentials and is suitable for demos and reviewers.
 
-### Interacting with the API
-You can interact with API using MCP tools in the Inspector or via HTTP requests (e.g., Postman, cURL).
-Example cURL request to fetch trivia data:
+1. Initialize sample config + seeded vault:
+
+   ```bash
+   python scripts/init_sample_config.py
+   python scripts/init_sample_vault.py
+   ```
+
+2. Launch the Inspector against the HDT gateway (STDIO transport):
+
+   ```bash
+   npx @modelcontextprotocol/inspector \
+     -e MCP_TRANSPORT=stdio \
+     -e HDT_VAULT_ENABLE=1 \
+     -e HDT_VAULT_PATH=artifacts/vault/hdt_vault_ieee_demo.sqlite \
+     -- python -m hdt_mcp.gateway
+   ```
+
+   Notes:
+
+   * `--` separates Inspector arguments from the server command/args. ([GitHub][1])
+   * Ensure you run this from an *activated* venv so `python -m hdt_mcp.gateway` uses the correct environment.
+
+3. Open the Inspector UI:
+
+   * Navigate to `http://localhost:6274` in your browser. ([GitHub][1])
+
+### Suggested tool calls to try
+
+In the Inspector UI, open the **Tools** panel and call:
+
+* **Policy explain (why a tool is allowed/denied in a lane)**
+
+  * Tool: `hdt.policy.explain.v1`
+  * Input:
+
+    ```json
+    { "tool": "hdt.walk.fetch.v1", "purpose": "modeling" }
+    ```
+
+* **Raw walk fetch (allowed in coaching/analytics; denied in modeling by policy)**
+
+  * Tool: `hdt.walk.fetch.v1`
+  * Input (analytics):
+
+    ```json
+    {
+      "user_id": 1,
+      "start_date": "2025-11-01",
+      "end_date": "2025-11-03",
+      "prefer_data": "vault",
+      "purpose": "analytics"
+    }
+    ```
+  * Input (modeling; expected deny):
+
+    ```json
+    {
+      "user_id": 1,
+      "start_date": "2025-11-01",
+      "end_date": "2025-11-03",
+      "prefer_data": "vault",
+      "purpose": "modeling"
+    }
+    ```
+
+* **Modeling-safe features**
+
+  * Tool: `hdt.walk.features.v1`
+  * Input:
+
+    ```json
+    {
+      "user_id": 1,
+      "start_date": "2025-11-01",
+      "end_date": "2025-11-03",
+      "prefer_data": "vault",
+      "purpose": "modeling"
+    }
+    ```
+
+* **Telemetry (recent calls)**
+
+  * Tool: `hdt.telemetry.recent.v1`
+  * Input:
+
+    ```json
+    { "n": 50 }
+    ```
+
+### Optional: inspect the sources server directly
+
+If you want to run the internal sources MCP server alone:
+
 ```bash
-curl -X GET "http://localhost:5000/get_trivia_data?user_id=1" -H "X-API-KEY: your_key_here"
+npx @modelcontextprotocol/inspector -e MCP_TRANSPORT=stdio -- python -m hdt_sources_mcp.server
 ```
----
 
-## How Components Interact
+### Troubleshooting
 
-1. **Fetching Data**:
-   - `HDT_API.py` endpoints call fetch functions from `GAMEBUS_DIABETES_fetch.py`, `GAMEBUS_WALK_fetch.py` or `GOOGLE_FIT_WALK_fetch.py`, based on user permissions and connected apps (retrieved from `users.json`).
-
-2. **Parsing Data**:
-   - Fetch functions parse raw API responses using `*_parse.py` files (e.g., `parse_json_trivia`).
-
-3. **Virtual Twin Model calculations**:
-   - `HDT_DIABETES_model.py`:
-     - Fetches Trivia and SugarVita data via the HDT API endpoints (`get_trivia_data`, `get_sugarvita_data`).
-     - Manipulates and normalizes metrics using `HDT_DIABETES_calculations.py`.
-     - Calculates health literacy and player type scores.
-     - Updates `diabetes_pt_hl_storage.json` with the results.
-
-4. **API Endpoint Input/Output**:
-   - **Model Developer APIs**:
-     - Inputs: API key (header), optional query params (e.g., `user_id` for filtering).
-     - Outputs: Processed metrics, latest activity info, or errors.
-   - **App Developer APIs**:
-     - Inputs: API key (header), `user_id` (query param).
-     - Outputs:
-       - `/get_sugarvita_player_types`: Latest player type scores for a user.
-       - `/get_health_literacy_diabetes`: Latest health literacy score for a user.
+* **Port conflicts:** Inspector uses ports `6274` (UI) and `6277` (proxy) by default; free those ports if they are occupied. ([GitHub][1])
+* **Nothing “prints” from the server:** with STDIO, servers often don’t show a typical “listening” banner; validate by listing tools and calling `hdt.sources.status.v1` / `hdt.healthz`-type tools in the UI.
 
 ---
 
 
-## MCP Facade (Model Context Protocol)
+## Architecture (Detailed)
 
-This repository includes an MCP server (façade) that exposes the HDT API and a few convenience utilities as MCP tools and resources. You can run it over stdio (best for local tooling and the Inspector) or as an HTTP server.
+### Why two MCP servers?
 
-### Overview
-- Location: `HDT_MCP/server.py`
-- Entrypoint (Windows, stdio):
-  ```powershell
-  python -m HDT_MCP.server
-  ```
-- Transport selection: set `MCP_TRANSPORT` environment variable to `"stdio"` (default) or `"streamable-http"`.
-- Policy file: `config/policy.json` (see Policy contract below)
-- Telemetry file: `HDT_MCP/telemetry/mcp-telemetry.jsonl`
+The design separates the problem into two layers:
 
-### 1) Run the API first
-Start the HDT API so the MCP façade can call it:
-```powershell
-python -m HDT_CORE_INFRASTRUCTURE.HDT_API
-```
-The API serves on `http://localhost:5000` by default.
+* **External MCP contract (domain-first):** what external clients/agents see and call.
+* **Internal MCP contract (source-first):** how the HDT interacts with external systems in a uniform way.
 
-### 2) Run the MCP server
+This prevents the external tool surface from leaking GameBus/Google Fit/SugarVita implementation details and lets you evolve source connectors independently.
 
-#### A. Stdio transport (recommended for local dev and Inspector)
-PowerShell (Windows):
-```powershell
-# Optional: ensure stdio (this is the default)
-$env:MCP_TRANSPORT = "stdio"
+### Components
 
-# Optionally pass API base/key via environment variables
-$env:HDT_API_BASE = "http://localhost:5000"
-$env:HDT_API_KEY  = "YOUR_API_KEY"
+#### 1) HDT MCP Server — `hdt_mcp.gateway`
 
-# Start the server
-python -m HDT_MCP.server
-```
+Role:
 
-#### B. HTTP transport (for desktop agents / remote clients)
-PowerShell (Windows):
-```powershell
-$env:MCP_TRANSPORT = "streamable-http"
-$env:HDT_API_BASE  = "http://localhost:5000"
-$env:HDT_API_KEY   = "YOUR_API_KEY"
-python -m HDT_MCP.server
-```
-Notes:
-- The HTTP transport is provided by `FastMCP`. Default host/port may be printed on launch by the library. If your agent needs a specific port/host, consult `mcp.server.fastmcp` docs for environment variables or wrapper options.
-- For most model/dev workflows, stdio with the Inspector is simplest.
+* The **only** supported integration surface for external clients.
+* Exposes **domain-level tools** such as:
 
-### 3) Inspector setup
-You can use the MCP Inspector to explore and call tools.
+  * `hdt.walk.fetch.v1`
+  * `hdt.trivia.fetch.v1`
+  * `hdt.sugarvita.fetch.v1`
+  * `hdt.sources.status.v1`
 
-Option 1 — Use the provided config file:
-```powershell
-# From the repo root (Windows)
-# This uses config/mcp.json to start a stdio server via the Python MCP CLI
-npx @modelcontextprotocol/inspector --config .\config\mcp.json --server hdt-mcp
-```
+What it does on each tool call:
 
-Option 2 — Simple dev mode (no config):
-```powershell
-# Ensure the API is running, then in another terminal:
-python -m HDT_MCP.server   # stdio server
+1. Creates a **correlation id** (`corr_id`) for end-to-end tracing.
+2. Validates request parameters (including `purpose` lane).
+3. Performs **policy pre-check** (deny fast, avoid upstream calls).
+4. Delegates execution to the Governor.
+5. Applies **policy redaction** (`apply_policy_safe`) on successful payloads.
+6. Writes telemetry (`log_event`) with:
 
-# And start Inspector in dev mode, pointing at the Python entrypoint:
-npx @modelcontextprotocol/inspector dev HDT_MCP/server.py
-```
+   * tool name
+   * args (sanitized)
+   * policy meta (allowed/redactions)
+   * `corr_id`
+   * duration (ms)
 
-Tip: If you installed the Python `mcp` CLI, you can also use:
-```powershell
-mcp dev HDT_MCP/server.py
-```
+#### 2) HDT Governor — `hdt_mcp.governor.HDTGovernor`
 
-### 4) Environment variables
-- `HDT_API_BASE` (default `http://localhost:5000`): Where the MCP façade sends API requests.
-- `HDT_API_KEY`: API key forwarded in `X-API-KEY` and `Authorization: Bearer ...` headers.
-- `MCP_TRANSPORT` (default `stdio`): `stdio` or `streamable-http`.
-- `MCP_CLIENT_ID` (default `MODEL_DEVELOPER_1`): Used for policy evaluation (`clients` section).
-- `HDT_ENABLE_POLICY_TOOLS` (default `0` in config/mcp.json; recommended `1` locally): Enables policy-aware envelopes and the `policy.evaluate@v1` tool.
-- `HDT_CACHE_TTL` (seconds, default `15`): In-process GET cache TTL.
-- `HDT_RETRY_MAX` (default `2`): Retries for API GETs.
+Role:
 
----
+* Orchestration and deterministic “negotiation rules.”
+* Converts multiple source/tool outcomes into one normalized response envelope.
+* Produces the **negotiation trace** via `attempts`.
 
-## MCP Tools and Resources
+Key behaviors:
 
-All tools return a policy envelope when allowed: 
-```json
-{
-  "allowed": true,
-  "purpose": "analytics",
-  "tool": "hdt.get_walk_data@v1",
-  "data": { "example": "redacted payload from API" },
-  "redactions_applied": ["records[].user_id"]
-}
-```
-When a call is blocked by policy, you receive:
-```json
-{ "allowed": false, "purpose": "analytics", "tool": "hdt.get_walk_data@v1", "error": "Blocked by policy" }
-```
+* **Source preference + fallback** (walk):
 
-### Tools
-- `hdt.walk.stream@v1(user_id: int, prefer: "auto"|"vault"|"live" = "auto", start?: string, end?: string)`
-  - Canonical walk entry point for agents. Returns a domain-shaped stream with `records[]` and `stats`.
-  - `prefer` controls source selection: `auto` (default), `vault`, or `live`.
-  - Example:
-    ```json
-    { "user_id": 1, "prefer": "auto", "start": "2025-01-01", "end": "2025-01-31" }
-    ```
-- `hdt.walk.stats@v1(user_id: int, start?: string, end?: string)`
-  - Lightweight rollups for a user’s walk data (e.g., `days`, `total_steps`, `avg_steps`).
-  - Example:
-    ```json
-    { "user_id": 1, "start": "2025-01-01", "end": "2025-01-31" }
-    ```
-- `hdt.get_trivia_data@v1(user_id: str)`
-  - Wraps `/get_trivia_data`. Example args:
-    ```json
-    { "user_id": "1" }
-    ```
-- `hdt.get_sugarvita_data@v1(user_id: str)`
-  - Wraps `/get_sugarvita_data`. Example:
-    ```json
-    { "user_id": "1" }
-    ```
-- `hdt.get_sugarvita_player_types@v1(user_id: str, purpose = "analytics")`
-  - Wraps `/get_sugarvita_player_types`. Example:
-    ```json
-    { "user_id": "1" }
-    ```
-- `hdt.get_health_literacy_diabetes@v1(user_id: str, purpose = "analytics")`
-  - Wraps `/get_health_literacy_diabetes`. Example:
-    ```json
-    { "user_id": "1" }
-    ```
-- `policy.evaluate@v1(purpose = "analytics")`
-  - Simple toggle to confirm if policy tools are enabled. Returns `{ purpose, allow, redact_fields, ... }`.
-- `intervention_time@v1(local_tz = "Europe/Amsterdam", preferred_hours = [18,21], min_gap_hours = 6, last_prompt_iso = null)`
-  - Returns a basic suggestion for next intervention window.
+  * try preferred live source (`gamebus` or `googlefit`)
+  * fallback to the other on typed errors
+* **Vault strategy** (`prefer_data`):
 
-#### Legacy
-- `TOOL_WALK` (`hdt.get_walk_data@v1`) — legacy/compatibility. Prefer `hdt.walk.stream@v1` going forward.
+  * `prefer_data="vault"`: vault-only (demos)
+  * `prefer_data="live"`: live-only (fail if upstream fails)
+  * `prefer_data="auto"`: vault-first or vault-fallback (depending on implementation)
+* **Write-through**:
 
-### Resources
-- `vault://{user_id}/integrated`
-  - Minimal integrated view combining walk records and rollups for a user.
-- `hdt://{user_id}/sources`
-  - Lists connected data sources for the user (from `config/users.json`).
-- `registry://tools`
-  - Returns a compact list of available tools.
-- `telemetry://recent/{n}`
-  - Returns the last `n` telemetry events recorded locally by the MCP façade.
+  * after successful live fetch, upsert into vault (best effort)
 
-  Quick demo (Inspector):
-  1) Make any tool call (e.g., `hdt.get_walk_data@v1`) so there is something to log.
-  2) Open the Resources panel and request: `telemetry://recent/5`
-  3) You’ll get a compact JSON list of recent events, for example:
-  ```json
-  {
-    "records": [
-      {
-        "ts": "2025-01-01T12:34:56.789Z",
-        "kind": "tool",
-        "name": "hdt.get_walk_data@v1",
-        "client_id": "MODEL_DEVELOPER_1",
-        "request_id": "f9b0c8b2-...",
-        "corr_id": "f9b0c8b2-...",
-        "args": { "user_id": "2", "purpose": "analytics", "redactions": 1 },
-        "ok": true,
-        "ms": 123
-      }
-    ]
-  }
-  ```
+Outputs:
+
+* Always returns structured dicts:
+
+  * success payload includes `selected_source` and `attempts`
+  * failure payload uses typed error envelope + `details` attempt list
+
+#### 3) Sources MCP Server — `hdt_sources_mcp.server`
+
+Role:
+
+* Internal façade that wraps external systems as tools:
+
+  * `source.gamebus.walk.fetch.v1`
+  * `source.googlefit.walk.fetch.v1`
+  * `source.gamebus.trivia.fetch.v1`
+  * `source.gamebus.sugarvita.fetch.v1`
+  * `sources.status.v1`
+
+What it does:
+
+1. Loads merged user config: `config/users.json` + `config/users.secrets.json`
+2. Resolves the right connector (player_id + token) for the requested user/source
+3. Calls fetchers in `hdt_core_infrastructure/`
+4. Returns a typed payload:
+
+   * success includes `provenance` (retrieved_at, ms, player_id)
+   * failure returns typed errors:
+
+     * `unknown_user`
+     * `not_connected`
+     * `missing_token`
+     * `upstream_error`
+
+Observability:
+
+* Accepts `HDT_CORR_ID` env var and sets it as the current request id, so telemetry correlates across:
+
+  * MCP server tool call → Governor → Sources MCP tool call
+
+#### 4) Connectors (internal to Sources MCP)
+
+Role:
+
+* Provider-specific HTTP/OAuth calls and parsing logic.
+* Not part of the external interoperability contract; only exposed through `hdt_sources_mcp.server` tools.
+
+#### 5) Policy engine — `hdt_mcp.policy.*`
+
+Role:
+
+* Enforces **purpose limitation** (analytics/modeling/coaching lanes)
+* Supports:
+
+  * deny by tool + purpose
+  * field-level redaction by dotted paths
+* Used:
+
+  * pre-check denies fast
+  * post-processing redacts successful payloads only
+
+#### 6) Telemetry — `hdt_mcp.observability.telemetry`
+
+Role:
+
+* JSONL logging suitable for:
+
+  * debugging
+  * audit traces
+  * later evaluation of “negotiation behavior”
+
+Records include:
+
+* `kind`: tool/governor/source
+* `name`: tool name
+* `corr_id`: correlation id across layers
+* `ms`: duration
+* sanitized args, policy info, attempts (governor)
 
 ---
 
-## Policy file contract (`config/policy.json`)
+## Data Flow Example: `hdt.walk.fetch.v1`
 
-The policy controls which tools are allowed and which fields are redacted in tool outputs. It supports three levels, with the following precedence:
-1) Tool-specific overrides (`tools`)
-2) Client-specific defaults (`clients`, keyed by `MCP_CLIENT_ID`)
-3) Global defaults (`defaults`)
+1. External client calls `hdt.walk.fetch.v1(user_id=1, prefer=gamebus, prefer_data=auto)`.
+2. MCP server:
 
-Each level maps a `purpose` to a rule object:
-```json
-{
-  "allow": true,
-  "redact": ["records[].user_id", "records[].steps"]
-}
-```
-- `allow` (boolean): If false, the call returns `{ allowed: false, error: "Blocked by policy" }`.
-- `redact` (array of dot-paths): Fields to replace with `***redacted***`. Works through objects and arrays (use `[]` to indicate array elements).
+   * sets `corr_id`
+   * checks lane policy
+   * calls `Governor.fetch_walk(...)`
+3. Governor:
 
-### Full example
-```json
-{
-  "defaults": {
-    "analytics": { "allow": true,  "redact": [] },
-    "modeling":  { "allow": true,  "redact": ["records[].user_id"] },
-    "coaching":  { "allow": false, "redact": [] }
-  },
-  "clients": {
-    "MODEL_DEVELOPER_1": {
-      "analytics": { "allow": true, "redact": [] },
-      "coaching":  { "allow": true, "redact": ["records[].user_id", "records[].steps"] }
-    }
-  },
-  "tools": {
-    "hdt.get_walk_data@v1": {
-      "analytics": { "allow": true, "redact": ["records[].user_id"] }
-    },
-    "hdt.get_trivia_data@v1": {
-      "analytics": { "allow": true, "redact": ["data[].player_name"] }
-    }
-  }
-}
-```
-In the example above:
-- For `hdt.get_walk_data@v1` at purpose `analytics`, the `tools` rule applies and redacts `records[].user_id`.
-- If no tool rule exists, the system falls back to the `clients` rule for the current `MCP_CLIENT_ID`, then to `defaults`.
+   * may try vault first (depending on `prefer_data`)
+   * calls Sources MCP tools in order (`source.gamebus.walk.fetch.v1`, then fallback `source.googlefit.walk.fetch.v1`)
+   * writes attempts to telemetry
+   * on success, upserts records into vault (best effort)
+4. MCP server:
 
-### Enabling/Disabling policy features
-- Set `HDT_ENABLE_POLICY_TOOLS=1` to enable policy-aware behavior and the `policy.evaluate@v1` tool.
-- If disabled, `policy.evaluate@v1` returns `disabled: true`, and tools may bypass policy envelopes depending on configuration.
+   * redacts fields if needed
+   * logs telemetry with the same `corr_id`
+5. Client receives:
 
----
+   * records
+   * `selected_source`
+   * `attempts`
+   * `corr_id`
 
-## End-to-end example (Windows)
-1) Start API:
-```powershell
-python -m HDT_CORE_INFRASTRUCTURE.HDT_API
-```
-2) Start MCP (stdio):
-```powershell
-$env:HDT_API_BASE = "http://localhost:5000"
-$env:HDT_API_KEY  = "YOUR_API_KEY"
-$env:HDT_ENABLE_POLICY_TOOLS = "1"
-python -m HDT_MCP.server
-```
-3) Launch Inspector:
-```powershell
-npx @modelcontextprotocol/inspector --config .\config\mcp.json --server hdt-mcp
-```
-4) In the Inspector, call the tool `hdt.get_walk_data@v1` with arguments:
-```json
-{ "user_id": "1", "purpose": "analytics" }
-```
+## Automatic Tool Discovery
+
+MCP provides **built-in tool discovery**: clients can query a server to obtain the current list of tools and their JSON schemas (arguments and expected shapes).
+
+### 1) External discovery (client → HDT) — fully automatic
+
+External agentic clients connect to the **HDT MCP server** (`hdt_mcp.gateway`) and can discover available HDT capabilities at runtime:
+
+* **Tool list**: the client can request the current set of tools (e.g., `hdt.walk.fetch.v1`, `hdt.trivia.fetch.v1`, `hdt.sugarvita.fetch.v1`, etc.).
+* **Tool schemas**: the client receives the argument schema for each tool.
+* **Versioning via tool names**: tools are versioned (e.g., `....v1`) so clients can safely target stable contracts.
+
+This is the primary interoperability surface.
+
+### 2) Internal discovery (HDT → Sources) — available, not enabled (yet)
+
+In the future, this will be realized via A2A and agent-orchestrator.
+
+### What “negotiation” means in v0.5.0
+
+In this prototype, “negotiation” is implemented as **deterministic orchestration** rather than LLM-driven contract rewriting:
+
+* the Governor applies a clear policy (prefer a source, fallback to another, optionally use vault),
+* source outcomes are normalized into a single response envelope,
+* the full attempt sequence is recorded for observability.
+

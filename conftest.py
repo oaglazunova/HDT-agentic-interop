@@ -1,43 +1,29 @@
-"""Pytest configuration and shared fixtures."""
-import sys
-import os
+"""Pytest configuration.
+
+Goals:
+- Keep unit tests fast and hermetic (no MCP runtime, no subprocesses by default).
+- Make integration tests opt-in via --run-integration.
+"""
+
+from __future__ import annotations
+
 import pytest
 
-# Ensure project root on sys.path for absolute imports
-ROOT = os.path.dirname(os.path.abspath(__file__))
-if ROOT not in sys.path:
-    sys.path.insert(0, ROOT)
 
-# Expose a Flask app and client fixtures used across tests.
-# Import lazily inside the fixture to avoid import errors when running
-# unit tests that don't need the Flask app (reduces coupling for pure unit tests).
-
-
-@pytest.fixture(scope="session")
-def app():
-    """Return the Flask app configured for testing.
-    Lazily import to prevent hard failures when API module isn't available.
-    """
-    try:
-        from HDT_CORE_INFRASTRUCTURE.HDT_API import app as _flask_app  # type: ignore
-    except Exception:
-        try:
-            from HDT_API.hdt_api import app as _flask_app  # type: ignore
-        except Exception as e:  # pragma: no cover - not needed in unit-only runs
-            pytest.skip("Flask app not available: %s" % (e,))
-    _flask_app.config.setdefault("TESTING", True)
-    return _flask_app
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        "--run-integration",
+        action="store_true",
+        default=False,
+        help="Run integration tests (spawns MCP subprocesses; may require local config/tokens).",
+    )
 
 
-@pytest.fixture()
-def app_client(app):
-    """A Flask test client for the app."""
-    with app.test_client() as c:
-        yield c
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    if config.getoption("--run-integration"):
+        return
 
-
-@pytest.fixture()
-def client(app_client):
-    """Alias used by some tests."""
-    yield app_client
-
+    skip = pytest.mark.skip(reason="integration tests are opt-in; pass --run-integration to run them")
+    for item in items:
+        if "integration" in item.keywords:
+            item.add_marker(skip)
