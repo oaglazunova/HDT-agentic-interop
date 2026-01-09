@@ -9,7 +9,7 @@ from typing import Optional
 from dotenv import load_dotenv
 
 
-def _find_repo_root(start: Path) -> Path:
+def _find_repo_root(start: Path) -> Optional[Path]:
     """
     Walk upward until we find pyproject.toml or .git.
     This stays correct if you later introduce src/ or move files.
@@ -18,8 +18,7 @@ def _find_repo_root(start: Path) -> Path:
     for p in (start, *start.parents):
         if (p / "pyproject.toml").exists() or (p / ".git").exists():
             return p
-    # Fallback: assume typical layout
-    return start.parents[1]
+    return None
 
 
 @lru_cache(maxsize=1)
@@ -28,31 +27,46 @@ def repo_root() -> Path:
 
     Order of precedence:
       1) HDT_REPO_ROOT (explicit override)
-      2) walk upward from this module file's location (robust for editable installs)
-      3) walk upward from current working directory
-
-    Rationale:
-    - On Windows (especially Git Bash), Path.cwd() can resolve unexpectedly.
-    - In editable installs, __file__ reliably points into the checked-out repo.
+      2) walk upward from current working directory
+      3) walk upward from this module file's directory
     """
-
     explicit = os.getenv("HDT_REPO_ROOT")
     if explicit:
-        return Path(explicit).expanduser().resolve()
+        p = Path(explicit).expanduser()
+        try:
+            p = p.resolve()
+        except Exception:
+            p = p.absolute()
 
-    # Robust: derive from module location first.
-    here = Path(__file__).resolve()
-    root = _find_repo_root(here)
-    if root.exists():
-        return root
+        if not p.exists() or not p.is_dir():
+            raise RuntimeError(f"HDT_REPO_ROOT does not exist or is not a directory: {p}")
 
-    # Fallback: called from within the repository (or a subfolder).
+        # Optional but strongly recommended sanity check
+        if not ((p / "pyproject.toml").exists() or (p / ".git").exists()):
+            # Not fatal, but warn via logging if you prefer
+            pass
+
+        return p
+
+    # 1) Search upward from current working directory
     cwd = Path.cwd().resolve()
     root = _find_repo_root(cwd)
-    if root.exists():
+    if root:
         return root
 
+    # 2) Derive from module location (use directory, not file path)
+    here_dir = Path(__file__).resolve().parent
+    root = _find_repo_root(here_dir)
+    if root:
+        return root
+
+    # Fallback: typical layout (repo/src/hdt_config/settings.py)
+    if len(here_dir.parents) >= 2:
+        # here_dir is .../src/hdt_config, parents[0]=.../src, parents[1]=.../repo
+        return here_dir.parents[1]
+
     return cwd
+
 
 
 

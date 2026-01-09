@@ -6,9 +6,9 @@ import functools
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
-from .context import get_request_id, new_request_id, set_request_id
-from .errors import typed_error
-from .telemetry import log_event
+from hdt_common.context import get_request_id, new_request_id, set_request_id
+from hdt_common.errors import typed_error
+from hdt_common.telemetry import log_event
 
 
 # ---------------------------------------------------------------------------

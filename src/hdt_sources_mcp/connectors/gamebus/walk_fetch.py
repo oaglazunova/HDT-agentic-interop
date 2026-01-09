@@ -1,9 +1,9 @@
 import logging
 import os
 
-from .walk_parse import parse_walk_activities
-from .diabetes_fetch import format_date_to_dd_mm_yyyy
-from ...core_infrastructure.http_client import DEFAULT_HTTP_CLIENT
+from hdt_sources_mcp.connectors.gamebus.walk_parse import parse_walk_activities
+from hdt_sources_mcp.connectors.gamebus.diabetes_fetch import format_date_to_dd_mm_yyyy
+from hdt_sources_mcp.core_infrastructure.http_client import DEFAULT_HTTP_CLIENT
 
 
 logger = logging.getLogger(__name__)

@@ -3,8 +3,8 @@ import os
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from .walk_parse import parse_google_fit_walk_data
-from ...core_infrastructure.http_client import DEFAULT_HTTP_CLIENT
+from hdt_sources_mcp.connectors.google_fit.walk_parse import parse_google_fit_walk_data
+from hdt_sources_mcp.core_infrastructure.http_client import DEFAULT_HTTP_CLIENT
 
 
 logger = logging.getLogger(__name__)
