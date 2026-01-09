@@ -548,6 +548,3 @@ class HDTGovernor:
                 client_id=cid,
                 corr_id=get_request_id(),
             )
-
-    async def shutdown(self) -> None:
-        await self.sources.close()
