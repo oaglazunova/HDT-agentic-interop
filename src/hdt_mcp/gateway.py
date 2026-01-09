@@ -6,7 +6,7 @@ from typing import Callable, TypeVar, ParamSpec
 from mcp.server.fastmcp import FastMCP
 
 from .governor import HDTGovernor
-from .policy.engine import apply_policy, apply_policy_safe, policy_last_meta
+from .policy.engine import apply_policy, apply_policy_safe, policy_last_meta, explain_policy
 from hdt_common.tooling import (
     InstrumentConfig,
     PolicyConfig,
@@ -15,7 +15,6 @@ from hdt_common.tooling import (
 )
 from hdt_common.telemetry import telemetry_recent
 from hdt_config.settings import init_runtime
-from hdt_mcp.policy.engine import explain_policy
 
 
 logger = logging.getLogger(__name__)
@@ -64,12 +63,13 @@ def hdt_tool(name: str, *, sync: bool = False, instrument: bool = True):
         if instrument:
             wrapped = instrument_sync_tool(_cfg(name))(wrapped) if sync else _instrument(name)(wrapped)
 
-        # Defensive: keep signature even if wrappers change
-        registered = mcp.tool(name=name)(wrapped)
+        # Ensure signature is set BEFORE registering with FastMCP
         try:
-            registered.__signature__ = sig  # type: ignore[attr-defined]
+            wrapped.__signature__ = sig  # type: ignore[attr-defined]
         except Exception:
             pass
+
+        registered = mcp.tool(name=name)(wrapped)
         return registered
 
     return decorator

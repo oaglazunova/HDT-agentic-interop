@@ -7,8 +7,8 @@ from pathlib import Path
 from typing import Any, Dict
 
 from hdt_config.settings import repo_root
-from hdt_common.context import get_request_id
-from hdt_common.errors import REDACT_TOKEN
+from .context import get_request_id
+from .errors import REDACT_TOKEN
 
 _DEFAULT_TELEMETRY_DIR = (repo_root() / "artifacts" / "telemetry").resolve()
 _TELEMETRY_DIR = Path(os.getenv("HDT_TELEMETRY_DIR", str(_DEFAULT_TELEMETRY_DIR))).expanduser().resolve()

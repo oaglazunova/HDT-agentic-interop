@@ -6,9 +6,9 @@ import functools
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
-from hdt_common.context import get_request_id, new_request_id, set_request_id
-from hdt_common.errors import typed_error
-from hdt_common.telemetry import log_event
+from .context import get_request_id, new_request_id, set_request_id
+from .errors import typed_error
+from .telemetry import log_event
 
 
 # ---------------------------------------------------------------------------
@@ -60,6 +60,9 @@ def instrument_sync_tool(cfg: InstrumentConfig):
     """Decorator for sync tools (e.g., Sources MCP)."""
 
     def decorator(fn: Callable[..., Any]):
+        fn_sig = inspect.signature(fn)
+
+        @functools.wraps(fn)
         def wrapper(*args: Any, **kwargs: Any):
             # Ensure corr_id exists; Sources may already have one set via sources.context.set.v1
             corr_id = get_request_id()
@@ -96,6 +99,7 @@ def instrument_sync_tool(cfg: InstrumentConfig):
                 payload.setdefault("corr_id", corr_id)
             return payload
 
+        wrapper.__signature__ = fn_sig  # type: ignore[attr-defined]
         return wrapper
 
     return decorator

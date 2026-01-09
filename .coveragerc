@@ -14,7 +14,7 @@ omit =
     # Demo/CLI/scripts, docs, models outside core runtime
     scripts/*
     docs/*
-    Virtual_Twin_Models/*
+    examples/*
 
     # Data artifacts
     data/*
