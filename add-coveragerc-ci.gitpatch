@@ -1,0 +1,38 @@
+--- /dev/null	2026-01-09 21:24:52.349847185 +0000
++++ .coveragerc.ci	2026-01-09 21:29:07.590408066 +0000
+@@ -0,0 +1,35 @@
++[run]
++branch = True
++source =
++    hdt_mcp
++
++omit =
++    # Provider adapters/parsers (exercise with integration tests, not unit tests)
++    */src/hdt_sources_mcp/core_infrastructure/*
++
++    # Composition roots (heavy wiring; better measured in integration/CI)
++    */src/hdt_mcp/gateway.py
++    */src/hdt_sources_mcp/server.py
++
++    # Demo/CLI/scripts, docs, models outside core runtime
++    */scripts/*
++    */docs/*
++    */examples/*
++
++    # Data artifacts
++    */data/*
++
++    # Python cache
++    */__pycache__/*
++    *.pyc
++
++[report]
++exclude_lines =
++    pragma: no cover
++    if __name__ == ["']__main__["']:
++    if TYPE_CHECKING:
++    except Exception
++    except:
++    raise NotImplementedError
++
++show_missing = True

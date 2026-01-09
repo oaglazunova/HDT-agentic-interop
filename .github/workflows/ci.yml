@@ -55,6 +55,5 @@ jobs:
         timeout-minutes: 12
         run: |
           python -m pytest --maxfail=1 --disable-warnings -q \
-            --cov-config=.coveragerc.ci \
             --cov=hdt_mcp --cov-report=term \
             --cov-fail-under=85
