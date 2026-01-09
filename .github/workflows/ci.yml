@@ -49,7 +49,7 @@ jobs:
           HDT_VAULT_ENABLE: "1"
           HDT_GATEWAY_MODULE: "hdt_mcp.gateway"
         run: |
-          python scripts/smoke_mcp.py       
+          python scripts/demo_smoke_mcp.py       
 
       - name: Run tests with coverage guard
         run: |
