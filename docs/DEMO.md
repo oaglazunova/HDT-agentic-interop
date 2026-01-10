@@ -76,6 +76,77 @@ The demo writes all outputs under `artifacts/`:
 
 These artifacts are intended for local runs and paper screenshots; they should not be committed.
 
+## Guardian auditor demo (optional)
+
+This optional demo shows how a monitoring agent can be built *only* by calling telemetry tools (no direct file access).
+
+1) Generate denied traces by simulating a misbehaving coaching agent:
+
+```powershell
+$env:HDT_POLICY_PATH="config/policy.guardian_demo.json"
+$env:MCP_CLIENT_ID="COACHING_AGENT"
+$env:HDT_TELEMETRY_SUBJECT_SALT="demo-salt"
+python -u scripts/demo_coaching_agent_suspicious.py
+```
+
+2) Run the guardian to detect repeated policy denies via `hdt.telemetry.query.v1`:
+
+```powershell
+$env:HDT_POLICY_PATH="config/policy.guardian_demo.json"
+$env:MCP_CLIENT_ID="GUARDIAN_AGENT"
+$env:HDT_TELEMETRY_SUBJECT_SALT="demo-salt"
+python -u scripts/demo_guardian_agent.py
+```
+
+Notes:
+
+* The demo policy `config/policy.guardian_demo.json` denies raw fetch tools for `purpose=coaching`, so denied attempts are deterministic.
+* `HDT_TELEMETRY_SUBJECT_SALT` enables a privacy-preserving `subject_hash` field in telemetry for per-subject governance.
+
+
+## Demo: “What does the HDT know about me?” (user-facing transparency)
+
+Purpose: demonstrate **user-facing transparency** using the same MCP tool surface as integration and governance.
+
+### Steps
+
+1) (Optional) Prepare deterministic data:
+
+```bash
+python scripts/init_sample_config.py
+python scripts/init_sample_vault.py
+````
+
+2. Run the transparency agent:
+
+PowerShell:
+
+```powershell
+$env:MCP_CLIENT_ID="TRANSPARENCY_AGENT"
+$env:HDT_TELEMETRY_SUBJECT_SALT="demo-salt"
+$env:HDT_VAULT_ENABLE="1"
+$env:HDT_VAULT_PATH="artifacts/vault/hdt_vault_ieee_demo.sqlite"
+python -u scripts/<YOUR_TRANSPARENCY_AGENT_SCRIPT>.py
+```
+
+Git Bash / macOS / Linux:
+
+```bash
+export MCP_CLIENT_ID="TRANSPARENCY_AGENT"
+export HDT_TELEMETRY_SUBJECT_SALT="demo-salt"
+export HDT_VAULT_ENABLE="1"
+export HDT_VAULT_PATH="artifacts/vault/hdt_vault_ieee_demo.sqlite"
+python -u scripts/<YOUR_TRANSPARENCY_AGENT_SCRIPT>.py
+```
+
+### Expected output (high level)
+
+* Data inventory: which HDT domains exist (walk/diabetes/etc.), which sources are configured (e.g., GameBus/Google Fit/Vault).
+* Recent access history (telemetry-derived): tool calls grouped by purpose (lane) and client_id.
+* Traceability: correlation ids (`corr_id`) suitable for audit and debugging.
+
+---
+
 ## Run individual demo scripts (optional)
 
 You can run each part independently from repo root:

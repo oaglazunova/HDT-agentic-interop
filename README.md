@@ -43,6 +43,140 @@ Prototype for an **MCP** Human Digital Twin (HDT) interoperability gateway, desi
   3) Policy matrix (clients × purposes × tools)
 
 - **Demo documentation:** see `docs/DEMO.md` for expected outputs and suggested screenshots.
+- **Guardian audit demo (telemetry-driven monitoring):** run `python scripts/demo_coaching_agent_suspicious.py` then `python scripts/demo_guardian_agent.py` (uses `config/policy.guardian_demo.json`; see **Guardian agent demo** below).
+- **User-facing transparency demo (“What does the HDT know about me?”):** run `python -u scripts/<YOUR_TRANSPARENCY_AGENT_SCRIPT>.py` (see **Transparency agent demo** below).
+
+---
+
+## Guardian agent demo (telemetry-driven auditing)
+
+This repository exposes telemetry as a first-class tool. A monitoring agent can therefore be implemented as a *tool consumer* (no privileged filesystem access, no bespoke log pipeline).
+
+The demo below simulates a misbehaving coaching agent repeatedly attempting to call analytics-only tools. The guardian (auditor) then queries telemetry via `hdt.telemetry.query.v1` and flags suspicious repeated denies.
+
+### 1) Use the guardian demo policy
+
+The demo policy denies raw fetch tools when `purpose=coaching` (analytics-only), so the denied attempts are deterministic:
+
+* Policy file: `config/policy.guardian_demo.json`
+
+### 2) Generate suspicious telemetry (simulated coaching agent)
+
+**PowerShell:**
+
+```powershell
+$env:HDT_POLICY_PATH="config/policy.guardian_demo.json"
+$env:MCP_CLIENT_ID="COACHING_AGENT"
+$env:HDT_TELEMETRY_SUBJECT_SALT="demo-salt"
+python -u scripts/demo_coaching_agent_suspicious.py
+```
+
+**Git Bash / macOS / Linux:**
+
+```bash
+export HDT_POLICY_PATH="config/policy.guardian_demo.json"
+export MCP_CLIENT_ID="COACHING_AGENT"
+export HDT_TELEMETRY_SUBJECT_SALT="demo-salt"
+python -u scripts/demo_coaching_agent_suspicious.py
+```
+
+### 3) Run the guardian auditor agent
+
+**PowerShell:**
+
+```powershell
+$env:HDT_POLICY_PATH="config/policy.guardian_demo.json"
+$env:MCP_CLIENT_ID="GUARDIAN_AGENT"
+$env:HDT_TELEMETRY_SUBJECT_SALT="demo-salt"
+python -u scripts/demo_guardian_agent.py
+```
+
+**Git Bash / macOS / Linux:**
+
+```bash
+export HDT_POLICY_PATH="config/policy.guardian_demo.json"
+export MCP_CLIENT_ID="GUARDIAN_AGENT"
+export HDT_TELEMETRY_SUBJECT_SALT="demo-salt"
+python -u scripts/demo_guardian_agent.py
+```
+
+### Notes
+
+* `HDT_TELEMETRY_SUBJECT_SALT` enables a privacy-preserving `subject_hash` in telemetry records, so governance can be performed *per citizen* without writing raw identifiers to disk.
+* The guardian uses `hdt.telemetry.query.v1` (bounded + filtered) rather than reading telemetry files directly.
+
+---
+
+## Transparency agent demo: “What does the HDT know about me?”
+
+This repository can support **user-facing transparency** using the same building blocks as policy enforcement and monitoring:
+
+- **Data-access tools** (e.g., `hdt.walk.fetch.v1`, `hdt.trivia.fetch.v1`, `hdt.sugarvita.fetch.v1`, `hdt.sources.status.v1`) to report what data exists / is configured.
+- **Telemetry tools** (e.g., `hdt.telemetry.query.v1`) to report which tools were accessed, by whom (`client_id`), and under which **purpose** (lane).
+
+The goal is to answer a user-centric question:
+
+> **“What does the HDT know about me?”**  
+> What data exists (by domain/source), and what access has occurred (tool, purpose, timestamp), in a human-readable report.
+
+### 1) Recommended setup (offline / deterministic)
+
+For a reviewer-friendly demo without live credentials:
+
+1. Generate sample config (if not already done):
+  ```bash
+   python scripts/init_sample_config.py
+```
+
+2. Initialize the seeded demo vault (optional but recommended):
+
+   ```bash
+   python scripts/init_sample_vault.py
+   ```
+
+### 2) Run the transparency agent script
+
+**PowerShell:**
+
+```powershell
+$env:MCP_CLIENT_ID="TRANSPARENCY_AGENT"
+$env:HDT_TELEMETRY_SUBJECT_SALT="demo-salt"
+# Optional (recommended for deterministic demo)
+$env:HDT_VAULT_ENABLE="1"
+$env:HDT_VAULT_PATH="artifacts/vault/hdt_vault_ieee_demo.sqlite"
+python -u scripts/<YOUR_TRANSPARENCY_AGENT_SCRIPT>.py
+```
+
+**Git Bash / macOS / Linux:**
+
+```bash
+export MCP_CLIENT_ID="TRANSPARENCY_AGENT"
+export HDT_TELEMETRY_SUBJECT_SALT="demo-salt"
+# Optional (recommended for deterministic demo)
+export HDT_VAULT_ENABLE="1"
+export HDT_VAULT_PATH="artifacts/vault/hdt_vault_ieee_demo.sqlite"
+python -u scripts/<YOUR_TRANSPARENCY_AGENT_SCRIPT>.py
+```
+
+### 3) What to capture (suggested screenshots)
+
+* A “data inventory” section (what domains/sources exist for the user; e.g., walk, diabetes).
+* An “access history” section listing:
+
+  * tool name (e.g., `hdt.walk.fetch.v1`)
+  * `client_id` (who accessed)
+  * **purpose** (lane) (e.g., coaching / analytics / modeling)
+  * timestamp and `corr_id` (traceability)
+* (Optional) A “recent governance signals” section:
+
+  * denied attempts (e.g., `denied_by_policy`)
+  * repeated denies by the same client (probing / misconfiguration)
+
+### Notes
+
+* The agent is **LLM-free** by default (rule-based summarization + tool calls). You can add an LLM later for natural-language narrative, but it is not required for transparency.
+* `HDT_TELEMETRY_SUBJECT_SALT` enables a privacy-preserving `subject_hash` in telemetry so reporting can be per-citizen without writing raw identifiers to disk.
+* The agent should use `hdt.telemetry.query.v1` (bounded + filtered) rather than reading telemetry files directly.
 
 ---
 
@@ -225,6 +359,7 @@ python -m pytest -q
 * `HDT_VAULT_ENABLE`: `1` to enable vault read-through/write-through
 * `HDT_VAULT_PATH`: location of the vault DB file (e.g., `./artifacts/vault/hdt_vault.sqlite`)
 * `HDT_TELEMETRY_DIR`: directory for telemetry JSONL output
+* `HDT_TELEMETRY_SUBJECT_SALT`: optional salt to add a privacy-preserving `subject_hash` to telemetry records
 * `HDT_DISABLE_TELEMETRY`: `1` to disable telemetry logging
 * `HDT_DEMO_TIMEOUT_SEC`: demo call timeout (default `30`)
 
@@ -336,6 +471,22 @@ In the Inspector UI, open the **Tools** panel and call:
     { "n": 50, "purpose": "analytics" }
     ```
 
+* **Telemetry query (filtered)**
+
+  * Tool: `hdt.telemetry.query.v1`
+  * Input (example: denied coaching attempts by a specific client in the last hour):
+
+    ```json
+    {
+      "n": 50,
+      "lookback_s": 3600,
+      "client_id": "COACHING_AGENT",
+      "event_purpose": "coaching",
+      "error_code": "denied_by_policy",
+      "purpose": "analytics"
+    }
+    ```
+
 ### Optional: inspect the sources server directly
 
 ```bash
@@ -376,6 +527,7 @@ Role:
   * `hdt.sources.status.v1`
   * `hdt.policy.explain.v1`
   * `hdt.telemetry.recent.v1`
+  * `hdt.telemetry.query.v1`
 
 What it does on each tool call:
 
@@ -487,10 +639,15 @@ Records include:
 
 * `kind`: tool/governor/source
 * `name`: tool name
+* `client_id`: caller identity for attribution
 * `corr_id`: correlation id across layers
 * `request_id`: request id (often equal to `corr_id` in demos)
+* `ok`: success/failure
 * `ms`: duration
-* sanitized args and policy info
+* `args`: sanitized arguments and policy metadata (PII + secrets redacted)
+* `out` (optional): lightweight output stats (counts/bytes/error_code) to support monitoring without storing payloads
+* `subject_hash` (optional): privacy-preserving per-subject key when `HDT_TELEMETRY_SUBJECT_SALT` is set
+
 
 ---
 

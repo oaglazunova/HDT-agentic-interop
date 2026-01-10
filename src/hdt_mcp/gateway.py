@@ -13,7 +13,7 @@ from hdt_common.tooling import (
     instrument_async_tool,
     instrument_sync_tool,
 )
-from hdt_common.telemetry import telemetry_recent
+from hdt_common.telemetry import telemetry_recent, telemetry_query
 from hdt_config.settings import init_runtime
 
 
@@ -191,6 +191,38 @@ async def hdt_policy_explain(tool: str, purpose: str = "analytics") -> dict:
 @hdt_tool("hdt.telemetry.recent.v1")
 async def hdt_telemetry_recent(n: int = 50, purpose: str = "analytics") -> dict:
     return telemetry_recent(n=n)
+
+@hdt_tool("hdt.telemetry.query.v1")
+async def hdt_telemetry_query(
+    n: int = 50,
+    lookback_s: int | None = 3600,
+    client_id: str | None = None,
+    tool: str | None = None,
+    tool_prefix: str | None = None,
+    event_purpose: str | None = None,
+    ok: bool | None = None,
+    error_code: str | None = None,
+    subject_hash: str | None = None,
+    purpose: str = "analytics",
+) -> dict:
+    """Filtered telemetry query (bounded).
+
+    Use this for monitoring/guardian agents without requiring direct file access.
+
+    The tool uses telemetry records that are already redacted on write.
+    """
+    return telemetry_query(
+        n=n,
+        lookback_s=lookback_s,
+        client_id=client_id,
+        tool=tool,
+        tool_prefix=tool_prefix,
+        purpose=event_purpose,
+        ok=ok,
+        error_code=error_code,
+        subject_hash=subject_hash,
+    )
+
 
 
 def main() -> None:

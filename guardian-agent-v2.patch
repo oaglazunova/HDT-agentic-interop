@@ -1,0 +1,1986 @@
+diff --git a/README.md b/README.md
+index fcda2e9..5b8fe67 100644
+--- a/README.md
++++ b/README.md
+@@ -1,546 +1,567 @@
+-# HDT v0.5.0 (2025-12-12)
+-
+-Prototype for an **MCP** Human Digital Twin (HDT) interoperability gateway, designed to support: purpose-limited tool access (“lanes”), deterministic orchestration (“governor”), typed errors, and auditable telemetry.
+-
+-## Highlights
+-
+-- **MCP-only architecture**: the HDT is exposed exclusively via MCP tools; REST is not a required integration surface.
+-- **HDT Governor (orchestrator)**:
+-  - Central decision point for source selection, fallback, and error normalization.
+-  - Executes tool calls; returns structured results with provenance and attempt traces.
+-- **Sources MCP façade (internal)**:
+-  - External systems are wrapped as MCP tools (e.g., GameBus, Google Fit, SugarVita, Trivia) using existing fetchers/parsers.
+-  - Enables capability discovery and uniform invocation via MCP rather than bespoke per-client glue.
+-- **Domain-first tool surface (external)**:
+-  - HDT-level tools expose capabilities (e.g., walking, diabetes/trivia) without leaking source-specific API details.
+-- **Structured errors and observability**:
+-  - Source failures are returned as typed error envelopes (e.g., `not_connected`, `missing_token`, `upstream_error`, `all_sources_failed`) instead of silent empty results.
+-  - Tool responses include basic provenance (and `corr_id`) to support debugging and auditing.
+-
+-## Architecture Overview
+-
+-- **External interface**: `hdt_mcp.gateway` (HDT MCP server)
+-  - Exposes HDT-level tools to external agents/clients.
+-  - Delegates execution to the **HDT Governor**.
+-- **Internal source interface**: `hdt_sources_mcp.server` (Sources MCP server)
+-  - Exposes source-specific tools (GameBus/Google Fit/SugarVita/Trivia).
+-  - Reads connection configuration via merged `config/users.json` + `config/users.secrets.json`.
+-- **Connectors** (internal implementation detail): provider-specific fetch/parse code lives inside `hdt_sources_mcp`.
+-  The external HDT surface remains MCP-only.
+-
+-## Architecture at a glance
+-
+-![Architecture](./docs/architecture.jpg)
+-
+----
+-
+-## Demos (IEEE paper / reviewer-friendly)
+-
+-- **One-command demo (recommended):** `.\scripts\demo_ieee_all.ps1`  
+-  Runs:
+-  1) Privacy & purpose lanes (deny-fast + modeling-safe outputs + redaction differences)  
+-  2) Transparency / traceability (telemetry with `corr_id` + JSONL summary)  
+-  3) Policy matrix (clients × purposes × tools)
+-
+-- **Demo documentation:** see `docs/DEMO.md` for expected outputs and suggested screenshots.
+-
+----
+-
+-## Quickstart (reproducible local run)
+-
+-### Prerequisites
+-
+-- Python **3.11+** (tested locally with Python 3.14)
+-- Git
+-- (Windows) `py` launcher recommended
+-
+-### 1) Create and activate a virtual environment
+-
+-**Windows (PowerShell):**
+-```powershell
+-py -V:3.14 -m venv .venv
+-.\.venv\Scripts\Activate.ps1
+-python --version
+-````
+-
+-**Windows (Git Bash):**
+-
+-```bash
+-py -V:3.14 -m venv .venv
+-source .venv/Scripts/activate
+-python --version
+-```
+-
+-**macOS / Linux:**
+-
+-```bash
+-python3 -m venv .venv
+-source .venv/bin/activate
+-python --version
+-```
+-
+-### 2) Install dependencies (editable + dev tools)
+-
+-```bash
+-python -m pip install -U pip
+-python -m pip install -e ".[dev]"
+-```
+-
+-### 3) Configure users and secrets
+-
+-This repository expects:
+-
+-* `config/users.json` (non-secret configuration)
+-* `config/users.secrets.json` (tokens/credentials; **do not commit**)
+-
+-If you don’t have configs yet, generate templates:
+-
+-```bash
+-python scripts/init_sample_config.py
+-```
+-
+-Then edit:
+-
+-* `config/users.json`
+-* `config/users.secrets.json`
+-
+-Important merge rule:
+-
+-* Identity fields must match across public and secret entries (e.g., `connected_application` + `player_id`) so the overlay merges correctly.
+-
+-### 4) Run the test suite (canonical validation)
+-
+-```bash
+-python -m pytest -q
+-```
+-
+-If this passes, your local environment and tool contracts are consistent.
+-
+-### 5) Run the IEEE demo (recommended end-to-end)
+-
+-**Windows (PowerShell):**
+-
+-```powershell
+-.\scripts\demo_ieee_all.ps1
+-```
+-
+-If execution policy blocks scripts:
+-
+-```powershell
+-powershell -ExecutionPolicy Bypass -File .\scripts\demo_ieee_all.ps1
+-```
+-
+-Artifacts are written under `artifacts/telemetry/` and `artifacts/vault/` (do not commit).
+-
+-### 6) Enable repo quality gates (recommended for contributors)
+-
+-Install hooks:
+-
+-```bash
+-python -m pip install pre-commit
+-pre-commit install
+-pre-commit install --hook-type pre-push
+-```
+-
+-Run locally once:
+-
+-```bash
+-pre-commit run -a
+-pre-commit run -a --hook-stage pre-push
+-```
+-
+----
+-
+-## Running the MCP Servers
+-
+-This repository implements **MCP-only** using **two MCP servers**:
+-
+-1. **External-facing HDT MCP server**
+-   Module: `python -m hdt_mcp.gateway`
+-   Purpose: exposes *domain-level* HDT tools to external agents/clients.
+-
+-2. **Internal Sources MCP server**
+-   Module: `python -m hdt_sources_mcp.server`
+-   Purpose: wraps external systems (GameBus, Google Fit, SugarVita, Trivia) as MCP tools.
+-
+-The HDT MCP server calls Sources MCP internally via a local stdio MCP client (it spawns the Sources server as a subprocess).
+-
+-### Transport modes
+-
+-* `stdio` (recommended for local dev and demos): MCP messages flow over standard input/output.
+-  Ideal for “spawn a server as a subprocess” and for local testing.
+-* `streamable-http` (optional): use only for the **external-facing** server, and only after adding authentication.
+-
+-### A) Start the external HDT MCP server
+-
+-PowerShell:
+-
+-```powershell
+-$env:MCP_TRANSPORT="stdio"
+-python -m hdt_mcp.gateway
+-```
+-
+-If you prefer `streamable-http` (optional):
+-
+-```powershell
+-$env:MCP_TRANSPORT="streamable-http"
+-python -m hdt_mcp.gateway
+-```
+-
+-Notes:
+-
+-* In `stdio` mode you typically do not see a friendly “listening” banner. It is meant to be driven by an MCP client (scripts/tests).
+-* The recommended validation is to run `.\scripts\demo_ieee_all.ps1` or `python scripts/demo_ieee_transparency.py`.
+-
+-### B) Start the internal Sources MCP server (usually not started manually)
+-
+-You normally do **not** run Sources MCP directly, because the HDT MCP client spawns it automatically.
+-
+-If you want to run it explicitly (debugging):
+-
+-```powershell
+-$env:MCP_TRANSPORT="stdio"
+-python -m hdt_sources_mcp.server
+-```
+-
+-### C) Validate everything works (recommended)
+-
+-Run the full demo:
+-
+-```powershell
+-.\scripts\demo_ieee_all.ps1
+-```
+-
+-Run the full test suite:
+-
+-```powershell
+-python -m pytest -q
+-```
+-
+-### D) Common environment variables
+-
+-* `MCP_TRANSPORT`: `stdio` (default) or `streamable-http`
+-* `MCP_CLIENT_ID`: identifier for policy/telemetry attribution (e.g., `MODEL_DEVELOPER_1`)
+-* `HDT_POLICY_PATH`: path to the policy JSON (e.g., `config/policy_ieee_demo.json`)
+-* `HDT_VAULT_ENABLE`: `1` to enable vault read-through/write-through
+-* `HDT_VAULT_PATH`: location of the vault DB file (e.g., `./artifacts/vault/hdt_vault.sqlite`)
+-* `HDT_TELEMETRY_DIR`: directory for telemetry JSONL output
+-* `HDT_DISABLE_TELEMETRY`: `1` to disable telemetry logging
+-* `HDT_DEMO_TIMEOUT_SEC`: demo call timeout (default `30`)
+-
+----
+-
+-## Test and debug with MCP Inspector (Windows + Git Bash)
+-
+-The MCP Inspector is an interactive UI for exploring an MCP server: list tools, call them with JSON inputs, and inspect responses. It runs a local web UI (default `http://localhost:6274`) and a local proxy server (default port `6277`).
+-
+-### Prerequisites
+-
+-* Node.js (for `npx`)
+-* This repo installed in a Python virtualenv:
+-
+-  ```bash
+-  python -m pip install -e ".[dev]"
+-  ```
+-
+-### Recommended: offline / deterministic mode (seeded vault)
+-
+-This mode does not require live GameBus credentials and is suitable for demos and reviewers.
+-
+-1. Initialize sample config + seeded vault:
+-
+-```bash
+-python scripts/init_sample_config.py
+-python scripts/init_sample_vault.py
+-```
+-
+-2. Launch the Inspector against the HDT gateway (STDIO transport):
+-
+-```bash
+-npx @modelcontextprotocol/inspector \
+-  -e MCP_TRANSPORT=stdio \
+-  -e HDT_VAULT_ENABLE=1 \
+-  -e HDT_VAULT_PATH=artifacts/vault/hdt_vault_ieee_demo.sqlite \
+-  -- python -m hdt_mcp.gateway
+-```
+-
+-Notes:
+-
+-* `--` separates Inspector arguments from the server command/args.
+-* Run this from an *activated* venv so `python -m hdt_mcp.gateway` uses the correct environment.
+-
+-3. Open the Inspector UI:
+-
+-* Navigate to `http://localhost:6274` in your browser.
+-
+-### Suggested tool calls to try
+-
+-In the Inspector UI, open the **Tools** panel and call:
+-
+-* **Policy explain (why a tool is allowed/denied in a lane)**
+-
+-  * Tool: `hdt.policy.explain.v1`
+-  * Input:
+-
+-    ```json
+-    { "tool": "hdt.walk.fetch.v1", "purpose": "modeling" }
+-    ```
+-
+-* **Raw walk fetch (allowed in coaching/analytics; denied in modeling by policy)**
+-
+-  * Tool: `hdt.walk.fetch.v1`
+-  * Input (analytics):
+-
+-    ```json
+-    {
+-      "user_id": 1,
+-      "start_date": "2025-11-01",
+-      "end_date": "2025-11-03",
+-      "prefer_data": "vault",
+-      "purpose": "analytics"
+-    }
+-    ```
+-  * Input (modeling; expected deny):
+-
+-    ```json
+-    {
+-      "user_id": 1,
+-      "start_date": "2025-11-01",
+-      "end_date": "2025-11-03",
+-      "prefer_data": "vault",
+-      "purpose": "modeling"
+-    }
+-    ```
+-
+-* **Modeling-safe features**
+-
+-  * Tool: `hdt.walk.features.v1`
+-  * Input:
+-
+-    ```json
+-    {
+-      "user_id": 1,
+-      "start_date": "2025-11-01",
+-      "end_date": "2025-11-03",
+-      "prefer_data": "vault",
+-      "purpose": "modeling"
+-    }
+-    ```
+-
+-* **Telemetry (recent calls)**
+-
+-  * Tool: `hdt.telemetry.recent.v1`
+-  * Input:
+-
+-    ```json
+-    { "n": 50, "purpose": "analytics" }
+-    ```
+-
+-### Optional: inspect the sources server directly
+-
+-```bash
+-npx @modelcontextprotocol/inspector -e MCP_TRANSPORT=stdio -- python -m hdt_sources_mcp.server
+-```
+-
+-### Troubleshooting
+-
+-* **Port conflicts:** Inspector uses ports `6274` (UI) and `6277` (proxy) by default; free those ports if they are occupied.
+-* **Nothing “prints” from the server:** with STDIO, servers often don’t show a typical “listening” banner; validate by listing tools and calling `hdt.sources.status.v1` / `hdt.healthz.v1` in the UI.
+-
+----
+-
+-## Architecture (Detailed)
+-
+-### Why two MCP servers?
+-
+-The design separates the system into two layers:
+-
+-* **External MCP contract (domain-first):** what external clients/agents see and call.
+-* **Internal MCP contract (source-first):** how the HDT interacts with external systems uniformly.
+-
+-This prevents the external tool surface from leaking GameBus/Google Fit/SugarVita implementation details and lets you evolve connectors independently.
+-
+-### Components
+-
+-#### 1) HDT MCP Server — `hdt_mcp.gateway`
+-
+-Role:
+-
+-* The **only** supported integration surface for external clients.
+-* Exposes **domain-level tools** such as:
+-
+-  * `hdt.walk.fetch.v1`
+-  * `hdt.walk.features.v1`
+-  * `hdt.trivia.fetch.v1`
+-  * `hdt.sugarvita.fetch.v1`
+-  * `hdt.sources.status.v1`
+-  * `hdt.policy.explain.v1`
+-  * `hdt.telemetry.recent.v1`
+-
+-What it does on each tool call:
+-
+-1. Creates a **correlation id** (`corr_id`) for end-to-end tracing.
+-2. Validates request parameters (including `purpose` lane).
+-3. Performs **policy pre-check** (deny fast, avoid upstream calls).
+-4. Delegates execution to the Governor.
+-5. Applies **policy redaction** (`apply_policy_safe`) on successful payloads.
+-6. Writes telemetry (JSONL) with:
+-
+-   * tool name
+-   * sanitized args
+-   * policy meta (allowed/redactions)
+-   * `corr_id`
+-   * duration (ms)
+-
+-#### 2) HDT Governor — `hdt_mcp.governor.HDTGovernor`
+-
+-Role:
+-
+-* Orchestration and deterministic “negotiation rules.”
+-* Converts multiple source/tool outcomes into one normalized response envelope.
+-* Produces a **negotiation trace** via `attempts`.
+-
+-Key behaviors:
+-
+-* **Source preference + fallback**:
+-
+-  * try preferred live source (e.g., `gamebus` or `googlefit`)
+-  * fallback to the other on typed errors
+-* **Vault strategy** (`prefer_data`):
+-
+-  * `prefer_data="vault"`: vault-only (demos)
+-  * `prefer_data="live"`: live-only (fail if upstream fails)
+-  * `prefer_data="auto"`: vault-first and/or vault-fallback depending on configuration
+-* **Write-through**:
+-
+-  * after successful live fetch, upsert into vault (best effort)
+-
+-Outputs:
+-
+-* Success payloads include `selected_source` and `attempts`.
+-* Failure payloads return a typed error envelope plus attempt details.
+-
+-#### 3) Sources MCP Server — `hdt_sources_mcp.server`
+-
+-Role:
+-
+-* Internal façade that wraps external systems as tools such as:
+-
+-  * `source.gamebus.walk.fetch.v1`
+-  * `source.googlefit.walk.fetch.v1`
+-  * `source.gamebus.trivia.fetch.v1`
+-  * `source.gamebus.sugarvita.fetch.v1`
+-  * `sources.status.v1`
+-
+-What it does:
+-
+-1. Loads merged user config: `config/users.json` + `config/users.secrets.json`
+-2. Resolves connector configuration for the requested user/source
+-3. Calls provider fetchers/parsers in `hdt_sources_mcp`
+-4. Returns typed payloads:
+-
+-   * success includes `provenance` (retrieved_at, ms, player_id where applicable)
+-   * failure returns typed errors:
+-
+-     * `unknown_user`
+-     * `not_connected`
+-     * `missing_token`
+-     * `upstream_error`
+-
+-Correlation:
+-
+-* The HDT layer can pass a correlation id to the Sources layer (via environment) so telemetry correlates across:
+-  MCP tool call → Governor → Sources MCP tool call.
+-
+-#### 4) Connectors (internal to Sources MCP)
+-
+-Role:
+-
+-* Provider-specific HTTP/OAuth calls and parsing logic.
+-* Not part of the external interoperability contract; exposed only through `hdt_sources_mcp.server` tools.
+-
+-#### 5) Policy engine — `hdt_mcp.policy.*`
+-
+-Role:
+-
+-* Enforces **purpose limitation** (analytics/modeling/coaching lanes)
+-* Supports:
+-
+-  * deny by tool + purpose
+-  * field-level redaction by dotted paths
+-* Used for:
+-
+-  * pre-check denies fast
+-  * post-processing redacts successful payloads only
+-
+-#### 6) Telemetry — JSONL traces (tool + governor)
+-
+-Role:
+-
+-* JSONL logging suitable for:
+-
+-  * debugging
+-  * audit traces
+-  * evaluation of “negotiation behavior”
+-
+-Records include:
+-
+-* `kind`: tool/governor/source
+-* `name`: tool name
+-* `corr_id`: correlation id across layers
+-* `request_id`: request id (often equal to `corr_id` in demos)
+-* `ms`: duration
+-* sanitized args and policy info
+-
+----
+-
+-## Data Flow Example: `hdt.walk.fetch.v1`
+-
+-1. External client calls `hdt.walk.fetch.v1(user_id=1, prefer=gamebus, prefer_data=auto)`.
+-2. HDT MCP server:
+-
+-   * sets `corr_id`
+-   * checks lane policy
+-   * calls `Governor.fetch_walk(...)`
+-3. Governor:
+-
+-   * may try vault first (depending on `prefer_data`)
+-   * calls Sources MCP tools in order (e.g., `source.gamebus.walk.fetch.v1`, then fallback `source.googlefit.walk.fetch.v1`)
+-   * records `attempts`
+-   * on success, upserts records into vault (best effort)
+-4. HDT MCP server:
+-
+-   * redacts fields if needed
+-   * logs telemetry with the same `corr_id`
+-5. Client receives:
+-
+-   * records (or modeling-safe features via `hdt.walk.features.v1`)
+-   * `selected_source`
+-   * `attempts`
+-   * `corr_id`
+-
+----
+-
+-## Automatic Tool Discovery
+-
+-MCP provides built-in tool discovery: clients can query a server to obtain the current list of tools and their JSON schemas (arguments and expected shapes).
+-
+-### 1) External discovery (client → HDT)
+-
+-External agentic clients connect to the **HDT MCP server** (`hdt_mcp.gateway`) and can discover available HDT capabilities at runtime:
+-
+-* **Tool list** (e.g., `hdt.walk.fetch.v1`, `hdt.trivia.fetch.v1`, `hdt.sugarvita.fetch.v1`, etc.)
+-* **Tool schemas** (argument shapes for each tool)
+-* **Versioning via tool names** (e.g., `....v1`) to preserve stable contracts
+-
+-### 2) Internal discovery (HDT → Sources)
+-
+-The Sources MCP server similarly exposes tool schemas for the internal source façade. The Governor uses deterministic orchestration rules today; more dynamic discovery/negotiation can be layered on later without changing the external tool surface.
+-
+-### What “negotiation” means in v0.5.0
+-
+-In this prototype, “negotiation” is implemented as deterministic orchestration rather than LLM-driven contract rewriting:
+-
+-* the Governor applies a clear strategy (prefer source, fallback, optionally use vault),
+-* source outcomes are normalized into a single response envelope,
+-* the attempt sequence is recorded for observability.
++# HDT v0.5.0 (2025-12-12)
++
++Prototype for an **MCP** Human Digital Twin (HDT) interoperability gateway, designed to support: purpose-limited tool access (“lanes”), deterministic orchestration (“governor”), typed errors, and auditable telemetry.
++
++## Highlights
++
++- **MCP-only architecture**: the HDT is exposed exclusively via MCP tools; REST is not a required integration surface.
++- **HDT Governor (orchestrator)**:
++  - Central decision point for source selection, fallback, and error normalization.
++  - Executes tool calls; returns structured results with provenance and attempt traces.
++- **Sources MCP façade (internal)**:
++  - External systems are wrapped as MCP tools (e.g., GameBus, Google Fit, SugarVita, Trivia) using existing fetchers/parsers.
++  - Enables capability discovery and uniform invocation via MCP rather than bespoke per-client glue.
++- **Domain-first tool surface (external)**:
++  - HDT-level tools expose capabilities (e.g., walking, diabetes/trivia) without leaking source-specific API details.
++- **Structured errors and observability**:
++  - Source failures are returned as typed error envelopes (e.g., `not_connected`, `missing_token`, `upstream_error`, `all_sources_failed`) instead of silent empty results.
++  - Tool responses include basic provenance (and `corr_id`) to support debugging and auditing.
++
++## Architecture Overview
++
++- **External interface**: `hdt_mcp.gateway` (HDT MCP server)
++  - Exposes HDT-level tools to external agents/clients.
++  - Delegates execution to the **HDT Governor**.
++- **Internal source interface**: `hdt_sources_mcp.server` (Sources MCP server)
++  - Exposes source-specific tools (GameBus/Google Fit/SugarVita/Trivia).
++  - Reads connection configuration via merged `config/users.json` + `config/users.secrets.json`.
++- **Connectors** (internal implementation detail): provider-specific fetch/parse code lives inside `hdt_sources_mcp`.
++  The external HDT surface remains MCP-only.
++
++## Architecture at a glance
++
++![Architecture](./docs/architecture.jpg)
++
++---
++
++## Demos (IEEE paper / reviewer-friendly)
++
++- **One-command demo (recommended):** `.\scripts\demo_ieee_all.ps1`  
++  Runs:
++  1) Privacy & purpose lanes (deny-fast + modeling-safe outputs + redaction differences)  
++  2) Transparency / traceability (telemetry with `corr_id` + JSONL summary)  
++  3) Policy matrix (clients × purposes × tools)
++
++- **Demo documentation:** see `docs/DEMO.md` for expected outputs and suggested screenshots.
++
++- **Guardian agent demo (telemetry-driven auditing):** shows how exposing telemetry as a tool enables monitoring agents.
++  1) Run a simulated "coaching" agent that repeatedly attempts analytics-only tools (expected policy denies).
++  2) Run a guardian/auditor agent that queries telemetry via `hdt.telemetry.query.v1` and reports suspicious patterns.
++  See `docs/DEMO.md` → *Guardian agent demo* for commands and expected output, and `docs/GUARDIAN.md` for design notes.
++
++---
++
++## Quickstart (reproducible local run)
++
++### Prerequisites
++
++- Python **3.11+** (tested locally with Python 3.14)
++- Git
++- (Windows) `py` launcher recommended
++
++### 1) Create and activate a virtual environment
++
++**Windows (PowerShell):**
++```powershell
++py -V:3.14 -m venv .venv
++.\.venv\Scripts\Activate.ps1
++python --version
++````
++
++**Windows (Git Bash):**
++
++```bash
++py -V:3.14 -m venv .venv
++source .venv/Scripts/activate
++python --version
++```
++
++**macOS / Linux:**
++
++```bash
++python3 -m venv .venv
++source .venv/bin/activate
++python --version
++```
++
++### 2) Install dependencies (editable + dev tools)
++
++```bash
++python -m pip install -U pip
++python -m pip install -e ".[dev]"
++```
++
++### 3) Configure users and secrets
++
++This repository expects:
++
++* `config/users.json` (non-secret configuration)
++* `config/users.secrets.json` (tokens/credentials; **do not commit**)
++
++If you don’t have configs yet, generate templates:
++
++```bash
++python scripts/init_sample_config.py
++```
++
++Then edit:
++
++* `config/users.json`
++* `config/users.secrets.json`
++
++Important merge rule:
++
++* Identity fields must match across public and secret entries (e.g., `connected_application` + `player_id`) so the overlay merges correctly.
++
++### 4) Run the test suite (canonical validation)
++
++```bash
++python -m pytest -q
++```
++
++If this passes, your local environment and tool contracts are consistent.
++
++### 5) Run the IEEE demo (recommended end-to-end)
++
++**Windows (PowerShell):**
++
++```powershell
++.\scripts\demo_ieee_all.ps1
++```
++
++If execution policy blocks scripts:
++
++```powershell
++powershell -ExecutionPolicy Bypass -File .\scripts\demo_ieee_all.ps1
++```
++
++Artifacts are written under `artifacts/telemetry/` and `artifacts/vault/` (do not commit).
++
++### 6) Enable repo quality gates (recommended for contributors)
++
++Install hooks:
++
++```bash
++python -m pip install pre-commit
++pre-commit install
++pre-commit install --hook-type pre-push
++```
++
++Run locally once:
++
++```bash
++pre-commit run -a
++pre-commit run -a --hook-stage pre-push
++```
++
++---
++
++## Running the MCP Servers
++
++This repository implements **MCP-only** using **two MCP servers**:
++
++1. **External-facing HDT MCP server**
++   Module: `python -m hdt_mcp.gateway`
++   Purpose: exposes *domain-level* HDT tools to external agents/clients.
++
++2. **Internal Sources MCP server**
++   Module: `python -m hdt_sources_mcp.server`
++   Purpose: wraps external systems (GameBus, Google Fit, SugarVita, Trivia) as MCP tools.
++
++The HDT MCP server calls Sources MCP internally via a local stdio MCP client (it spawns the Sources server as a subprocess).
++
++### Transport modes
++
++* `stdio` (recommended for local dev and demos): MCP messages flow over standard input/output.
++  Ideal for “spawn a server as a subprocess” and for local testing.
++* `streamable-http` (optional): use only for the **external-facing** server, and only after adding authentication.
++
++### A) Start the external HDT MCP server
++
++PowerShell:
++
++```powershell
++$env:MCP_TRANSPORT="stdio"
++python -m hdt_mcp.gateway
++```
++
++If you prefer `streamable-http` (optional):
++
++```powershell
++$env:MCP_TRANSPORT="streamable-http"
++python -m hdt_mcp.gateway
++```
++
++Notes:
++
++* In `stdio` mode you typically do not see a friendly “listening” banner. It is meant to be driven by an MCP client (scripts/tests).
++* The recommended validation is to run `.\scripts\demo_ieee_all.ps1` or `python scripts/demo_ieee_transparency.py`.
++
++### B) Start the internal Sources MCP server (usually not started manually)
++
++You normally do **not** run Sources MCP directly, because the HDT MCP client spawns it automatically.
++
++If you want to run it explicitly (debugging):
++
++```powershell
++$env:MCP_TRANSPORT="stdio"
++python -m hdt_sources_mcp.server
++```
++
++### C) Validate everything works (recommended)
++
++Run the full demo:
++
++```powershell
++.\scripts\demo_ieee_all.ps1
++```
++
++Run the full test suite:
++
++```powershell
++python -m pytest -q
++```
++
++### D) Common environment variables
++
++* `MCP_TRANSPORT`: `stdio` (default) or `streamable-http`
++* `MCP_CLIENT_ID`: identifier for policy/telemetry attribution (e.g., `MODEL_DEVELOPER_1`)
++* `HDT_POLICY_PATH`: path to the policy JSON (e.g., `config/policy_ieee_demo.json`)
++* `HDT_VAULT_ENABLE`: `1` to enable vault read-through/write-through
++* `HDT_VAULT_PATH`: location of the vault DB file (e.g., `./artifacts/vault/hdt_vault.sqlite`)
++* `HDT_TELEMETRY_DIR`: directory for telemetry JSONL output
++* `HDT_DISABLE_TELEMETRY`: `1` to disable telemetry logging
++* `HDT_TELEMETRY_SUBJECT_SALT`: optional salt for `subject_hash` in telemetry (privacy-preserving per-subject auditing)
++* `HDT_DEMO_TIMEOUT_SEC`: demo call timeout (default `30`)
++
++---
++
++## Test and debug with MCP Inspector (Windows + Git Bash)
++
++The MCP Inspector is an interactive UI for exploring an MCP server: list tools, call them with JSON inputs, and inspect responses. It runs a local web UI (default `http://localhost:6274`) and a local proxy server (default port `6277`).
++
++### Prerequisites
++
++* Node.js (for `npx`)
++* This repo installed in a Python virtualenv:
++
++  ```bash
++  python -m pip install -e ".[dev]"
++  ```
++
++### Recommended: offline / deterministic mode (seeded vault)
++
++This mode does not require live GameBus credentials and is suitable for demos and reviewers.
++
++1. Initialize sample config + seeded vault:
++
++```bash
++python scripts/init_sample_config.py
++python scripts/init_sample_vault.py
++```
++
++2. Launch the Inspector against the HDT gateway (STDIO transport):
++
++```bash
++npx @modelcontextprotocol/inspector \
++  -e MCP_TRANSPORT=stdio \
++  -e HDT_VAULT_ENABLE=1 \
++  -e HDT_VAULT_PATH=artifacts/vault/hdt_vault_ieee_demo.sqlite \
++  -- python -m hdt_mcp.gateway
++```
++
++Notes:
++
++* `--` separates Inspector arguments from the server command/args.
++* Run this from an *activated* venv so `python -m hdt_mcp.gateway` uses the correct environment.
++
++3. Open the Inspector UI:
++
++* Navigate to `http://localhost:6274` in your browser.
++
++### Suggested tool calls to try
++
++In the Inspector UI, open the **Tools** panel and call:
++
++* **Policy explain (why a tool is allowed/denied in a lane)**
++
++  * Tool: `hdt.policy.explain.v1`
++  * Input:
++
++    ```json
++    { "tool": "hdt.walk.fetch.v1", "purpose": "modeling" }
++    ```
++
++* **Raw walk fetch (allowed in coaching/analytics; denied in modeling by policy)**
++
++  * Tool: `hdt.walk.fetch.v1`
++  * Input (analytics):
++
++    ```json
++    {
++      "user_id": 1,
++      "start_date": "2025-11-01",
++      "end_date": "2025-11-03",
++      "prefer_data": "vault",
++      "purpose": "analytics"
++    }
++    ```
++  * Input (modeling; expected deny):
++
++    ```json
++    {
++      "user_id": 1,
++      "start_date": "2025-11-01",
++      "end_date": "2025-11-03",
++      "prefer_data": "vault",
++      "purpose": "modeling"
++    }
++    ```
++
++* **Modeling-safe features**
++
++  * Tool: `hdt.walk.features.v1`
++  * Input:
++
++    ```json
++    {
++      "user_id": 1,
++      "start_date": "2025-11-01",
++      "end_date": "2025-11-03",
++      "prefer_data": "vault",
++      "purpose": "modeling"
++    }
++    ```
++
++* **Telemetry (recent calls)**
++
++  * Tool: `hdt.telemetry.recent.v1`
++  * Input:
++
++    ```json
++    { "n": 50, "purpose": "analytics" }
++    ```
++
++* **Telemetry query (filtered audit readout)**
++
++  * Tool: `hdt.telemetry.query.v1`
++  * Input (example: policy denies by a client in the last 10 minutes):
++
++    ```json
++    {
++      "lookback_s": 600,
++      "client_id": "COACHING_AGENT",
++      "ok": false,
++      "error_code": "denied_by_policy",
++      "tool": "hdt.walk.fetch.v1"
++    }
++    ```
++
++### Optional: inspect the sources server directly
++
++```bash
++npx @modelcontextprotocol/inspector -e MCP_TRANSPORT=stdio -- python -m hdt_sources_mcp.server
++```
++
++### Troubleshooting
++
++* **Port conflicts:** Inspector uses ports `6274` (UI) and `6277` (proxy) by default; free those ports if they are occupied.
++* **Nothing “prints” from the server:** with STDIO, servers often don’t show a typical “listening” banner; validate by listing tools and calling `hdt.sources.status.v1` / `hdt.healthz.v1` in the UI.
++
++---
++
++## Architecture (Detailed)
++
++### Why two MCP servers?
++
++The design separates the system into two layers:
++
++* **External MCP contract (domain-first):** what external clients/agents see and call.
++* **Internal MCP contract (source-first):** how the HDT interacts with external systems uniformly.
++
++This prevents the external tool surface from leaking GameBus/Google Fit/SugarVita implementation details and lets you evolve connectors independently.
++
++### Components
++
++#### 1) HDT MCP Server — `hdt_mcp.gateway`
++
++Role:
++
++* The **only** supported integration surface for external clients.
++* Exposes **domain-level tools** such as:
++
++  * `hdt.walk.fetch.v1`
++  * `hdt.walk.features.v1`
++  * `hdt.trivia.fetch.v1`
++  * `hdt.sugarvita.fetch.v1`
++  * `hdt.sources.status.v1`
++  * `hdt.policy.explain.v1`
++  * `hdt.telemetry.recent.v1`
++
++What it does on each tool call:
++
++1. Creates a **correlation id** (`corr_id`) for end-to-end tracing.
++2. Validates request parameters (including `purpose` lane).
++3. Performs **policy pre-check** (deny fast, avoid upstream calls).
++4. Delegates execution to the Governor.
++5. Applies **policy redaction** (`apply_policy_safe`) on successful payloads.
++6. Writes telemetry (JSONL) with:
++
++   * tool name
++   * sanitized args
++   * policy meta (allowed/redactions)
++   * `corr_id`
++   * duration (ms)
++
++#### 2) HDT Governor — `hdt_mcp.governor.HDTGovernor`
++
++Role:
++
++* Orchestration and deterministic “negotiation rules.”
++* Converts multiple source/tool outcomes into one normalized response envelope.
++* Produces a **negotiation trace** via `attempts`.
++
++Key behaviors:
++
++* **Source preference + fallback**:
++
++  * try preferred live source (e.g., `gamebus` or `googlefit`)
++  * fallback to the other on typed errors
++* **Vault strategy** (`prefer_data`):
++
++  * `prefer_data="vault"`: vault-only (demos)
++  * `prefer_data="live"`: live-only (fail if upstream fails)
++  * `prefer_data="auto"`: vault-first and/or vault-fallback depending on configuration
++* **Write-through**:
++
++  * after successful live fetch, upsert into vault (best effort)
++
++Outputs:
++
++* Success payloads include `selected_source` and `attempts`.
++* Failure payloads return a typed error envelope plus attempt details.
++
++#### 3) Sources MCP Server — `hdt_sources_mcp.server`
++
++Role:
++
++* Internal façade that wraps external systems as tools such as:
++
++  * `source.gamebus.walk.fetch.v1`
++  * `source.googlefit.walk.fetch.v1`
++  * `source.gamebus.trivia.fetch.v1`
++  * `source.gamebus.sugarvita.fetch.v1`
++  * `sources.status.v1`
++
++What it does:
++
++1. Loads merged user config: `config/users.json` + `config/users.secrets.json`
++2. Resolves connector configuration for the requested user/source
++3. Calls provider fetchers/parsers in `hdt_sources_mcp`
++4. Returns typed payloads:
++
++   * success includes `provenance` (retrieved_at, ms, player_id where applicable)
++   * failure returns typed errors:
++
++     * `unknown_user`
++     * `not_connected`
++     * `missing_token`
++     * `upstream_error`
++
++Correlation:
++
++* The HDT layer can pass a correlation id to the Sources layer (via environment) so telemetry correlates across:
++  MCP tool call → Governor → Sources MCP tool call.
++
++#### 4) Connectors (internal to Sources MCP)
++
++Role:
++
++* Provider-specific HTTP/OAuth calls and parsing logic.
++* Not part of the external interoperability contract; exposed only through `hdt_sources_mcp.server` tools.
++
++#### 5) Policy engine — `hdt_mcp.policy.*`
++
++Role:
++
++* Enforces **purpose limitation** (analytics/modeling/coaching lanes)
++* Supports:
++
++  * deny by tool + purpose
++  * field-level redaction by dotted paths
++* Used for:
++
++  * pre-check denies fast
++  * post-processing redacts successful payloads only
++
++#### 6) Telemetry — JSONL traces (tool + governor)
++
++Role:
++
++* JSONL logging suitable for:
++
++  * debugging
++  * audit traces
++  * evaluation of “negotiation behavior”
++
++Records include:
++
++* `kind`: tool/governor/source
++* `name`: tool name
++* `corr_id`: correlation id across layers
++* `request_id`: request id (often equal to `corr_id` in demos)
++* `ms`: duration
++* sanitized args and policy info
++
++---
++
++## Data Flow Example: `hdt.walk.fetch.v1`
++
++1. External client calls `hdt.walk.fetch.v1(user_id=1, prefer=gamebus, prefer_data=auto)`.
++2. HDT MCP server:
++
++   * sets `corr_id`
++   * checks lane policy
++   * calls `Governor.fetch_walk(...)`
++3. Governor:
++
++   * may try vault first (depending on `prefer_data`)
++   * calls Sources MCP tools in order (e.g., `source.gamebus.walk.fetch.v1`, then fallback `source.googlefit.walk.fetch.v1`)
++   * records `attempts`
++   * on success, upserts records into vault (best effort)
++4. HDT MCP server:
++
++   * redacts fields if needed
++   * logs telemetry with the same `corr_id`
++5. Client receives:
++
++   * records (or modeling-safe features via `hdt.walk.features.v1`)
++   * `selected_source`
++   * `attempts`
++   * `corr_id`
++
++---
++
++## Automatic Tool Discovery
++
++MCP provides built-in tool discovery: clients can query a server to obtain the current list of tools and their JSON schemas (arguments and expected shapes).
++
++### 1) External discovery (client → HDT)
++
++External agentic clients connect to the **HDT MCP server** (`hdt_mcp.gateway`) and can discover available HDT capabilities at runtime:
++
++* **Tool list** (e.g., `hdt.walk.fetch.v1`, `hdt.trivia.fetch.v1`, `hdt.sugarvita.fetch.v1`, etc.)
++* **Tool schemas** (argument shapes for each tool)
++* **Versioning via tool names** (e.g., `....v1`) to preserve stable contracts
++
++### 2) Internal discovery (HDT → Sources)
++
++The Sources MCP server similarly exposes tool schemas for the internal source façade. The Governor uses deterministic orchestration rules today; more dynamic discovery/negotiation can be layered on later without changing the external tool surface.
++
++### What “negotiation” means in v0.5.0
++
++In this prototype, “negotiation” is implemented as deterministic orchestration rather than LLM-driven contract rewriting:
++
++* the Governor applies a clear strategy (prefer source, fallback, optionally use vault),
++* source outcomes are normalized into a single response envelope,
++* the attempt sequence is recorded for observability.
+diff --git a/docs/ARTIFACTS_APPENDIX.md b/docs/ARTIFACTS_APPENDIX.md
+index bc17d96..d0dc611 100644
+--- a/docs/ARTIFACTS_APPENDIX.md
++++ b/docs/ARTIFACTS_APPENDIX.md
+@@ -1,27 +1,64 @@
+-# Artifact Appendix (IEEE Software)
+-
+-## A. Artifact overview
+-This artifact contains a research prototype of a Human Digital Twin (HDT) integration layer that exposes an **agent-friendly tool surface** via the Model Context Protocol (MCP) and enforces **purpose-specific policy lanes** (e.g., coaching vs. analytics vs. modeling). The repository includes:
+-
+-- MCP façade (gateway) with a small set of versioned tools (e.g., walk fetch and walk features).
+-- Lane-aware policy checks (deny / allow) and output shaping (data minimization) driven by JSON policy configuration.
+-- A local “seeded vault” mode that enables deterministic offline demos without external systems.
+-- Automated tests that verify lane behavior, policy contracts, and key tool schemas.
+-
+-## B. System requirements
+-- OS: Linux, macOS, or Windows.
+-- Python: 3.11+.
+-- Network: Optional. All demos can run offline when using the seeded vault.
+-
+-## C. Installation
+-From the repository root:
+-
+-```bash
+-python -m venv .venv
+-# activate venv (Linux/macOS)
+-source .venv/bin/activate
+-# or Windows PowerShell
+-# .\\.venv\\Scripts\\Activate.ps1
+-
+-python -m pip install --upgrade pip
+-python -m pip install -e ".[dev]"
++# Artifact Appendix (IEEE Software)
++
++## A. Artifact overview
++This artifact contains a research prototype of a Human Digital Twin (HDT) integration layer that exposes an **agent-friendly tool surface** via the Model Context Protocol (MCP) and enforces **purpose-specific policy lanes** (e.g., coaching vs. analytics vs. modeling). The repository includes:
++
++- MCP façade (gateway) with a small set of versioned tools (e.g., walk fetch and walk features).
++- Lane-aware policy checks (deny / allow) and output shaping (data minimization) driven by JSON policy configuration.
++- A local “seeded vault” mode that enables deterministic offline demos without external systems.
++- Automated tests that verify lane behavior, policy contracts, and key tool schemas.
++- Telemetry tools (`hdt.telemetry.*`) that expose recent and filtered audit traces to agents/clients.
++- A small “guardian” (auditor) demo agent that consumes telemetry as a tool to detect cross-lane misuse patterns.
++
++## B. System requirements
++- OS: Linux, macOS, or Windows.
++- Python: 3.11+.
++- Network: Optional. All demos can run offline when using the seeded vault.
++
++## C. Installation
++From the repository root:
++
++```bash
++python -m venv .venv
++# activate venv (Linux/macOS)
++source .venv/bin/activate
++# or Windows PowerShell
++# .\\.venv\\Scripts\\Activate.ps1
++
++python -m pip install --upgrade pip
++python -m pip install -e ".[dev]"
++
++
++## D. Reproducible demos
++
++### D1. Main IEEE demo (privacy, transparency, policy matrix)
++
++See `docs/DEMO.md` and run (Windows PowerShell):
++
++```powershell
++.\scripts\demo_ieee_all.ps1
++```
++
++### D2. Guardian agent demo (telemetry-driven auditing)
++
++This demo shows how a monitoring agent can be built using only tool calls (no direct log access).
++
++1) Generate suspicious activity (expected policy denies):
++
++```powershell
++$env:HDT_POLICY_PATH="config/policy.guardian_demo.json"
++$env:MCP_CLIENT_ID="COACHING_AGENT"
++$env:HDT_TELEMETRY_SUBJECT_SALT="demo-salt"
++python -u scripts/demo_coaching_agent_suspicious.py
++```
++
++2) Run the guardian agent (queries telemetry via `hdt.telemetry.query.v1`):
++
++```powershell
++$env:HDT_POLICY_PATH="config/policy.guardian_demo.json"
++$env:MCP_CLIENT_ID="GUARDIAN_AGENT"
++$env:HDT_TELEMETRY_SUBJECT_SALT="demo-salt"
++python -u scripts/demo_guardian_agent.py
++```
++
++Artifacts (telemetry JSONL) are written under `artifacts/telemetry/` and should not be committed.
+diff --git a/docs/DEMO.md b/docs/DEMO.md
+index 11da66d..203f8bf 100644
+--- a/docs/DEMO.md
++++ b/docs/DEMO.md
+@@ -1,140 +1,195 @@
+-# Demo
+-
+-This repo includes a deterministic, offline-friendly demo that showcases key features around privacy, transparency, and policy management:
+-- purpose-based access control (lanes)
+-- deny-fast vs modeling-safe outputs
+-- redaction/shaping for analytics vs coaching
+-- auditable telemetry with correlation IDs
+-- policy matrix across clients × purposes × tools
+-
+-## Prerequisites
+-
+-- Windows + PowerShell
+-- Python environment (use the repo’s `.venv` if you have it; otherwise create one)
+-- Dependencies installed (recommended: editable install with dev extras)
+-
+-From repo root:
+-
+-```powershell
+-# create venv if needed
+-python -m venv .venv
+-
+-# activate
+-.\.venv\Scripts\Activate.ps1
+-
+-# install deps
+-python -m pip install -U pip
+-python -m pip install -e "./.[dev]"
+-````
+-
+-## Run the full demo
+-
+-From the repository root:
+-
+-```powershell
+-.\scripts\demo_ieee_all.ps1
+-```
+-
+-If PowerShell blocks script execution:
+-
+-```powershell
+-powershell -ExecutionPolicy Bypass -File .\scripts\demo_ieee_all.ps1
+-```
+-
+-### What you should see
+-
+-The script runs three parts in sequence:
+-
+-1. **Privacy & purpose lanes**
+-
+-   * modeling + `hdt.walk.fetch.v1` → denied
+-   * modeling + `hdt.walk.features.v1` → allowed, modeling-safe aggregate features
+-   * coaching vs analytics redaction differences on `hdt.walk.fetch.v1`
+-   * policy explain for a tool/purpose
+-
+-2. **Transparency / traceability (telemetry)**
+-
+-   * a correlated call to `hdt.walk.fetch.v1` (prefer_data=vault)
+-   * telemetry via `hdt.telemetry.recent.v1`
+-   * a JSONL summary filtered by `corr_id` (includes tool, purpose, status, policy, request_id)
+-
+-3. **Policy matrix**
+-
+-   * runs a compact matrix across representative clients and purposes for a small tool set
+-   * prints a “Full JSON” payload suitable for paper appendix capture
+-
+-## Outputs (artifacts)
+-
+-The demo writes all outputs under `artifacts/`:
+-
+-* **Vault DB (seeded demo data)**
+-  `artifacts/vault/hdt_vault_ieee_demo.sqlite`
+-
+-* **Telemetry (JSONL + per-run folders)**
+-  `artifacts/telemetry/demo_ieee_*`
+-  Example: `artifacts/telemetry/demo_ieee_trace_YYYYMMDD_HHMMSS/mcp-telemetry.jsonl`
+-
+-These artifacts are intended for local runs and paper screenshots; they should not be committed.
+-
+-## Run individual demo scripts (optional)
+-
+-You can run each part independently from repo root:
+-
+-```powershell
+-python scripts/demo_ieee_privacy.py
+-python scripts/demo_ieee_transparency.py
+-python scripts/demo_ieee_policy_matrix.py
+-```
+-
+-The transparency demo is often the one you want for appendix screenshots because it produces:
+-
+-* a tool output excerpt
+-* a recent telemetry readout
+-* a filtered JSONL summary for the same `corr_id`
+-
+-## Deterministic/offline behavior
+-
+-The demo is designed to run without external systems by seeding a local vault database and using:
+-
+-* `prefer_data=vault` in calls where appropriate
+-* a fixed demo policy file:
+-  `config/policy_ieee_demo.json`
+-
+-If you want to force vault usage from the environment, set:
+-
+-```powershell
+-$env:HDT_VAULT_ENABLE="1"
+-$env:HDT_VAULT_PATH="$(Resolve-Path .\artifacts\vault\hdt_vault_ieee_demo.sqlite)"
+-```
+-
+-## Troubleshooting
+-
+-### “running scripts is disabled on this system”
+-
+-Run with bypass:
+-
+-```powershell
+-powershell -ExecutionPolicy Bypass -File .\scripts\demo_ieee_all.ps1
+-```
+-
+-### Demo hangs on a tool call
+-
+-The transparency demo uses a timeout (`HDT_DEMO_TIMEOUT_SEC`, default 30s). You can increase it:
+-
+-```powershell
+-$env:HDT_DEMO_TIMEOUT_SEC="60"
+-python scripts/demo_ieee_transparency.py
+-```
+-
+-### Missing policy file
+-
+-Ensure this exists:
+-
+-* `config/policy_ieee_demo.json`
+-
+-### Telemetry file not found
+-
+-The demo writes telemetry under the printed “Telemetry dir”. If the folder exists but is empty, verify:
+-
+-* `HDT_TELEMETRY_DIR` is set by the script (it is)
+-* the run is not failing before any tool is called
++# Demo
++
++This repo includes a deterministic, offline-friendly demo that showcases key features around privacy, transparency, and policy management:
++- purpose-based access control (lanes)
++- deny-fast vs modeling-safe outputs
++- redaction/shaping for analytics vs coaching
++- auditable telemetry with correlation IDs
++- policy matrix across clients × purposes × tools
++
++## Prerequisites
++
++- Windows + PowerShell
++- Python environment (use the repo’s `.venv` if you have it; otherwise create one)
++- Dependencies installed (recommended: editable install with dev extras)
++
++From repo root:
++
++```powershell
++# create venv if needed
++python -m venv .venv
++
++# activate
++.\.venv\Scripts\Activate.ps1
++
++# install deps
++python -m pip install -U pip
++python -m pip install -e "./.[dev]"
++````
++
++## Run the full demo
++
++From the repository root:
++
++```powershell
++.\scripts\demo_ieee_all.ps1
++```
++
++If PowerShell blocks script execution:
++
++```powershell
++powershell -ExecutionPolicy Bypass -File .\scripts\demo_ieee_all.ps1
++```
++
++### What you should see
++
++The script runs three parts in sequence:
++
++1. **Privacy & purpose lanes**
++
++   * modeling + `hdt.walk.fetch.v1` → denied
++   * modeling + `hdt.walk.features.v1` → allowed, modeling-safe aggregate features
++   * coaching vs analytics redaction differences on `hdt.walk.fetch.v1`
++   * policy explain for a tool/purpose
++
++2. **Transparency / traceability (telemetry)**
++
++   * a correlated call to `hdt.walk.fetch.v1` (prefer_data=vault)
++   * telemetry via `hdt.telemetry.recent.v1`
++   * a JSONL summary filtered by `corr_id` (includes tool, purpose, status, policy, request_id)
++
++3. **Policy matrix**
++
++   * runs a compact matrix across representative clients and purposes for a small tool set
++   * prints a “Full JSON” payload suitable for paper appendix capture
++
++## Outputs (artifacts)
++
++The demo writes all outputs under `artifacts/`:
++
++* **Vault DB (seeded demo data)**
++  `artifacts/vault/hdt_vault_ieee_demo.sqlite`
++
++* **Telemetry (JSONL + per-run folders)**
++  `artifacts/telemetry/demo_ieee_*`
++  Example: `artifacts/telemetry/demo_ieee_trace_YYYYMMDD_HHMMSS/mcp-telemetry.jsonl`
++
++These artifacts are intended for local runs and paper screenshots; they should not be committed.
++
++## Run individual demo scripts (optional)
++
++You can run each part independently from repo root:
++
++```powershell
++python scripts/demo_ieee_privacy.py
++python scripts/demo_ieee_transparency.py
++python scripts/demo_ieee_policy_matrix.py
++```
++
++The transparency demo is often the one you want for appendix screenshots because it produces:
++
++* a tool output excerpt
++* a recent telemetry readout
++* a filtered JSONL summary for the same `corr_id`
++
++## Deterministic/offline behavior
++
++The demo is designed to run without external systems by seeding a local vault database and using:
++
++* `prefer_data=vault` in calls where appropriate
++* a fixed demo policy file:
++  `config/policy_ieee_demo.json`
++
++If you want to force vault usage from the environment, set:
++
++```powershell
++$env:HDT_VAULT_ENABLE="1"
++$env:HDT_VAULT_PATH="$(Resolve-Path .\artifacts\vault\hdt_vault_ieee_demo.sqlite)"
++```
++
++## Troubleshooting
++
++### “running scripts is disabled on this system”
++
++Run with bypass:
++
++```powershell
++powershell -ExecutionPolicy Bypass -File .\scripts\demo_ieee_all.ps1
++```
++
++### Demo hangs on a tool call
++
++The transparency demo uses a timeout (`HDT_DEMO_TIMEOUT_SEC`, default 30s). You can increase it:
++
++```powershell
++$env:HDT_DEMO_TIMEOUT_SEC="60"
++python scripts/demo_ieee_transparency.py
++```
++
++### Missing policy file
++
++Ensure this exists:
++
++* `config/policy_ieee_demo.json`
++
++### Telemetry file not found
++
++The demo writes telemetry under the printed “Telemetry dir”. If the folder exists but is empty, verify:
++
++* `HDT_TELEMETRY_DIR` is set by the script (it is)
++* the run is not failing before any tool is called
++
++
++## Guardian agent demo (telemetry-driven auditing)
++
++This optional demo illustrates how exposing telemetry as an MCP tool lowers the barrier to building monitoring agents.
++
++**Scenario:** a “coaching” agent repeatedly attempts to call an analytics-only tool (policy denies). A guardian/auditor agent queries telemetry via `hdt.telemetry.query.v1` and flags the pattern.
++
++### 1) Generate suspicious activity (simulated coaching agent)
++
++**Windows PowerShell:**
++```powershell
++$env:HDT_POLICY_PATH="config/policy.guardian_demo.json"
++$env:MCP_CLIENT_ID="COACHING_AGENT"
++$env:HDT_TELEMETRY_SUBJECT_SALT="demo-salt"   # enables subject_hash in telemetry (optional)
++python -u scripts/demo_coaching_agent_suspicious.py
++```
++
++**macOS / Linux / Git Bash:**
++```bash
++export HDT_POLICY_PATH=config/policy.guardian_demo.json
++export MCP_CLIENT_ID=COACHING_AGENT
++export HDT_TELEMETRY_SUBJECT_SALT=demo-salt   # optional
++python -u scripts/demo_coaching_agent_suspicious.py
++```
++
++### 2) Run the guardian (auditor) agent
++
++**Windows PowerShell:**
++```powershell
++$env:HDT_POLICY_PATH="config/policy.guardian_demo.json"
++$env:MCP_CLIENT_ID="GUARDIAN_AGENT"
++$env:HDT_TELEMETRY_SUBJECT_SALT="demo-salt"
++python -u scripts/demo_guardian_agent.py
++```
++
++**macOS / Linux / Git Bash:**
++```bash
++export HDT_POLICY_PATH=config/policy.guardian_demo.json
++export MCP_CLIENT_ID=GUARDIAN_AGENT
++export HDT_TELEMETRY_SUBJECT_SALT=demo-salt
++python -u scripts/demo_guardian_agent.py
++```
++
++### What you should see
++
++- The “coaching agent” run prints policy-denied responses for `hdt.walk.fetch.v1` (and writes telemetry JSONL under `artifacts/telemetry/`).
++- The guardian prints a concise “finding” when it observes repeated denies in the lookback window and includes evidence (e.g., `corr_id` values).
++
++### Tuning (optional)
++
++- `HDT_GUARDIAN_LOOKBACK_S` (default: 600)
++- `HDT_GUARDIAN_MIN_DENIES` (default: 3)
++- `HDT_GUARDIAN_WATCH_CLIENTS` (default: `COACHING_AGENT`)
++- `HDT_GUARDIAN_ANALYTICS_TOOLS` (default: `hdt.walk.fetch.v1,hdt.trivia.fetch.v1,hdt.sugarvita.fetch.v1`)
+diff --git a/src/hdt_common/telemetry.py b/src/hdt_common/telemetry.py
+index d1fc21e..ca644d3 100644
+--- a/src/hdt_common/telemetry.py
++++ b/src/hdt_common/telemetry.py
+@@ -1,10 +1,11 @@
+ from __future__ import annotations
+ 
+ import datetime as _dt
++import hashlib
+ import json
+ import os
+ from pathlib import Path
+-from typing import Any, Dict
++from typing import Any
+ 
+ from hdt_config.settings import repo_root
+ from hdt_common.context import get_request_id
+@@ -16,6 +17,10 @@ _TELEMETRY_DIR.mkdir(parents=True, exist_ok=True)
+ 
+ _DISABLE_TELEMETRY = (os.getenv("HDT_DISABLE_TELEMETRY", "0").strip().lower() in {"1", "true", "yes"})
+ 
++# Optional: privacy-preserving per-subject linkability.
++# If set, we will compute `subject_hash` from the first `user_id` found in the event args.
++# This allows per-citizen governance without writing the raw user id into telemetry.
++_TELEMETRY_SUBJECT_SALT = os.getenv("HDT_TELEMETRY_SUBJECT_SALT", "").strip()
+ 
+ _SECRET_KEYS = {"authorization", "auth_bearer", "access_token", "token", "api_key", "apikey"}
+ 
+@@ -59,6 +64,39 @@ def _redact_pii(obj: Any) -> Any:
+     return obj
+ 
+ 
++def _find_first_key(obj: Any, *, key: str) -> Any | None:
++    """Best-effort recursive search for a key in nested dict/list structures."""
++    if isinstance(obj, dict):
++        for k, v in obj.items():
++            if isinstance(k, str) and k.strip().lower() == key:
++                return v
++        for v in obj.values():
++            found = _find_first_key(v, key=key)
++            if found is not None:
++                return found
++        return None
++    if isinstance(obj, list):
++        for item in obj:
++            found = _find_first_key(item, key=key)
++            if found is not None:
++                return found
++    return None
++
++
++def _hash_subject(user_id: Any) -> str | None:
++    if not _TELEMETRY_SUBJECT_SALT:
++        return None
++    if user_id is None:
++        return None
++    if user_id == REDACT_TOKEN:
++        return None
++    try:
++        s = f"{_TELEMETRY_SUBJECT_SALT}:{user_id}".encode("utf-8")
++        return hashlib.sha256(s).hexdigest()[:16]
++    except Exception:
++        return None
++
++
+ def log_event(
+     kind: str,
+     name: str,
+@@ -70,16 +108,14 @@ def log_event(
+     corr_id: str | None = None,
+     telemetry_file: str = "mcp-telemetry.jsonl",
+ ) -> None:
+-    """
+-    Append JSONL telemetry for tools/resources.
+-    """
++    """Append JSONL telemetry for tools/resources."""
+     if _DISABLE_TELEMETRY:
+         return
+ 
+     rid = get_request_id()
+     payload = {} if args is None else dict(args)
+ 
+-    rec = {
++    rec: dict[str, Any] = {
+         "ts": _dt.datetime.now(_dt.timezone.utc).isoformat().replace("+00:00", "Z"),
+         "kind": kind,
+         "name": name,
+@@ -91,6 +127,13 @@ def log_event(
+         "ms": int(ms),
+     }
+ 
++    # Optional: derive a privacy-preserving per-subject key.
++    # We compute this BEFORE redaction, then store only the hash.
++    uid = _find_first_key(payload, key="user_id")
++    subject_hash = _hash_subject(uid)
++    if subject_hash:
++        rec["subject_hash"] = subject_hash
++
+     # Defense-in-depth:
+     # 1) redact secrets (tokens, API keys)
+     # 2) redact common PII keys (user identifiers, emails)
+@@ -102,9 +145,7 @@ def log_event(
+ 
+ 
+ def telemetry_recent(n: int = 50, telemetry_file: str = "mcp-telemetry.jsonl") -> dict:
+-    """
+-    Return last N telemetry records (bounded) with secrets + PII redacted.
+-    """
++    """Return last N telemetry records (bounded) with secrets + PII redacted."""
+     p = _TELEMETRY_DIR / telemetry_file
+     if not p.exists():
+         return {"records": []}
+@@ -120,7 +161,7 @@ def telemetry_recent(n: int = 50, telemetry_file: str = "mcp-telemetry.jsonl") -
+     tail_window = max(500, n_int * 5)
+     lines = p.read_text(encoding="utf-8").splitlines()[-tail_window:]
+ 
+-    out = []
++    out: list[dict[str, Any]] = []
+     for line in lines[-n_int:]:
+         try:
+             rec = json.loads(line)
+@@ -133,3 +174,131 @@ def telemetry_recent(n: int = 50, telemetry_file: str = "mcp-telemetry.jsonl") -
+ 
+     return {"records": out}
+ 
++
++def _parse_ts(ts: str | None) -> _dt.datetime | None:
++    if not ts:
++        return None
++    try:
++        # expected format: 2025-01-01T00:00:00Z
++        if ts.endswith("Z"):
++            ts = ts[:-1] + "+00:00"
++        return _dt.datetime.fromisoformat(ts)
++    except Exception:
++        return None
++
++
++def telemetry_query(
++    n: int = 50,
++    *,
++    lookback_s: int | None = None,
++    since_ts: str | None = None,
++    client_id: str | None = None,
++    tool: str | None = None,
++    tool_prefix: str | None = None,
++    purpose: str | None = None,
++    ok: bool | None = None,
++    error_code: str | None = None,
++    subject_hash: str | None = None,
++    telemetry_file: str = "mcp-telemetry.jsonl",
++) -> dict:
++    """
++    Filtered telemetry query over the local JSONL store.
++
++    This is intentionally bounded (tail-read + filters) to keep the tool safe and fast.
++
++    Notes:
++    - Telemetry records are already redacted on write; we redact again on read.
++    - Filters are best-effort; malformed lines are skipped.
++    """
++    p = _TELEMETRY_DIR / telemetry_file
++    if not p.exists():
++        return {"records": []}
++
++    # hard bounds
++    try:
++        n_int = int(n)
++    except Exception:
++        n_int = 50
++    n_int = max(1, min(n_int, 200))
++
++    # Time window
++    now = _dt.datetime.now(_dt.timezone.utc)
++    since: _dt.datetime | None = None
++    if lookback_s is not None:
++        try:
++            lb = max(0, int(lookback_s))
++        except Exception:
++            lb = 0
++        since = now - _dt.timedelta(seconds=lb)
++    if since_ts:
++        parsed = _parse_ts(since_ts)
++        if parsed is not None:
++            # If both provided, take the more restrictive (later) bound.
++            since = parsed if since is None else max(since, parsed)
++
++    # Read a tail window larger than n to tolerate filtering.
++    # Keep it bounded to avoid huge reads in CI.
++    tail_window = 5000
++    lines = p.read_text(encoding="utf-8").splitlines()[-tail_window:]
++
++    # Iterate newest-first; collect until we have n matches
++    matches: list[dict[str, Any]] = []
++    for line in reversed(lines):
++        try:
++            rec = json.loads(line)
++        except Exception:
++            continue
++
++        # Time filter (best-effort)
++        if since is not None:
++            ts = _parse_ts(rec.get("ts"))
++            if ts is not None and ts < since:
++                # Since we're going backwards in time, we can break early.
++                break
++
++        if client_id is not None and rec.get("client_id") != client_id:
++            continue
++
++        if subject_hash is not None and rec.get("subject_hash") != subject_hash:
++            continue
++
++        name = rec.get("name")
++        if tool is not None and name != tool:
++            continue
++        if tool_prefix is not None and (not isinstance(name, str) or not name.startswith(tool_prefix)):
++            continue
++
++        # instrumented tools store purpose in rec['args']['purpose']
++        if purpose is not None:
++            rec_purpose = None
++            try:
++                rec_purpose = (rec.get("args") or {}).get("purpose")
++            except Exception:
++                rec_purpose = None
++            if (rec_purpose or "") != purpose:
++                continue
++
++        if ok is not None and bool(rec.get("ok")) != bool(ok):
++            continue
++
++        if error_code is not None:
++            code = None
++            try:
++                err = (rec.get("args") or {}).get("error")
++                if isinstance(err, dict):
++                    code = err.get("code")
++            except Exception:
++                code = None
++            if code != error_code:
++                continue
++
++        # defense-in-depth: redact again on read
++        rec = _redact_secrets(rec)
++        rec = _redact_pii(rec)
++        matches.append(rec)
++
++        if len(matches) >= n_int:
++            break
++
++    matches.reverse()
++    return {"records": matches}
+diff --git a/src/hdt_common/tooling.py b/src/hdt_common/tooling.py
+index fc29b5d..e66c877 100644
+--- a/src/hdt_common/tooling.py
++++ b/src/hdt_common/tooling.py
+@@ -1,6 +1,7 @@
+ from __future__ import annotations
+ 
+ import inspect
++import json
+ import time
+ import functools
+ from dataclasses import dataclass
+@@ -42,6 +43,58 @@ def _bound_args(fn: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str,
+         return d
+ 
+ 
++def _compute_out_stats(payload: Any) -> dict[str, Any]:
++    """Compute lightweight output metadata for monitoring/guardrails."""
++    stats: dict[str, Any] = {"type": type(payload).__name__}
++
++    try:
++        if isinstance(payload, dict):
++            stats["keys"] = len(payload)
++
++            err = payload.get("error")
++            if isinstance(err, dict):
++                stats["error_code"] = err.get("code")
++
++            if isinstance(payload.get("attempts"), list):
++                stats["attempts"] = len(payload.get("attempts") or [])
++
++            if isinstance(payload.get("records"), list):
++                stats["records"] = len(payload.get("records") or [])
++
++            streams = payload.get("streams")
++            if isinstance(streams, dict):
++                per: dict[str, int] = {}
++                total = 0
++                for k, v in streams.items():
++                    if isinstance(v, dict) and isinstance(v.get("records"), list):
++                        n = len(v.get("records") or [])
++                        per[str(k)] = n
++                        total += n
++                if per:
++                    stats["streams"] = per
++                    stats["streams_total"] = total
++
++        elif isinstance(payload, list):
++            stats["len"] = len(payload)
++
++        # Approximate size, but avoid expensive dumps for very large payloads.
++        # This is best-effort and may be omitted.
++        if isinstance(payload, dict):
++            too_large = False
++            if isinstance(payload.get("records"), list) and len(payload.get("records") or []) > 500:
++                too_large = True
++            if isinstance(payload.get("attempts"), list) and len(payload.get("attempts") or []) > 500:
++                too_large = True
++            if not too_large:
++                s = json.dumps(payload, ensure_ascii=False, default=str)
++                stats["json_bytes"] = len(s.encode("utf-8"))
++    except Exception:
++        # Never fail a tool call because telemetry stats failed.
++        return stats
++
++    return stats
++
++
+ @dataclass(frozen=True)
+ class InstrumentConfig:
+     kind: str
+@@ -72,7 +125,7 @@ def instrument_sync_tool(cfg: InstrumentConfig):
+ 
+             t0 = time.perf_counter()
+             bound = _bound_args(fn, args, kwargs)
+-            args_for_log = {"args": sanitize_args_for_log(bound)}
++            args_for_log: dict[str, Any] = {"args": sanitize_args_for_log(bound)}
+ 
+             try:
+                 payload = fn(*args, **kwargs)
+@@ -84,6 +137,8 @@ def instrument_sync_tool(cfg: InstrumentConfig):
+             if isinstance(payload, dict) and payload.get("error"):
+                 args_for_log["error"] = payload.get("error")
+ 
++            args_for_log["out"] = _compute_out_stats(payload)
++
+             log_event(
+                 cfg.kind,
+                 cfg.name,
+@@ -108,6 +163,7 @@ def instrument_sync_tool(cfg: InstrumentConfig):
+ @dataclass(frozen=True)
+ class PolicyConfig:
+     """Optional policy enforcement configuration for instrumented tools."""
++
+     lanes: set[str]
+     # policy engine hooks
+     apply_policy: Callable[..., dict]
+@@ -154,6 +210,7 @@ def instrument_async_tool(cfg: InstrumentConfig, *, policy: PolicyConfig | None
+                     )
+                     ms = int((time.perf_counter() - t0) * 1000)
+                     args_for_log["error"] = payload.get("error")
++                    args_for_log["out"] = _compute_out_stats(payload)
+                     log_event(cfg.kind, cfg.name, args_for_log, ok=False, ms=ms, client_id=cfg.client_id, corr_id=corr_id)
+                     if cfg.attach_corr_id and isinstance(payload, dict):
+                         payload.setdefault("corr_id", corr_id)
+@@ -166,6 +223,7 @@ def instrument_async_tool(cfg: InstrumentConfig, *, policy: PolicyConfig | None
+                     meta = policy.policy_last_meta() or {}
+                     args_for_log["policy"] = meta
+                     args_for_log["error"] = probe.get("error")
++                    args_for_log["out"] = _compute_out_stats(probe)
+                     log_event(cfg.kind, cfg.name, args_for_log, ok=False, ms=ms, client_id=cfg.client_id, corr_id=corr_id)
+                     if cfg.attach_corr_id and isinstance(probe, dict):
+                         probe.setdefault("corr_id", corr_id)
+@@ -191,6 +249,8 @@ def instrument_async_tool(cfg: InstrumentConfig, *, policy: PolicyConfig | None
+             if isinstance(payload, dict) and payload.get("error"):
+                 args_for_log["error"] = payload.get("error")
+ 
++            args_for_log["out"] = _compute_out_stats(payload)
++
+             log_event(cfg.kind, cfg.name, args_for_log, ok=ok, ms=ms, client_id=cfg.client_id, corr_id=corr_id)
+ 
+             if cfg.attach_corr_id and isinstance(payload, dict):
+@@ -202,4 +262,3 @@ def instrument_async_tool(cfg: InstrumentConfig, *, policy: PolicyConfig | None
+         return wrapper
+ 
+     return decorator
+-
+diff --git a/src/hdt_mcp/gateway.py b/src/hdt_mcp/gateway.py
+index 1d2b4eb..cacf1b9 100644
+--- a/src/hdt_mcp/gateway.py
++++ b/src/hdt_mcp/gateway.py
+@@ -13,7 +13,7 @@ from hdt_common.tooling import (
+     instrument_async_tool,
+     instrument_sync_tool,
+ )
+-from hdt_common.telemetry import telemetry_recent
++from hdt_common.telemetry import telemetry_recent, telemetry_query
+ from hdt_config.settings import init_runtime
+ 
+ 
+@@ -192,6 +192,38 @@ async def hdt_policy_explain(tool: str, purpose: str = "analytics") -> dict:
+ async def hdt_telemetry_recent(n: int = 50, purpose: str = "analytics") -> dict:
+     return telemetry_recent(n=n)
+ 
++@hdt_tool("hdt.telemetry.query.v1")
++async def hdt_telemetry_query(
++    n: int = 50,
++    lookback_s: int | None = 3600,
++    client_id: str | None = None,
++    tool: str | None = None,
++    tool_prefix: str | None = None,
++    event_purpose: str | None = None,
++    ok: bool | None = None,
++    error_code: str | None = None,
++    subject_hash: str | None = None,
++    purpose: str = "analytics",
++) -> dict:
++    """Filtered telemetry query (bounded).
++
++    Use this for monitoring/guardian agents without requiring direct file access.
++
++    The tool uses telemetry records that are already redacted on write.
++    """
++    return telemetry_query(
++        n=n,
++        lookback_s=lookback_s,
++        client_id=client_id,
++        tool=tool,
++        tool_prefix=tool_prefix,
++        purpose=event_purpose,
++        ok=ok,
++        error_code=error_code,
++        subject_hash=subject_hash,
++    )
++
++
+ 
+ def main() -> None:
+     # Entry points (console_scripts) call main() directly, so we must perform
