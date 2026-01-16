@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import json
 import time
 import functools
 from dataclasses import dataclass
@@ -42,6 +43,58 @@ def _bound_args(fn: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str,
         return d
 
 
+def _compute_out_stats(payload: Any) -> dict[str, Any]:
+    """Compute lightweight output metadata for monitoring/guardrails."""
+    stats: dict[str, Any] = {"type": type(payload).__name__}
+
+    try:
+        if isinstance(payload, dict):
+            stats["keys"] = len(payload)
+
+            err = payload.get("error")
+            if isinstance(err, dict):
+                stats["error_code"] = err.get("code")
+
+            if isinstance(payload.get("attempts"), list):
+                stats["attempts"] = len(payload.get("attempts") or [])
+
+            if isinstance(payload.get("records"), list):
+                stats["records"] = len(payload.get("records") or [])
+
+            streams = payload.get("streams")
+            if isinstance(streams, dict):
+                per: dict[str, int] = {}
+                total = 0
+                for k, v in streams.items():
+                    if isinstance(v, dict) and isinstance(v.get("records"), list):
+                        n = len(v.get("records") or [])
+                        per[str(k)] = n
+                        total += n
+                if per:
+                    stats["streams"] = per
+                    stats["streams_total"] = total
+
+        elif isinstance(payload, list):
+            stats["len"] = len(payload)
+
+        # Approximate size, but avoid expensive dumps for very large payloads.
+        # This is best-effort and may be omitted.
+        if isinstance(payload, dict):
+            too_large = False
+            if isinstance(payload.get("records"), list) and len(payload.get("records") or []) > 500:
+                too_large = True
+            if isinstance(payload.get("attempts"), list) and len(payload.get("attempts") or []) > 500:
+                too_large = True
+            if not too_large:
+                s = json.dumps(payload, ensure_ascii=False, default=str)
+                stats["json_bytes"] = len(s.encode("utf-8"))
+    except Exception:
+        # Never fail a tool call because telemetry stats failed.
+        return stats
+
+    return stats
+
+
 @dataclass(frozen=True)
 class InstrumentConfig:
     kind: str
@@ -60,6 +113,9 @@ def instrument_sync_tool(cfg: InstrumentConfig):
     """Decorator for sync tools (e.g., Sources MCP)."""
 
     def decorator(fn: Callable[..., Any]):
+        fn_sig = inspect.signature(fn)
+
+        @functools.wraps(fn)
         def wrapper(*args: Any, **kwargs: Any):
             # Ensure corr_id exists; Sources may already have one set via sources.context.set.v1
             corr_id = get_request_id()
@@ -69,7 +125,7 @@ def instrument_sync_tool(cfg: InstrumentConfig):
 
             t0 = time.perf_counter()
             bound = _bound_args(fn, args, kwargs)
-            args_for_log = {"args": sanitize_args_for_log(bound)}
+            args_for_log: dict[str, Any] = {"args": sanitize_args_for_log(bound)}
 
             try:
                 payload = fn(*args, **kwargs)
@@ -80,6 +136,8 @@ def instrument_sync_tool(cfg: InstrumentConfig):
             ok = not (isinstance(payload, dict) and "error" in payload)
             if isinstance(payload, dict) and payload.get("error"):
                 args_for_log["error"] = payload.get("error")
+
+            args_for_log["out"] = _compute_out_stats(payload)
 
             log_event(
                 cfg.kind,
@@ -96,6 +154,7 @@ def instrument_sync_tool(cfg: InstrumentConfig):
                 payload.setdefault("corr_id", corr_id)
             return payload
 
+        wrapper.__signature__ = fn_sig  # type: ignore[attr-defined]
         return wrapper
 
     return decorator
@@ -104,6 +163,7 @@ def instrument_sync_tool(cfg: InstrumentConfig):
 @dataclass(frozen=True)
 class PolicyConfig:
     """Optional policy enforcement configuration for instrumented tools."""
+
     lanes: set[str]
     # policy engine hooks
     apply_policy: Callable[..., dict]
@@ -150,6 +210,7 @@ def instrument_async_tool(cfg: InstrumentConfig, *, policy: PolicyConfig | None 
                     )
                     ms = int((time.perf_counter() - t0) * 1000)
                     args_for_log["error"] = payload.get("error")
+                    args_for_log["out"] = _compute_out_stats(payload)
                     log_event(cfg.kind, cfg.name, args_for_log, ok=False, ms=ms, client_id=cfg.client_id, corr_id=corr_id)
                     if cfg.attach_corr_id and isinstance(payload, dict):
                         payload.setdefault("corr_id", corr_id)
@@ -162,6 +223,7 @@ def instrument_async_tool(cfg: InstrumentConfig, *, policy: PolicyConfig | None 
                     meta = policy.policy_last_meta() or {}
                     args_for_log["policy"] = meta
                     args_for_log["error"] = probe.get("error")
+                    args_for_log["out"] = _compute_out_stats(probe)
                     log_event(cfg.kind, cfg.name, args_for_log, ok=False, ms=ms, client_id=cfg.client_id, corr_id=corr_id)
                     if cfg.attach_corr_id and isinstance(probe, dict):
                         probe.setdefault("corr_id", corr_id)
@@ -187,6 +249,8 @@ def instrument_async_tool(cfg: InstrumentConfig, *, policy: PolicyConfig | None 
             if isinstance(payload, dict) and payload.get("error"):
                 args_for_log["error"] = payload.get("error")
 
+            args_for_log["out"] = _compute_out_stats(payload)
+
             log_event(cfg.kind, cfg.name, args_for_log, ok=ok, ms=ms, client_id=cfg.client_id, corr_id=corr_id)
 
             if cfg.attach_corr_id and isinstance(payload, dict):
@@ -198,4 +262,3 @@ def instrument_async_tool(cfg: InstrumentConfig, *, policy: PolicyConfig | None 
         return wrapper
 
     return decorator
-

@@ -36,35 +36,57 @@ class _FakeSessionFailOnceGlobal:
 
 
 @pytest.mark.asyncio
-async def test_call_tool_reconnects_once(monkeypatch):
+async def test_call_tool_invokes_corr_id_sync_then_tool(monkeypatch):
+    """Per-call stdio session: ensure corr-id sync is attempted and tool is invoked."""
     set_request_id("CID-1")
     client = SourcesMCPClient()
 
-    fail_state = {"failed": False}
-    client._session = _FakeSessionFailOnceGlobal(fail_state)
+    calls: list[tuple[str, dict]] = []
 
-    close_calls = {"n": 0}
-    connect_calls = {"n": 0}
+    class _FakeClientSession:
+        def __init__(self, read, write):
+            self.read = read
+            self.write = write
 
-    async def fake_close():
-        close_calls["n"] += 1
-        client._session = None
+        async def __aenter__(self):
+            return self
 
-    async def fake_connect():
-        connect_calls["n"] += 1
-        if client._session is None:
-            client._session = _FakeSessionFailOnceGlobal(fail_state)
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
 
-    monkeypatch.setattr(client, "_close", fake_close)
-    monkeypatch.setattr(client, "_connect", fake_connect)
+        async def initialize(self):
+            return None
 
-    out = await client.call_tool("source.gamebus.walk.fetch.v1", {"user_id": 1})
+        async def call_tool(self, name, args):
+            calls.append((name, dict(args)))
+            if name == "sources.context.set.v1":
+                return _FakeResult("ok")
+            return _FakeResult('{"ok": true}')
+
+    class _FakeStdioCM:
+        async def __aenter__(self):
+            return (object(), object())
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    def _fake_stdio_client(server):
+        return _FakeStdioCM()
+
+    import mcp
+    import mcp.client.stdio as stdio_mod
+    monkeypatch.setattr(mcp, "ClientSession", _FakeClientSession)
+    monkeypatch.setattr(stdio_mod, "stdio_client", _fake_stdio_client)
+
+    out = await client.call_tool("sources.status.v1", {"user_id": 1})
     assert isinstance(out, str)
     assert '"ok"' in out
 
-    # We should have tried close+connect once due to the injected failure.
-    assert close_calls["n"] == 1
-    assert connect_calls["n"] >= 1
+    # First we sync corr_id, then call the requested tool.
+    assert calls[0][0] == "sources.context.set.v1"
+    assert calls[0][1]["corr_id"] == "CID-1"
+    assert calls[1][0] == "sources.status.v1"
+    assert calls[1][1] == {"user_id": 1}
 
 
 class _FakeStdioCM:
@@ -113,39 +135,46 @@ def test_server_params_sets_env(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_close_closes_session_and_stdio():
-    """
-    Covers close() -> _close() branches: session and stdio context manager teardown.
-    """
+async def test_close_is_noop():
+    """Per-call mode has nothing to close; close() should not raise."""
     client = SourcesMCPClient()
-    fake_session = _FakeSessionForClose()
-    fake_stdio = _FakeStdioCM()
-
-    client._session = fake_session
-    client._stdio_cm = fake_stdio
-    client._last_corr_id = "CID-OLD"
-
     await client.close()
-
-    assert fake_session.exited == 1
-    assert fake_stdio.exited == 1
-    assert client._session is None
-    assert client._stdio_cm is None
-    assert client._last_corr_id is None
 
 
 @pytest.mark.asyncio
-async def test_list_tools_uses_session(monkeypatch):
-    """
-    Covers list_tools() method path without spawning a Sources process.
-    """
+async def test_list_tools_returns_tools(monkeypatch):
     client = SourcesMCPClient()
 
-    async def fake_connect():
-        if client._session is None:
-            client._session = _FakeSessionForListTools()
+    class _FakeClientSession:
+        def __init__(self, read, write):
+            pass
 
-    monkeypatch.setattr(client, "_connect", fake_connect)
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def initialize(self):
+            return None
+
+        async def list_tools(self):
+            return {"tools": ["a", "b"]}
+
+    class _FakeStdioCM:
+        async def __aenter__(self):
+            return (object(), object())
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    def _fake_stdio_client(server):
+        return _FakeStdioCM()
+
+    import mcp
+    import mcp.client.stdio as stdio_mod
+    monkeypatch.setattr(mcp, "ClientSession", _FakeClientSession)
+    monkeypatch.setattr(stdio_mod, "stdio_client", _fake_stdio_client)
 
     out = await client.list_tools()
     assert out == {"tools": ["a", "b"]}

@@ -19,7 +19,7 @@ repos:
       # 3) Optional: keep your smoke script as manual
       - id: smoke-mcp
         name: smoke_mcp (manual)
-        entry: python scripts/smoke_mcp.py
+        entry: python scripts/demo_smoke_mcp.py
         language: system
         pass_filenames: false
         stages: [manual]

@@ -1,0 +1,258 @@
+diff --git a/.env.example b/.env.example
+index 4d886c2..0bc8f53 100644
+--- a/.env.example
++++ b/.env.example
+@@ -14,6 +14,10 @@ HDT_CACHE_TTL=60
+ HDT_RETRY_MAX=3
+ HDT_DISABLE_TELEMETRY=0
+ 
++# Optional: add a privacy-preserving subject hash to telemetry records (derived from user_id + salt)
++# Set a stable salt per environment; rotate to break linkability across deployments.
++HDT_TELEMETRY_SUBJECT_SALT=
++
+ # Vault configuration; switch to DuckDB later
+ HDT_VAULT_PATH=./data/hdt_vault.sqlite
+ HDT_VAULT_ENABLE=1
+diff --git a/README.md b/README.md
+index fcda2e9..4a4bd30 100644
+--- a/README.md
++++ b/README.md
+@@ -44,6 +44,12 @@ Prototype for an **MCP** Human Digital Twin (HDT) interoperability gateway, desi
+ 
+ - **Demo documentation:** see `docs/DEMO.md` for expected outputs and suggested screenshots.
+ 
++- **User-facing transparency report (“What does the HDT know about me?”):** `python scripts/demo_what_hdt_knows.py`
++  - LLM-free: deterministic report built from data-access tools + telemetry tools.
++  - Builds a human-readable summary of what data exists, which tools accessed it, and under which purpose (lane), using only MCP tools (data-access + telemetry).
++  - See `docs/TRANSPARENCY_AGENT.md` for details and expected outputs.
++
++
+ ---
+ 
+ ## Quickstart (reproducible local run)
+@@ -226,6 +232,7 @@ python -m pytest -q
+ * `HDT_VAULT_PATH`: location of the vault DB file (e.g., `./artifacts/vault/hdt_vault.sqlite`)
+ * `HDT_TELEMETRY_DIR`: directory for telemetry JSONL output
+ * `HDT_DISABLE_TELEMETRY`: `1` to disable telemetry logging
++* `HDT_TELEMETRY_SUBJECT_SALT`: optional stable salt to record `subject_hash` in telemetry (privacy-preserving per-subject linkage)
+ * `HDT_DEMO_TIMEOUT_SEC`: demo call timeout (default `30`)
+ 
+ ---
+@@ -327,7 +334,28 @@ In the Inspector UI, open the **Tools** panel and call:
+     }
+     ```
+ 
+-* **Telemetry (recent calls)**
++* **Telemetry (filtered query; preferred for transparency/auditing)**
++
++  * Tool: `hdt.telemetry.query.v1`
++  * Input (last hour, analytics lane):
++
++    ```json
++    {
++      "lookback_s": 3600,
++      "purpose": "analytics",
++      "limit": 50
++    }
++    ```
++
++  * Optional filters you can add:
++
++    * `client_id`: e.g., `"TRANSPARENCY_AGENT"`
++    * `tool`: e.g., `"hdt.walk.fetch.v1"`
++    * `ok`: `true` / `false`
++    * `error_code`: e.g., `"denied_by_policy"`
++    * `subject_hash`: if `HDT_TELEMETRY_SUBJECT_SALT` is enabled
++
++* **Telemetry (recent calls; fallback)**
+ 
+   * Tool: `hdt.telemetry.recent.v1`
+   * Input:
+@@ -376,6 +404,7 @@ Role:
+   * `hdt.sources.status.v1`
+   * `hdt.policy.explain.v1`
+   * `hdt.telemetry.recent.v1`
++  * `hdt.telemetry.query.v1` (filtered telemetry reads; useful for transparency/auditing agents)
+ 
+ What it does on each tool call:
+ 
+diff --git a/docs/ARTIFACTS_APPENDIX.md b/docs/ARTIFACTS_APPENDIX.md
+index bc17d96..216a81f 100644
+--- a/docs/ARTIFACTS_APPENDIX.md
++++ b/docs/ARTIFACTS_APPENDIX.md
+@@ -25,3 +25,29 @@ source .venv/bin/activate
+ 
+ python -m pip install --upgrade pip
+ python -m pip install -e ".[dev]"
++```
++
++
++---
++
++## User-facing transparency agent (“What does the HDT know about me?”)
++
++In addition to policy-lane enforcement, the artifact demonstrates how the same MCP tool surface can support **user-facing transparency**.
++
++This transparency agent is intentionally **LLM-free**: it is a deterministic report generator that uses MCP tools.
++
++The transparency agent script (`scripts/demo_what_hdt_knows.py`) uses:
++
++- HDT data-access tools (e.g., walking/diabetes domains)
++- telemetry tools (`hdt.telemetry.query.v1` or `hdt.telemetry.recent.v1`)
++
++to produce a human-readable report that summarizes:
++
++- what data domains exist for a subject,
++- which tools accessed them,
++- under which purpose (lane), and
++- with correlation IDs suitable for audit trails.
++
++To enable privacy-preserving per-subject scoping of the report, set `HDT_TELEMETRY_SUBJECT_SALT` so telemetry includes `subject_hash` (derived from `user_id` + salt) rather than persisting the raw identifier.
++
++See `docs/TRANSPARENCY_AGENT.md` for run instructions and expected output.
+diff --git a/docs/DEMO.md b/docs/DEMO.md
+index 11da66d..63f3d06 100644
+--- a/docs/DEMO.md
++++ b/docs/DEMO.md
+@@ -92,6 +92,42 @@ The transparency demo is often the one you want for appendix screenshots because
+ * a recent telemetry readout
+ * a filtered JSONL summary for the same `corr_id`
+ 
++## User-facing transparency agent (“What does the HDT know about me?”)
++
++This optional demo script shows how the same building blocks (data-access tools + telemetry tools) can be used to provide **user-facing transparency**.
++
++It is intentionally **LLM-free**: it is a deterministic report generator rather than a conversational assistant.
++
++It produces a concise, human-readable summary of:
++
++- what HDT data streams exist for a subject (based on tool calls)
++- which tools accessed that data
++- under which *purpose* (lane), and by which `client_id`
++
++### Run
++
++From repo root (PowerShell):
++
++```powershell
++$env:MCP_CLIENT_ID="TRANSPARENCY_AGENT"
++# Optional: add privacy-preserving subject_hash to telemetry records
++$env:HDT_TELEMETRY_SUBJECT_SALT="demo-salt"
++
++python scripts/demo_what_hdt_knows.py
++```
++
++Notes:
++
++- The script is expected to call at least one data-access tool (e.g., `hdt.walk.fetch.v1`) and then query telemetry (e.g., `hdt.telemetry.query.v1` or `hdt.telemetry.recent.v1`).
++- If you run other demo scripts first (privacy / matrix), the transparency report will also include those tool accesses.
++
++### Suggested screenshots
++
++- The “What does the HDT know about me?” summary (stdout)
++- A short telemetry excerpt showing tool + purpose + policy decision for the same `corr_id`
++
++For more detail, see `docs/TRANSPARENCY_AGENT.md`.
++
+ ## Deterministic/offline behavior
+ 
+ The demo is designed to run without external systems by seeding a local vault database and using:
+diff --git a/docs/TRANSPARENCY_AGENT.md b/docs/TRANSPARENCY_AGENT.md
+new file mode 100644
+index 0000000..74296f8
+--- /dev/null
++++ b/docs/TRANSPARENCY_AGENT.md
+@@ -0,0 +1,93 @@
++# User-facing transparency agent: “What does the HDT know about me?”
++
++This repository includes an optional agent script that answers a user-centric question: **“What does the HDT know about me?”**
++
++It demonstrates that the same MCP tool surface used for integration and policy enforcement can also support **user-facing transparency**:
++
++This script is intentionally **LLM-free**: it is a deterministic report generator that uses MCP tools (data-access + telemetry) rather than natural-language reasoning.
++
++- The agent calls HDT **data-access tools** to discover or confirm what data streams exist for a subject (for example, walking records or diabetes-related self-reports).
++- It calls **telemetry tools** to retrieve an auditable trace of what was accessed, by which client, and for which purpose (lane).
++
++The output is a human-readable summary that can be used in a UI, a consent dialog, or a study audit report.
++
++## What the report includes
++
++1. **Data inventory**
++   - Which HDT domains/streams are configured or available (for example: walking, trivia, sugarvita).
++   - Where data is expected to come from (for example: vault vs live source), when provenance is available.
++
++2. **Recent access history**
++   - Tool name, timestamp, `client_id`, and `purpose` (lane).
++   - Policy outcome (allowed/denied) and relevant error codes.
++   - Correlation IDs (`corr_id`) to enable drill-down into a specific interaction.
++
++3. **Purpose breakdown**
++   - Counts of accesses per lane (coaching/analytics/modeling).
++   - “Unexpected” patterns (for example: repeated denials when a coaching client probes analytics-only tools).
++
++4. **Privacy notes**
++   - The report uses telemetry metadata only; it does not store or render raw payload logs.
++   - Optionally, telemetry can include a privacy-preserving `subject_hash` so the report can be scoped to a single subject without logging raw identifiers.
++
++## How to run
++
++From the repository root (after installing dependencies):
++
++### PowerShell
++
++```powershell
++$env:MCP_CLIENT_ID="TRANSPARENCY_AGENT"
++# Optional: add privacy-preserving subject_hash to telemetry records
++$env:HDT_TELEMETRY_SUBJECT_SALT="demo-salt"
++
++python scripts/demo_what_hdt_knows.py
++```
++
++### Git Bash / macOS / Linux
++
++```bash
++export MCP_CLIENT_ID="TRANSPARENCY_AGENT"
++export HDT_TELEMETRY_SUBJECT_SALT="demo-salt"  # optional
++
++python scripts/demo_what_hdt_knows.py
++```
++
++Notes:
++
++- The script is expected to call at least one data-access tool and then query telemetry (preferably via `hdt.telemetry.query.v1`; `hdt.telemetry.recent.v1` is a fallback).
++- If you run other demo scripts first (privacy/matrix), the report will also include those tool accesses.
++
++## Telemetry prerequisites
++
++The transparency agent relies on one of:
++
++- `hdt.telemetry.query.v1` (preferred; supports filtering)
++- `hdt.telemetry.recent.v1` (fallback; last N entries)
++
++To enable privacy-preserving per-subject linkage in telemetry, set:
++
++```
++HDT_TELEMETRY_SUBJECT_SALT=<stable secret salt>
++```
++
++When this variable is set, the gateway records `subject_hash` derived from `user_id` and the salt instead of persisting the raw `user_id` in telemetry.
++
++## Extending to a real HDT
++
++Recommended next steps for a user-facing HDT implementation:
++
++- Add a dedicated “inventory” tool that returns schema-level metadata per stream (types, time ranges, sources) without returning records.
++- Persist governance outputs as explicit telemetry events (for example: `transparency.report.generated`) to keep the audit trail end-to-end.
++- Expose the report to the user interface as a “data access ledger,” with filtering by purpose and time window.
++
++
++## Exploring the same tools in MCP Inspector
++
++You can reproduce the agent's key calls interactively in MCP Inspector. In the Tools panel, call:
++
++- `hdt.sources.status.v1` (inventory)
++- `hdt.walk.fetch.v1` (sample data-access, in a lane)
++- `hdt.telemetry.query.v1` (filtered audit trail)
++
++See `README.md` (Inspector section) for how to launch Inspector against `python -m hdt_mcp.gateway`.

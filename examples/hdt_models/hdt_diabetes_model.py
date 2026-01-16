@@ -14,14 +14,14 @@ from typing import Any, Iterable, Optional
 
 # Ensure repo root on sys.path (so `hdt_mcp` and `config` resolve when run as a script)
 _THIS_FILE = Path(__file__).resolve()
-_REPO_ROOT = _THIS_FILE.parents[1] if (_THIS_FILE.parents and (_THIS_FILE.parents[0].name in {"Virtual_Twin_Models", "scripts"})) else Path.cwd()
+_REPO_ROOT = _THIS_FILE.parents[2] if (_THIS_FILE.parents and (_THIS_FILE.parents[0].name == "hdt_models")) else Path.cwd()
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 # Prefer explicit imports (avoid wildcard)
 try:
-    # If you keep calculations under Virtual_Twin_Models
-    from Virtual_Twin_Models.HDT_DIABETES_calculations import (
+    # If you keep calculations under examples/hdt_models
+    from examples.hdt_models.hdt_diabetes_calculations import (
         manipulate_initial_metrics_trivia,
         manipulate_initial_metrics_sugarvita,
         normalize_metrics,
@@ -32,7 +32,7 @@ try:
     )
 except Exception:
     # Fallback if script lives in same folder as calculations
-    from HDT_DIABETES_calculations import (  # type: ignore
+    from hdt_diabetes_calculations import (  # type: ignore
         manipulate_initial_metrics_trivia,
         manipulate_initial_metrics_sugarvita,
         normalize_metrics,

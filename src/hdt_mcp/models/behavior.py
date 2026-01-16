@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 # read from vault if available
 try:
-    from .. import vault_store as _vault
+    from hdt_mcp import vault_store as _vault
 except Exception:
     _vault = None
 

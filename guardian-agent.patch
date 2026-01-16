@@ -1,0 +1,879 @@
+diff --git a/config/policy.guardian_demo.json b/config/policy.guardian_demo.json
+new file mode 100644
+index 0000000..ae1f757
+--- /dev/null
++++ b/config/policy.guardian_demo.json
+@@ -0,0 +1,24 @@
++{
++  "defaults": {
++    "analytics": {"allow": true, "redact": []},
++    "coaching": {"allow": true, "redact": []},
++    "modeling": {"allow": true, "redact": []}
++  },
++  "tools": {
++    "hdt.walk.fetch.v1": {
++      "analytics": {"allow": true},
++      "coaching": {"allow": false},
++      "modeling": {"allow": false}
++    },
++    "hdt.trivia.fetch.v1": {
++      "analytics": {"allow": true},
++      "coaching": {"allow": false},
++      "modeling": {"allow": false}
++    },
++    "hdt.sugarvita.fetch.v1": {
++      "analytics": {"allow": true},
++      "coaching": {"allow": false},
++      "modeling": {"allow": false}
++    }
++  }
++}
+diff --git a/scripts/demo_coaching_agent_suspicious.py b/scripts/demo_coaching_agent_suspicious.py
+new file mode 100644
+index 0000000..9081534
+--- /dev/null
++++ b/scripts/demo_coaching_agent_suspicious.py
+@@ -0,0 +1,106 @@
++"""Demo: a (misbehaving) coaching agent that repeatedly attempts an analytics-only tool.
++
++Purpose
++-------
++This script is intentionally 'bad': it calls an analytics tool with purpose=coaching,
++which (under the guardian demo policy) should be denied. Those denied calls are still
++useful because they leave an auditable trace in telemetry.
++
++Usage (bash)
++------------
++export HDT_POLICY_PATH=config/policy.guardian_demo.json
++export HDT_TELEMETRY_SUBJECT_SALT=demo-salt
++export MCP_CLIENT_ID=COACHING_AGENT
++python scripts/demo_coaching_agent_suspicious.py
++"""
++
++from __future__ import annotations
++
++import asyncio
++import json
++import os
++import sys
++from pathlib import Path
++from typing import Any
++
++_THIS_FILE = Path(__file__).resolve()
++_REPO_ROOT = _THIS_FILE.parents[1]
++if str(_REPO_ROOT) not in sys.path:
++    sys.path.insert(0, str(_REPO_ROOT))
++
++
++def _pretty(x: Any) -> str:
++    try:
++        return json.dumps(x, indent=2, ensure_ascii=False)
++    except Exception:
++        return str(x)
++
++
++def _unwrap_tool_result(res: Any) -> Any:
++    content = getattr(res, "content", None)
++    if not content:
++        return res
++    c0 = content[0]
++    if isinstance(c0, dict) and "text" in c0:
++        return c0["text"]
++    return getattr(c0, "text", c0)
++
++
++async def main() -> int:
++    from mcp import ClientSession
++    from mcp.client.stdio import StdioServerParameters, stdio_client
++
++    gateway_module = os.getenv("HDT_GATEWAY_MODULE", "hdt_mcp.gateway")
++    python_cmd = os.getenv("MCP_PYTHON") or sys.executable
++
++    user_id = int(os.getenv("HDT_SMOKE_USER_ID", "1"))
++    tool_name = os.getenv("HDT_SUSPICIOUS_TOOL", "hdt.walk.fetch.v1")
++    attempts = int(os.getenv("HDT_SUSPICIOUS_ATTEMPTS", "5"))
++
++    print(f"[coaching-agent] Repo root: {_REPO_ROOT}")
++    print(f"[coaching-agent] Gateway module: {gateway_module}")
++    print(f"[coaching-agent] MCP_CLIENT_ID={os.getenv('MCP_CLIENT_ID')}")
++    print(f"[coaching-agent] Policy: {os.getenv('HDT_POLICY_PATH')}")
++    print(f"[coaching-agent] Attempts: {attempts} calls to {tool_name} with purpose=coaching")
++
++    server = StdioServerParameters(
++        command=python_cmd,
++        args=["-m", gateway_module],
++        env=dict(os.environ, MCP_TRANSPORT="stdio"),
++    )
++
++    denies = 0
++
++    async with stdio_client(server) as (read, write):
++        async with ClientSession(read, write) as session:
++            await session.initialize()
++
++            for i in range(1, attempts + 1):
++                res = await session.call_tool(tool_name, {"user_id": user_id, "purpose": "coaching"})
++                out = _unwrap_tool_result(res)
++                if isinstance(out, str) and out.strip().startswith("{"):
++                    try:
++                        out = json.loads(out)
++                    except Exception:
++                        pass
++
++                code = None
++                if isinstance(out, dict) and isinstance(out.get("error"), dict):
++                    code = out["error"].get("code")
++                if code in {"denied_by_policy", "denied"}:
++                    denies += 1
++
++                print(f"\n[coaching-agent] call {i}/{attempts}: {tool_name} -> error_code={code}")
++                if isinstance(out, dict):
++                    # Keep the output short but traceable
++                    snippet = {"error": out.get("error"), "corr_id": out.get("corr_id")}
++                    print(_pretty(snippet))
++                else:
++                    print(_pretty(out))
++
++    print(f"\n[coaching-agent] Done. Denied calls: {denies}/{attempts} (expected under guardian demo policy).")
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(asyncio.run(main()))
+diff --git a/scripts/demo_guardian_agent.py b/scripts/demo_guardian_agent.py
+new file mode 100644
+index 0000000..a0c3143
+--- /dev/null
++++ b/scripts/demo_guardian_agent.py
+@@ -0,0 +1,157 @@
++"""Demo: Guardian agent (auditor) that queries telemetry for suspicious patterns.
++
++Concept
++-------
++The guardian agent is a simple monitoring agent that uses the MCP tool
++`hdt.telemetry.query.v1` to detect suspicious patterns, e.g. repeated
++policy-denied attempts by another agent.
++
++Importantly, this demo does not require direct file access: the telemetry store is
++exposed as a tool, reducing the barrier to building governance/monitoring agents.
++
++Usage (bash)
++------------
++# 1) (In one terminal) generate suspicious attempts:
++export HDT_POLICY_PATH=config/policy.guardian_demo.json
++export HDT_TELEMETRY_SUBJECT_SALT=demo-salt
++export MCP_CLIENT_ID=COACHING_AGENT
++python scripts/demo_coaching_agent_suspicious.py
++
++# 2) (In another terminal) run the guardian:
++export HDT_POLICY_PATH=config/policy.guardian_demo.json
++export HDT_TELEMETRY_SUBJECT_SALT=demo-salt
++export MCP_CLIENT_ID=GUARDIAN_AGENT
++python scripts/demo_guardian_agent.py
++
++Exit codes:
++  0: no suspicious pattern detected
++  3: suspicious pattern detected
++"""
++
++from __future__ import annotations
++
++import asyncio
++import json
++import os
++import sys
++from pathlib import Path
++from typing import Any, Dict, List, Tuple
++
++_THIS_FILE = Path(__file__).resolve()
++_REPO_ROOT = _THIS_FILE.parents[1]
++if str(_REPO_ROOT) not in sys.path:
++    sys.path.insert(0, str(_REPO_ROOT))
++
++
++def _pretty(x: Any) -> str:
++    try:
++        return json.dumps(x, indent=2, ensure_ascii=False)
++    except Exception:
++        return str(x)
++
++
++def _unwrap_tool_result(res: Any) -> Any:
++    content = getattr(res, "content", None)
++    if not content:
++        return res
++    c0 = content[0]
++    if isinstance(c0, dict) and "text" in c0:
++        return c0["text"]
++    return getattr(c0, "text", c0)
++
++
++def _coerce_json(out: Any) -> Any:
++    if isinstance(out, str) and out.strip().startswith("{"):
++        try:
++            return json.loads(out)
++        except Exception:
++            return out
++    return out
++
++
++async def main() -> int:
++    from mcp import ClientSession
++    from mcp.client.stdio import StdioServerParameters, stdio_client
++
++    gateway_module = os.getenv("HDT_GATEWAY_MODULE", "hdt_mcp.gateway")
++    python_cmd = os.getenv("MCP_PYTHON") or sys.executable
++
++    watch_client = os.getenv("HDT_GUARDIAN_WATCH_CLIENT", "COACHING_AGENT")
++    lookback_s = int(os.getenv("HDT_GUARDIAN_LOOKBACK_S", "3600"))
++    min_denies = int(os.getenv("HDT_GUARDIAN_MIN_DENIES", "3"))
++
++    # This is the suspicious pattern we look for in this demo.
++    denied_code = os.getenv("HDT_GUARDIAN_DENIED_CODE", "denied_by_policy")
++    event_purpose = os.getenv("HDT_GUARDIAN_EVENT_PURPOSE", "coaching")
++
++    print(f"[guardian] Repo root: {_REPO_ROOT}")
++    print(f"[guardian] Gateway module: {gateway_module}")
++    print(f"[guardian] MCP_CLIENT_ID={os.getenv('MCP_CLIENT_ID')} (should be GUARDIAN_AGENT)")
++    print(f"[guardian] Watching client_id={watch_client}")
++    print(f"[guardian] lookback_s={lookback_s}, min_denies={min_denies}")
++    print(f"[guardian] pattern: ok=false, error_code={denied_code}, event_purpose={event_purpose}")
++
++    server = StdioServerParameters(
++        command=python_cmd,
++        args=["-m", gateway_module],
++        env=dict(os.environ, MCP_TRANSPORT="stdio"),
++    )
++
++    async with stdio_client(server) as (read, write):
++        async with ClientSession(read, write) as session:
++            await session.initialize()
++
++            # Query telemetry (purpose=analytics to pass lane validation; filter by event_purpose).
++            res = await session.call_tool(
++                "hdt.telemetry.query.v1",
++                {
++                    "n": 200,
++                    "lookback_s": lookback_s,
++                    "client_id": watch_client,
++                    "event_purpose": event_purpose,
++                    "ok": False,
++                    "error_code": denied_code,
++                    "purpose": "analytics",
++                },
++            )
++            out = _coerce_json(_unwrap_tool_result(res))
++
++    if not isinstance(out, dict) or "records" not in out:
++        print("[guardian] Unexpected telemetry response:")
++        print(_pretty(out))
++        return 0
++
++    records: List[Dict[str, Any]] = out.get("records") or []
++
++    # Count denied tool calls per tool
++    counts: Dict[str, int] = {}
++    evidence: Dict[str, List[Tuple[str, str]]] = {}
++
++    for r in records:
++        tool_name = r.get("name") or "(unknown)"
++        counts[tool_name] = counts.get(tool_name, 0) + 1
++
++        # keep small evidence (ts,corr_id)
++        evidence.setdefault(tool_name, []).append((str(r.get("ts")), str(r.get("corr_id"))))
++
++    suspicious_tools = {t: c for t, c in counts.items() if c >= min_denies}
++
++    if not suspicious_tools:
++        print(f"[guardian] OK: no tool exceeded min_denies={min_denies} in the last {lookback_s}s.")
++        print(f"[guardian] denies observed: {counts or '{}'}")
++        return 0
++
++    print("[guardian] SUSPICIOUS: repeated denied attempts detected")
++    print(_pretty(suspicious_tools))
++
++    for tool_name, c in sorted(suspicious_tools.items(), key=lambda kv: (-kv[1], kv[0])):
++        print(f"\n[guardian] evidence for {tool_name} (showing up to 5):")
++        for ts, cid in evidence.get(tool_name, [])[-5:]:
++            print(f"  - ts={ts} corr_id={cid}")
++
++    # Non-zero to make it usable in CI/automation
++    return 3
++
++
++if __name__ == "__main__":
++    raise SystemExit(asyncio.run(main()))
+diff --git a/src/hdt_common/telemetry.py b/src/hdt_common/telemetry.py
+index d1fc21e..ca644d3 100644
+--- a/src/hdt_common/telemetry.py
++++ b/src/hdt_common/telemetry.py
+@@ -1,10 +1,11 @@
+ from __future__ import annotations
+ 
+ import datetime as _dt
++import hashlib
+ import json
+ import os
+ from pathlib import Path
+-from typing import Any, Dict
++from typing import Any
+ 
+ from hdt_config.settings import repo_root
+ from hdt_common.context import get_request_id
+@@ -16,6 +17,10 @@ _TELEMETRY_DIR.mkdir(parents=True, exist_ok=True)
+ 
+ _DISABLE_TELEMETRY = (os.getenv("HDT_DISABLE_TELEMETRY", "0").strip().lower() in {"1", "true", "yes"})
+ 
++# Optional: privacy-preserving per-subject linkability.
++# If set, we will compute `subject_hash` from the first `user_id` found in the event args.
++# This allows per-citizen governance without writing the raw user id into telemetry.
++_TELEMETRY_SUBJECT_SALT = os.getenv("HDT_TELEMETRY_SUBJECT_SALT", "").strip()
+ 
+ _SECRET_KEYS = {"authorization", "auth_bearer", "access_token", "token", "api_key", "apikey"}
+ 
+@@ -59,6 +64,39 @@ def _redact_pii(obj: Any) -> Any:
+     return obj
+ 
+ 
++def _find_first_key(obj: Any, *, key: str) -> Any | None:
++    """Best-effort recursive search for a key in nested dict/list structures."""
++    if isinstance(obj, dict):
++        for k, v in obj.items():
++            if isinstance(k, str) and k.strip().lower() == key:
++                return v
++        for v in obj.values():
++            found = _find_first_key(v, key=key)
++            if found is not None:
++                return found
++        return None
++    if isinstance(obj, list):
++        for item in obj:
++            found = _find_first_key(item, key=key)
++            if found is not None:
++                return found
++    return None
++
++
++def _hash_subject(user_id: Any) -> str | None:
++    if not _TELEMETRY_SUBJECT_SALT:
++        return None
++    if user_id is None:
++        return None
++    if user_id == REDACT_TOKEN:
++        return None
++    try:
++        s = f"{_TELEMETRY_SUBJECT_SALT}:{user_id}".encode("utf-8")
++        return hashlib.sha256(s).hexdigest()[:16]
++    except Exception:
++        return None
++
++
+ def log_event(
+     kind: str,
+     name: str,
+@@ -70,16 +108,14 @@ def log_event(
+     corr_id: str | None = None,
+     telemetry_file: str = "mcp-telemetry.jsonl",
+ ) -> None:
+-    """
+-    Append JSONL telemetry for tools/resources.
+-    """
++    """Append JSONL telemetry for tools/resources."""
+     if _DISABLE_TELEMETRY:
+         return
+ 
+     rid = get_request_id()
+     payload = {} if args is None else dict(args)
+ 
+-    rec = {
++    rec: dict[str, Any] = {
+         "ts": _dt.datetime.now(_dt.timezone.utc).isoformat().replace("+00:00", "Z"),
+         "kind": kind,
+         "name": name,
+@@ -91,6 +127,13 @@ def log_event(
+         "ms": int(ms),
+     }
+ 
++    # Optional: derive a privacy-preserving per-subject key.
++    # We compute this BEFORE redaction, then store only the hash.
++    uid = _find_first_key(payload, key="user_id")
++    subject_hash = _hash_subject(uid)
++    if subject_hash:
++        rec["subject_hash"] = subject_hash
++
+     # Defense-in-depth:
+     # 1) redact secrets (tokens, API keys)
+     # 2) redact common PII keys (user identifiers, emails)
+@@ -102,9 +145,7 @@ def log_event(
+ 
+ 
+ def telemetry_recent(n: int = 50, telemetry_file: str = "mcp-telemetry.jsonl") -> dict:
+-    """
+-    Return last N telemetry records (bounded) with secrets + PII redacted.
+-    """
++    """Return last N telemetry records (bounded) with secrets + PII redacted."""
+     p = _TELEMETRY_DIR / telemetry_file
+     if not p.exists():
+         return {"records": []}
+@@ -120,7 +161,7 @@ def telemetry_recent(n: int = 50, telemetry_file: str = "mcp-telemetry.jsonl") -
+     tail_window = max(500, n_int * 5)
+     lines = p.read_text(encoding="utf-8").splitlines()[-tail_window:]
+ 
+-    out = []
++    out: list[dict[str, Any]] = []
+     for line in lines[-n_int:]:
+         try:
+             rec = json.loads(line)
+@@ -133,3 +174,131 @@ def telemetry_recent(n: int = 50, telemetry_file: str = "mcp-telemetry.jsonl") -
+ 
+     return {"records": out}
+ 
++
++def _parse_ts(ts: str | None) -> _dt.datetime | None:
++    if not ts:
++        return None
++    try:
++        # expected format: 2025-01-01T00:00:00Z
++        if ts.endswith("Z"):
++            ts = ts[:-1] + "+00:00"
++        return _dt.datetime.fromisoformat(ts)
++    except Exception:
++        return None
++
++
++def telemetry_query(
++    n: int = 50,
++    *,
++    lookback_s: int | None = None,
++    since_ts: str | None = None,
++    client_id: str | None = None,
++    tool: str | None = None,
++    tool_prefix: str | None = None,
++    purpose: str | None = None,
++    ok: bool | None = None,
++    error_code: str | None = None,
++    subject_hash: str | None = None,
++    telemetry_file: str = "mcp-telemetry.jsonl",
++) -> dict:
++    """
++    Filtered telemetry query over the local JSONL store.
++
++    This is intentionally bounded (tail-read + filters) to keep the tool safe and fast.
++
++    Notes:
++    - Telemetry records are already redacted on write; we redact again on read.
++    - Filters are best-effort; malformed lines are skipped.
++    """
++    p = _TELEMETRY_DIR / telemetry_file
++    if not p.exists():
++        return {"records": []}
++
++    # hard bounds
++    try:
++        n_int = int(n)
++    except Exception:
++        n_int = 50
++    n_int = max(1, min(n_int, 200))
++
++    # Time window
++    now = _dt.datetime.now(_dt.timezone.utc)
++    since: _dt.datetime | None = None
++    if lookback_s is not None:
++        try:
++            lb = max(0, int(lookback_s))
++        except Exception:
++            lb = 0
++        since = now - _dt.timedelta(seconds=lb)
++    if since_ts:
++        parsed = _parse_ts(since_ts)
++        if parsed is not None:
++            # If both provided, take the more restrictive (later) bound.
++            since = parsed if since is None else max(since, parsed)
++
++    # Read a tail window larger than n to tolerate filtering.
++    # Keep it bounded to avoid huge reads in CI.
++    tail_window = 5000
++    lines = p.read_text(encoding="utf-8").splitlines()[-tail_window:]
++
++    # Iterate newest-first; collect until we have n matches
++    matches: list[dict[str, Any]] = []
++    for line in reversed(lines):
++        try:
++            rec = json.loads(line)
++        except Exception:
++            continue
++
++        # Time filter (best-effort)
++        if since is not None:
++            ts = _parse_ts(rec.get("ts"))
++            if ts is not None and ts < since:
++                # Since we're going backwards in time, we can break early.
++                break
++
++        if client_id is not None and rec.get("client_id") != client_id:
++            continue
++
++        if subject_hash is not None and rec.get("subject_hash") != subject_hash:
++            continue
++
++        name = rec.get("name")
++        if tool is not None and name != tool:
++            continue
++        if tool_prefix is not None and (not isinstance(name, str) or not name.startswith(tool_prefix)):
++            continue
++
++        # instrumented tools store purpose in rec['args']['purpose']
++        if purpose is not None:
++            rec_purpose = None
++            try:
++                rec_purpose = (rec.get("args") or {}).get("purpose")
++            except Exception:
++                rec_purpose = None
++            if (rec_purpose or "") != purpose:
++                continue
++
++        if ok is not None and bool(rec.get("ok")) != bool(ok):
++            continue
++
++        if error_code is not None:
++            code = None
++            try:
++                err = (rec.get("args") or {}).get("error")
++                if isinstance(err, dict):
++                    code = err.get("code")
++            except Exception:
++                code = None
++            if code != error_code:
++                continue
++
++        # defense-in-depth: redact again on read
++        rec = _redact_secrets(rec)
++        rec = _redact_pii(rec)
++        matches.append(rec)
++
++        if len(matches) >= n_int:
++            break
++
++    matches.reverse()
++    return {"records": matches}
+diff --git a/src/hdt_common/tooling.py b/src/hdt_common/tooling.py
+index fc29b5d..e66c877 100644
+--- a/src/hdt_common/tooling.py
++++ b/src/hdt_common/tooling.py
+@@ -1,6 +1,7 @@
+ from __future__ import annotations
+ 
+ import inspect
++import json
+ import time
+ import functools
+ from dataclasses import dataclass
+@@ -42,6 +43,58 @@ def _bound_args(fn: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str,
+         return d
+ 
+ 
++def _compute_out_stats(payload: Any) -> dict[str, Any]:
++    """Compute lightweight output metadata for monitoring/guardrails."""
++    stats: dict[str, Any] = {"type": type(payload).__name__}
++
++    try:
++        if isinstance(payload, dict):
++            stats["keys"] = len(payload)
++
++            err = payload.get("error")
++            if isinstance(err, dict):
++                stats["error_code"] = err.get("code")
++
++            if isinstance(payload.get("attempts"), list):
++                stats["attempts"] = len(payload.get("attempts") or [])
++
++            if isinstance(payload.get("records"), list):
++                stats["records"] = len(payload.get("records") or [])
++
++            streams = payload.get("streams")
++            if isinstance(streams, dict):
++                per: dict[str, int] = {}
++                total = 0
++                for k, v in streams.items():
++                    if isinstance(v, dict) and isinstance(v.get("records"), list):
++                        n = len(v.get("records") or [])
++                        per[str(k)] = n
++                        total += n
++                if per:
++                    stats["streams"] = per
++                    stats["streams_total"] = total
++
++        elif isinstance(payload, list):
++            stats["len"] = len(payload)
++
++        # Approximate size, but avoid expensive dumps for very large payloads.
++        # This is best-effort and may be omitted.
++        if isinstance(payload, dict):
++            too_large = False
++            if isinstance(payload.get("records"), list) and len(payload.get("records") or []) > 500:
++                too_large = True
++            if isinstance(payload.get("attempts"), list) and len(payload.get("attempts") or []) > 500:
++                too_large = True
++            if not too_large:
++                s = json.dumps(payload, ensure_ascii=False, default=str)
++                stats["json_bytes"] = len(s.encode("utf-8"))
++    except Exception:
++        # Never fail a tool call because telemetry stats failed.
++        return stats
++
++    return stats
++
++
+ @dataclass(frozen=True)
+ class InstrumentConfig:
+     kind: str
+@@ -72,7 +125,7 @@ def instrument_sync_tool(cfg: InstrumentConfig):
+ 
+             t0 = time.perf_counter()
+             bound = _bound_args(fn, args, kwargs)
+-            args_for_log = {"args": sanitize_args_for_log(bound)}
++            args_for_log: dict[str, Any] = {"args": sanitize_args_for_log(bound)}
+ 
+             try:
+                 payload = fn(*args, **kwargs)
+@@ -84,6 +137,8 @@ def instrument_sync_tool(cfg: InstrumentConfig):
+             if isinstance(payload, dict) and payload.get("error"):
+                 args_for_log["error"] = payload.get("error")
+ 
++            args_for_log["out"] = _compute_out_stats(payload)
++
+             log_event(
+                 cfg.kind,
+                 cfg.name,
+@@ -108,6 +163,7 @@ def instrument_sync_tool(cfg: InstrumentConfig):
+ @dataclass(frozen=True)
+ class PolicyConfig:
+     """Optional policy enforcement configuration for instrumented tools."""
++
+     lanes: set[str]
+     # policy engine hooks
+     apply_policy: Callable[..., dict]
+@@ -154,6 +210,7 @@ def instrument_async_tool(cfg: InstrumentConfig, *, policy: PolicyConfig | None
+                     )
+                     ms = int((time.perf_counter() - t0) * 1000)
+                     args_for_log["error"] = payload.get("error")
++                    args_for_log["out"] = _compute_out_stats(payload)
+                     log_event(cfg.kind, cfg.name, args_for_log, ok=False, ms=ms, client_id=cfg.client_id, corr_id=corr_id)
+                     if cfg.attach_corr_id and isinstance(payload, dict):
+                         payload.setdefault("corr_id", corr_id)
+@@ -166,6 +223,7 @@ def instrument_async_tool(cfg: InstrumentConfig, *, policy: PolicyConfig | None
+                     meta = policy.policy_last_meta() or {}
+                     args_for_log["policy"] = meta
+                     args_for_log["error"] = probe.get("error")
++                    args_for_log["out"] = _compute_out_stats(probe)
+                     log_event(cfg.kind, cfg.name, args_for_log, ok=False, ms=ms, client_id=cfg.client_id, corr_id=corr_id)
+                     if cfg.attach_corr_id and isinstance(probe, dict):
+                         probe.setdefault("corr_id", corr_id)
+@@ -191,6 +249,8 @@ def instrument_async_tool(cfg: InstrumentConfig, *, policy: PolicyConfig | None
+             if isinstance(payload, dict) and payload.get("error"):
+                 args_for_log["error"] = payload.get("error")
+ 
++            args_for_log["out"] = _compute_out_stats(payload)
++
+             log_event(cfg.kind, cfg.name, args_for_log, ok=ok, ms=ms, client_id=cfg.client_id, corr_id=corr_id)
+ 
+             if cfg.attach_corr_id and isinstance(payload, dict):
+@@ -202,4 +262,3 @@ def instrument_async_tool(cfg: InstrumentConfig, *, policy: PolicyConfig | None
+         return wrapper
+ 
+     return decorator
+-
+diff --git a/src/hdt_mcp/gateway.py b/src/hdt_mcp/gateway.py
+index 1d2b4eb..cacf1b9 100644
+--- a/src/hdt_mcp/gateway.py
++++ b/src/hdt_mcp/gateway.py
+@@ -13,7 +13,7 @@ from hdt_common.tooling import (
+     instrument_async_tool,
+     instrument_sync_tool,
+ )
+-from hdt_common.telemetry import telemetry_recent
++from hdt_common.telemetry import telemetry_recent, telemetry_query
+ from hdt_config.settings import init_runtime
+ 
+ 
+@@ -192,6 +192,38 @@ async def hdt_policy_explain(tool: str, purpose: str = "analytics") -> dict:
+ async def hdt_telemetry_recent(n: int = 50, purpose: str = "analytics") -> dict:
+     return telemetry_recent(n=n)
+ 
++@hdt_tool("hdt.telemetry.query.v1")
++async def hdt_telemetry_query(
++    n: int = 50,
++    lookback_s: int | None = 3600,
++    client_id: str | None = None,
++    tool: str | None = None,
++    tool_prefix: str | None = None,
++    event_purpose: str | None = None,
++    ok: bool | None = None,
++    error_code: str | None = None,
++    subject_hash: str | None = None,
++    purpose: str = "analytics",
++) -> dict:
++    """Filtered telemetry query (bounded).
++
++    Use this for monitoring/guardian agents without requiring direct file access.
++
++    The tool uses telemetry records that are already redacted on write.
++    """
++    return telemetry_query(
++        n=n,
++        lookback_s=lookback_s,
++        client_id=client_id,
++        tool=tool,
++        tool_prefix=tool_prefix,
++        purpose=event_purpose,
++        ok=ok,
++        error_code=error_code,
++        subject_hash=subject_hash,
++    )
++
++
+ 
+ def main() -> None:
+     # Entry points (console_scripts) call main() directly, so we must perform
+diff --git a/tests/unit/test_gateway_telemetry_query_tool.py b/tests/unit/test_gateway_telemetry_query_tool.py
+new file mode 100644
+index 0000000..978a402
+--- /dev/null
++++ b/tests/unit/test_gateway_telemetry_query_tool.py
+@@ -0,0 +1,76 @@
++import importlib
++import json
++
++import pytest
++
++
++def _write_record(path, rec):
++    with path.open("a", encoding="utf-8") as f:
++        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
++
++
++@pytest.mark.asyncio
++async def test_gateway_telemetry_query_tool_filters(tmp_path, monkeypatch):
++    # Disable telemetry so calling the tool does not pollute the file
++    monkeypatch.setenv("HDT_DISABLE_TELEMETRY", "1")
++    monkeypatch.setenv("HDT_TELEMETRY_DIR", str(tmp_path))
++
++    # Ensure modules rebind env-configured telemetry dir and disable flag
++    import hdt_common.telemetry as telem
++    importlib.reload(telem)
++    import hdt_common.tooling as tooling
++    importlib.reload(tooling)
++    import hdt_mcp.gateway as gw
++    importlib.reload(gw)
++
++    p = tmp_path / "mcp-telemetry.jsonl"
++
++    # A matching denied record
++    _write_record(
++        p,
++        {
++            "ts": "2026-01-10T00:00:00Z",
++            "kind": "tool",
++            "name": "hdt.walk.fetch.v1",
++            "client_id": "COACHING_AGENT",
++            "request_id": "r1",
++            "corr_id": "c1",
++            "args": {"purpose": "coaching", "error": {"code": "denied_by_policy"}},
++            "ok": False,
++            "ms": 1,
++            "subject_hash": "abcd",
++        },
++    )
++
++    # A non-matching record
++    _write_record(
++        p,
++        {
++            "ts": "2026-01-10T00:00:01Z",
++            "kind": "tool",
++            "name": "hdt.walk.fetch.v1",
++            "client_id": "OTHER",
++            "request_id": "r2",
++            "corr_id": "c2",
++            "args": {"purpose": "coaching", "error": {"code": "denied_by_policy"}},
++            "ok": False,
++            "ms": 1,
++            "subject_hash": "zzzz",
++        },
++    )
++
++    out = await gw.hdt_telemetry_query(
++        n=10,
++        lookback_s=999999999,
++        client_id="COACHING_AGENT",
++        event_purpose="coaching",
++        ok=False,
++        error_code="denied_by_policy",
++        purpose="analytics",
++    )
++
++    assert isinstance(out, dict)
++    recs = out.get("records") or []
++    assert len(recs) == 1
++    assert recs[0]["client_id"] == "COACHING_AGENT"
++    assert recs[0]["corr_id"] == "c1"
+diff --git a/tests/unit/test_telemetry_query_and_subject_hash.py b/tests/unit/test_telemetry_query_and_subject_hash.py
+new file mode 100644
+index 0000000..e63e4bf
+--- /dev/null
++++ b/tests/unit/test_telemetry_query_and_subject_hash.py
+@@ -0,0 +1,54 @@
++import hashlib
++import importlib
++import json
++
++import hdt_common.telemetry as t
++
++
++def test_telemetry_subject_hash_and_query_filters(tmp_path, monkeypatch):
++    # Configure telemetry module to write into a temporary dir
++    monkeypatch.setenv("HDT_TELEMETRY_DIR", str(tmp_path))
++    monkeypatch.setenv("HDT_TELEMETRY_SUBJECT_SALT", "demo-salt")
++    monkeypatch.delenv("HDT_DISABLE_TELEMETRY", raising=False)
++
++    importlib.reload(t)
++
++    # Write a denied event through log_event (so subject_hash is computed pre-redaction)
++    t.log_event(
++        kind="tool",
++        name="hdt.walk.fetch.v1",
++        args={
++            "args": {"user_id": 1, "email": "x@y", "token": "secret"},
++            "purpose": "coaching",
++            "error": {"code": "denied_by_policy"},
++        },
++        ok=False,
++        ms=12,
++        client_id="COACHING_AGENT",
++        corr_id="corr-1",
++    )
++
++    # Validate raw record persisted with redaction + subject_hash
++    p = tmp_path / "mcp-telemetry.jsonl"
++    raw = p.read_text(encoding="utf-8").splitlines()[0]
++    rec = json.loads(raw)
++
++    expected = hashlib.sha256(b"demo-salt:1").hexdigest()[:16]
++    assert rec.get("subject_hash") == expected
++
++    inner = rec["args"]["args"]
++    assert inner["user_id"] == "***redacted***"
++    assert inner["email"] == "***redacted***"
++    assert inner["token"] == "***redacted***"
++
++    out = t.telemetry_query(
++        n=10,
++        client_id="COACHING_AGENT",
++        purpose="coaching",
++        ok=False,
++        error_code="denied_by_policy",
++    )
++
++    assert isinstance(out, dict)
++    assert len(out.get("records") or []) == 1
++    assert out["records"][0].get("subject_hash") == expected

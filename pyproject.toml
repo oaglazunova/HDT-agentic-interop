@@ -63,7 +63,7 @@ include = [
 
 exclude = [
   "data*",
-  "Virtual_Twin_Models*",
+  "examples*",
   "docs*",
   "scripts*",
   "tests*",

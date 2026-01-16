@@ -1,0 +1,24 @@
+{
+  "defaults": {
+    "analytics": {"allow": true, "redact": []},
+    "coaching": {"allow": true, "redact": []},
+    "modeling": {"allow": true, "redact": []}
+  },
+  "tools": {
+    "hdt.walk.fetch.v1": {
+      "analytics": {"allow": true},
+      "coaching": {"allow": false},
+      "modeling": {"allow": false}
+    },
+    "hdt.trivia.fetch.v1": {
+      "analytics": {"allow": true},
+      "coaching": {"allow": false},
+      "modeling": {"allow": false}
+    },
+    "hdt.sugarvita.fetch.v1": {
+      "analytics": {"allow": true},
+      "coaching": {"allow": false},
+      "modeling": {"allow": false}
+    }
+  }
+}

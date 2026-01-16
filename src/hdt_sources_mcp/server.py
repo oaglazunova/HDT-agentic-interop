@@ -8,7 +8,7 @@ from datetime import date, datetime
 from mcp.server.fastmcp import FastMCP
 from hdt_common.context import set_request_id, get_request_id
 from hdt_common.errors import typed_error
-from hdt_common.tooling import InstrumentConfig, instrument_sync_tool
+from hdt_common.tooling import InstrumentConfig, instrument_sync_tool, instrument_async_tool
 from hdt_config.settings import init_runtime, config_dir
 from hdt_sources_mcp.core_infrastructure.users_store import load_users_merged
 from hdt_sources_mcp.connectors.gamebus.walk_fetch import fetch_walk_data
@@ -152,7 +152,12 @@ def _cfg(name: str) -> InstrumentConfig:
 
 
 def _instrument(name: str):
-    return instrument_sync_tool(_cfg(name))
+    def decorator(fn):
+        import inspect
+        is_async = inspect.iscoroutinefunction(fn)
+        instr = instrument_async_tool if is_async else instrument_sync_tool
+        return instr(_cfg(name))(fn)
+    return decorator
 
 
 mcp = FastMCP(
@@ -163,13 +168,13 @@ mcp = FastMCP(
 
 @mcp.tool(name="healthz.v1")
 @_instrument("healthz.v1")
-def healthz() -> dict:
+async def healthz() -> dict:
     return {"ok": True}
 
 
 @mcp.tool(name="sources.context.set.v1")
 @_instrument("sources.context.set.v1")
-def sources_context_set(corr_id: str | None = None) -> dict:
+async def sources_context_set(corr_id: str | None = None) -> dict:
     """
     Set / update the correlation id used for telemetry in this long-lived Sources MCP process.
 
@@ -185,11 +190,18 @@ def sources_context_set(corr_id: str | None = None) -> dict:
 
 @mcp.tool(name="sources.status.v1")
 @_instrument("sources.status.v1")
-def sources_status(user_id: int) -> dict:
+async def sources_status(user_id: int) -> dict:
+    import logging
+    l = logging.getLogger(__name__)
+    l.info("sources_status called for user_id=%s", user_id)
+    # Run CPU-bound/IO-bound work in a way that doesn't block the loop
+    # but for this smoke test, a simple async def is enough to rule out thread issues.
     u, err = _get_user_or_error(user_id)
     if err:
+        l.warning("user not found or error: %s", err)
         return err
 
+    l.info("user found, resolving connectors...")
     gb_walk = _find_primary_connector(u, "connected_apps_walk_data", "GameBus")
     gf_walk = _find_primary_connector(u, "connected_apps_walk_data", "Google Fit")
     gb_diab = _find_primary_connector(u, "connected_apps_diabetes_data", "GameBus")
@@ -204,12 +216,14 @@ def sources_status(user_id: int) -> dict:
             "has_token": bool(c.auth_bearer and "YOUR_" not in c.auth_bearer),
         }
 
-    return {
+    res = {
         "user_id": user_id,
         "walk": {"gamebus": _conn_state(gb_walk), "googlefit": _conn_state(gf_walk)},
         "diabetes": {"gamebus": _conn_state(gb_diab)},
         "note": "Checks local config only; does not validate tokens upstream.",
     }
+    l.info("sources_status returning result")
+    return res
 
 
 

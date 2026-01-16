@@ -5,17 +5,16 @@ import inspect
 from typing import Callable, TypeVar, ParamSpec
 from mcp.server.fastmcp import FastMCP
 
-from .governor import HDTGovernor
-from .policy.engine import apply_policy, apply_policy_safe, policy_last_meta
+from hdt_mcp.governor import HDTGovernor
+from hdt_mcp.policy.engine import apply_policy, apply_policy_safe, policy_last_meta, explain_policy
 from hdt_common.tooling import (
     InstrumentConfig,
     PolicyConfig,
     instrument_async_tool,
     instrument_sync_tool,
 )
-from hdt_common.telemetry import telemetry_recent
+from hdt_common.telemetry import telemetry_recent, telemetry_query
 from hdt_config.settings import init_runtime
-from hdt_mcp.policy.engine import explain_policy
 
 
 logger = logging.getLogger(__name__)
@@ -64,12 +63,13 @@ def hdt_tool(name: str, *, sync: bool = False, instrument: bool = True):
         if instrument:
             wrapped = instrument_sync_tool(_cfg(name))(wrapped) if sync else _instrument(name)(wrapped)
 
-        # Defensive: keep signature even if wrappers change
-        registered = mcp.tool(name=name)(wrapped)
+        # Ensure signature is set BEFORE registering with FastMCP
         try:
-            registered.__signature__ = sig  # type: ignore[attr-defined]
+            wrapped.__signature__ = sig  # type: ignore[attr-defined]
         except Exception:
             pass
+
+        registered = mcp.tool(name=name)(wrapped)
         return registered
 
     return decorator
@@ -191,6 +191,38 @@ async def hdt_policy_explain(tool: str, purpose: str = "analytics") -> dict:
 @hdt_tool("hdt.telemetry.recent.v1")
 async def hdt_telemetry_recent(n: int = 50, purpose: str = "analytics") -> dict:
     return telemetry_recent(n=n)
+
+@hdt_tool("hdt.telemetry.query.v1")
+async def hdt_telemetry_query(
+    n: int = 50,
+    lookback_s: int | None = 3600,
+    client_id: str | None = None,
+    tool: str | None = None,
+    tool_prefix: str | None = None,
+    event_purpose: str | None = None,
+    ok: bool | None = None,
+    error_code: str | None = None,
+    subject_hash: str | None = None,
+    purpose: str = "analytics",
+) -> dict:
+    """Filtered telemetry query (bounded).
+
+    Use this for monitoring/guardian agents without requiring direct file access.
+
+    The tool uses telemetry records that are already redacted on write.
+    """
+    return telemetry_query(
+        n=n,
+        lookback_s=lookback_s,
+        client_id=client_id,
+        tool=tool,
+        tool_prefix=tool_prefix,
+        purpose=event_purpose,
+        ok=ok,
+        error_code=error_code,
+        subject_hash=subject_hash,
+    )
+
 
 
 def main() -> None:

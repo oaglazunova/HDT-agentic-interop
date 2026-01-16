@@ -63,10 +63,21 @@ async def demo_mcp() -> bool:
     user_id = int(os.getenv("HDT_SMOKE_USER_ID", "1"))
     purpose = os.getenv("HDT_SMOKE_PURPOSE", "analytics")
 
-    print(f"[smoke] Repo root: {_REPO_ROOT}")
-    print(f"[smoke] Gateway module: {gateway_module}")
-    print(f"[smoke] Python: {python_cmd}")
-    print(f"[smoke] user_id={user_id}, purpose={purpose}")
+    # In CI, stdout can be fully buffered; force flushing for progressive logs.
+    print(f"[smoke] Repo root: {_REPO_ROOT}", flush=True)
+    print(f"[smoke] Gateway module: {gateway_module}", flush=True)
+    print(f"[smoke] Python: {python_cmd}", flush=True)
+    print(f"[smoke] user_id={user_id}, purpose={purpose}", flush=True)
+
+    # Defensive timeouts: if the underlying transport stalls, we fail fast
+    # instead of waiting for the GitHub Actions step timeout.
+    call_timeout_s = float(os.getenv("HDT_SMOKE_CALL_TIMEOUT_S", "30"))
+
+    async def _list_tools(session: ClientSession):
+        return await asyncio.wait_for(session.list_tools(), timeout=call_timeout_s)
+
+    async def _call(session: ClientSession, name: str, args: dict):
+        return await asyncio.wait_for(session.call_tool(name, args), timeout=call_timeout_s)
 
     server = StdioServerParameters(
         command=python_cmd,
@@ -83,43 +94,44 @@ async def demo_mcp() -> bool:
     try:
         async with stdio_client(server) as (read, write):
             async with ClientSession(read, write) as session:
-                await session.initialize()
+                await asyncio.wait_for(session.initialize(), timeout=call_timeout_s)
 
-                tools = await session.list_tools()
+                tools = await _list_tools(session)
                 names = [t.name for t in tools.tools]
-                print("\n[smoke] TOOLS:")
+                print("\n[smoke] TOOLS:", flush=True)
                 for n in names:
-                    print(f" - {n}")
+                    print(f" - {n}", flush=True)
 
                 # Gateway health check
                 try:
-                    res = await session.call_tool("hdt.healthz.v1", {})
+                    res = await _call(session, "hdt.healthz.v1", {})
                     out = _unwrap_tool_result(res)
-                    print("\n[smoke] CALL hdt.healthz.v1:")
-                    print(_pretty(out))
+                    print("\n[smoke] CALL hdt.healthz.v1:", flush=True)
+                    print(_pretty(out), flush=True)
 
                     if isinstance(out, str):
                         out_obj = json.loads(out) if out.strip().startswith("{") else {"text": out}
                     else:
                         out_obj = out
                     if not (isinstance(out_obj, dict) and out_obj.get("ok") is True):
-                        print("[smoke] WARN: hdt.healthz.v1 did not return {'ok': True}")
+                        print("[smoke] WARN: hdt.healthz.v1 did not return {'ok': True}", flush=True)
                         ok = False
                 except Exception as e:
-                    print(f"[smoke] ERROR: hdt.healthz.v1 failed: {e}")
+                    print(f"[smoke] ERROR: hdt.healthz.v1 failed: {e}", flush=True)
                     return False
 
                 # Sources status (recommended)
                 try:
-                    res = await session.call_tool(
+                    res = await _call(
+                        session,
                         "hdt.sources.status.v1",
                         {"user_id": user_id, "purpose": purpose},
                     )
                     out = _unwrap_tool_result(res)
-                    print(f"\n[smoke] CALL hdt.sources.status.v1(user_id={user_id}):")
-                    print(_pretty(out))
+                    print(f"\n[smoke] CALL hdt.sources.status.v1(user_id={user_id}):", flush=True)
+                    print(_pretty(out), flush=True)
                 except Exception as e:
-                    print(f"[smoke] WARN: hdt.sources.status.v1 failed: {e}")
+                    print(f"[smoke] WARN: hdt.sources.status.v1 failed: {e}", flush=True)
                     ok = False
 
     except BaseExceptionGroup as eg:  # Python 3.11+

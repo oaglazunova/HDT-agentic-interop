@@ -5,7 +5,7 @@ from typing import Any, Dict, Optional
 import os
 import time
 
-from .sources_mcp_client import SourcesMCPClient
+from hdt_mcp.sources_mcp_client import SourcesMCPClient
 from hdt_common.telemetry import log_event
 from hdt_common.context import get_request_id
 from hdt_common.errors import typed_error
@@ -58,12 +58,16 @@ def _shape_for_purpose(payload: dict, purpose: str) -> dict:
 
 
 def _as_json(obj: Any) -> Any:
-    """Parse JSON text responses coming from MCP content."""
+    """Parse JSON text responses coming from MCP content (best-effort)."""
     if isinstance(obj, str):
         s = obj.strip()
-        if s.startswith("{") or s.startswith("["):
-            return json.loads(s)
+        if s and s[0] in "{[":
+            try:
+                return json.loads(s)
+            except Exception:
+                return obj
     return obj
+
 
 def _vault_try_read_walk(
     *,
@@ -544,5 +548,3 @@ class HDTGovernor:
                 client_id=cid,
                 corr_id=get_request_id(),
             )
-
-
