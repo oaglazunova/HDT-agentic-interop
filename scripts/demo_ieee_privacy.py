@@ -98,8 +98,9 @@ async def main() -> None:
                 print("\nTOOLS (excerpt):")
                 tools = await session.list_tools()
                 for t in tools.tools:
-                    if t.name.startswith("hdt.walk") or t.name.startswith("hdt.policy") or t.name.startswith("hdt.telemetry"):
-                        print(f"- {t.name}")
+                    # if t.name.startswith("hdt.walk") or t.name.startswith("hdt.policy") or t.name.startswith("hdt.telemetry"):
+                    print(f"- {t.name}")
+                    # print(_pretty(t.inputSchema))
 
                 # 1) Deny-fast: modeling on raw fetch
                 print("\n1) Deny-fast: modeling + hdt.walk.fetch.v1")

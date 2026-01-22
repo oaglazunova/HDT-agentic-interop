@@ -126,7 +126,7 @@ $env:MCP_CLIENT_ID="TRANSPARENCY_AGENT"
 $env:HDT_TELEMETRY_SUBJECT_SALT="demo-salt"
 $env:HDT_VAULT_ENABLE="1"
 $env:HDT_VAULT_PATH="artifacts/vault/hdt_vault_ieee_demo.sqlite"
-python -u scripts/<YOUR_TRANSPARENCY_AGENT_SCRIPT>.py
+python -u scripts/demo_transparency_what_hdt_knows.py
 ```
 
 Git Bash / macOS / Linux:
@@ -136,7 +136,7 @@ export MCP_CLIENT_ID="TRANSPARENCY_AGENT"
 export HDT_TELEMETRY_SUBJECT_SALT="demo-salt"
 export HDT_VAULT_ENABLE="1"
 export HDT_VAULT_PATH="artifacts/vault/hdt_vault_ieee_demo.sqlite"
-python -u scripts/<YOUR_TRANSPARENCY_AGENT_SCRIPT>.py
+python -u scripts/demo_transparency_what_hdt_knows.py
 ```
 
 ### Expected output (high level)

@@ -146,7 +146,7 @@ async def hdt_walk_fetch(
 
 
 @hdt_tool("hdt.trivia.fetch.v1")
-@delegate_to_gov("fetch_trivia")
+@delegate_to_gov("fetch_trivia") #
 async def hdt_trivia_fetch(
     user_id: int,
     start_date: str | None = None,
