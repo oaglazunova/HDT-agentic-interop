@@ -1,0 +1,2 @@
+# when start persisting plans / comparing runs / preparing paper artifacts:
+# TODO: Implement plan normalization: sort required_columns, stable ordering of record_mapping keys when writing, remove null/empty optional fields. Optional: normalize numeric representations (e.g., 100 vs 100.0) if it matters for diffs/hashes, produce a deterministic canonical JSON representation for artifacts (and potentially for plan hashing later)

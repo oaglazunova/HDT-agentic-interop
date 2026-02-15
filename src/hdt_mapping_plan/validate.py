@@ -4,11 +4,12 @@
 # That’s not wrong, but can be annoying. If that becomes an issue, the next deterministic refinement is:
 # normalize schema before hashing (drop description, maybe drop title, keep structural keywords)
 
-# TODO: Make sure contract_hash format matches the schema: must be 64 hex chars only. If any code returns sha256:<hex>, fix it.
-# TODO: Plumb real dataset_column_types from the vault catalog generator. Now we can pass them manually in tests. The host runner will need to pass both: dataset_columns & dataset_column_types
-# TODO: Decide strictness for “unknown” typing: now unknown types usually become warnings or “compatible”. Decide if some cases should be hard errors (e.g., contract expects date but inference unknown).
-# TODO: Report size caps: cap total errors/warnings (e.g., 50) so repair prompts don’t explode; optionally group by code.
+# TODO: Typing strictness policy: decide strictness for “unknown” typing. Now unknown types usually become warnings or “compatible”. Decide if some cases should be hard errors (e.g., contract expects date but inference unknown).
+# TODO: Critic payload control: cap total errors/warnings (e.g., 50) so repair prompts don’t explode; optionally group by code.
+
 # TODO: Normalization / canonicalization (normalize.py): sort required_columns; stable ordering for record_mapping keys when writing files; remove null/empty optional fields. Yields stable diffs and stable hashes if we later hash the plan.
+
+# only when real provider schemas force it:
 # TODO: Better contract schema traversal: current pointer/type extraction is MVP (properties + allOf + local refs). Extend to handle more patterns if provider schemas use them (anyOf/oneOf more robustly, nested refs, etc.).
 
 from __future__ import annotations
@@ -18,10 +19,11 @@ from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
 from importlib import resources
 from jsonschema import Draft202012Validator
-import hashlib
 import re
 
 from hdt_mapping_plan import errors as E
+from hdt_mapping_plan.hashing import sha256_hex_of_json
+from hdt_mapping_plan.vault_catalog import get_dataset_schema  # ok to import; no file I/O
 
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -284,17 +286,6 @@ def _contract_pointer_exists(contract_input_schema: Mapping[str, Any], ptr: str)
             return False
         node = nxt
     return True
-
-
-def _canonical_json_bytes(obj: Any) -> bytes:
-    """
-    Deterministic JSON serialization:
-      - sorted keys
-      - no insignificant whitespace
-      - UTF-8
-    """
-    s = json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    return s.encode("utf-8")
 
 
 def _normalize_dataset_type(t: str) -> str:
@@ -1261,8 +1252,7 @@ def compute_contract_schema_hash(schema_obj: Mapping[str, Any]) -> str:
     Compute a stable hash for a provider schema.
     Output format: 64 hex chars (SHA-256 of canonical JSON serialization).
     """
-    h = hashlib.sha256(_canonical_json_bytes(schema_obj)).hexdigest()
-    return h  # <- 64 hex chars, matches your schema
+    return sha256_hex_of_json(schema_obj)
 
 
 def validate_plan_contract_hash(
@@ -1318,16 +1308,17 @@ def validate_plan_contract_hash(
             warnings=[],
         )
 
-    actual = compute_contract_schema_hash(contract_input_schema)
+    plan_hash = contract.get("contract_hash")
+    computed_hash = compute_contract_schema_hash(contract_input_schema)
 
-    if expected != actual:
+    if plan_hash != computed_hash:
         return CriticReport(
             ok=False,
             errors=[
                 CriticIssue(
                     code=E.CONTRACT_HASH_MISMATCH,
                     path="/contract/contract_hash",
-                    detail=f"contract_hash mismatch: expected {expected}, computed {actual}",
+                    detail=f"contract_hash mismatch: plan has {plan_hash}, computed {computed_hash}",
                     severity="error",
                     hint="Update the plan to match the provider schema used, or fetch the correct schema version.",
                 )
@@ -1443,6 +1434,25 @@ def merge_reports(reports: list[CriticReport]) -> CriticReport:
     return CriticReport(ok=(len(errors_sorted) == 0), errors=errors_sorted, warnings=warnings_sorted)
 
 
+def resolve_dataset_schema_from_catalog(
+    plan: Mapping[str, Any],
+    *,
+    vault_catalog: Mapping[str, Any],
+) -> tuple[set[str], Mapping[str, str]]:
+    ds = plan.get("dataset") or {}
+    if not isinstance(ds, dict):
+        raise ValueError("plan.dataset missing or invalid")
+
+    dataset_id = ds.get("dataset_id")
+    table_name = ds.get("table_name")
+    if not isinstance(dataset_id, str) or not dataset_id:
+        raise ValueError("plan.dataset.dataset_id missing/invalid")
+    if not isinstance(table_name, str) or not table_name:
+        raise ValueError("plan.dataset.table_name missing/invalid")
+
+    return get_dataset_schema(vault_catalog, dataset_id=dataset_id, table_name=table_name)
+
+
 def validate_plan(
     plan: dict[str, Any],
     *,
@@ -1450,6 +1460,7 @@ def validate_plan(
     dataset_column_types: Mapping[str, str] | None = None,
     allowed_ops_profile: Mapping[str, Any] | None = None,
     contract_input_schema: Mapping[str, Any] | None = None,
+    vault_catalog: Mapping[str, Any] | None = None,
 ) -> CriticReport:
     reports: list[CriticReport] = []
 
@@ -1459,6 +1470,32 @@ def validate_plan(
     if not s1.ok:
         # Cannot safely run further validators if shape is wrong.
         return merge_reports(reports)
+
+    # Optional: resolve dataset schema from vault catalog (no file I/O here)
+    if vault_catalog is not None and (dataset_columns is None or dataset_column_types is None):
+        try:
+            cols, types = resolve_dataset_schema_from_catalog(plan, vault_catalog=vault_catalog)
+            if dataset_columns is None:
+                dataset_columns = cols
+            if dataset_column_types is None:
+                dataset_column_types = types
+        except Exception as ex:
+            # Keep deterministic: surface as an error so caller knows why column safety couldn't run
+            reports.append(
+                CriticReport(
+                    ok=False,
+                    errors=[
+                        CriticIssue(
+                            code=E.DATASET_SCHEMA_MISSING,
+                            path="/dataset",
+                            detail=f"failed to resolve dataset schema from vault_catalog: {ex}",
+                            severity="error",
+                            hint="Pass correct vault_catalog for plan.dataset.dataset_id/table_name, or pass dataset_columns/types directly.",
+                        )
+                    ],
+                    warnings=[],
+                )
+            )
 
     # S2: semantic checks (column safety, op allowlist, budgets, row_filter typing, output confinement, grouping checks)
     s2 = validate_plan_semantics(
@@ -1486,4 +1523,32 @@ def validate_plan(
     reports.append(s_types)
 
     return merge_reports(reports)
+
+
+def validate_and_lint_plan(
+    plan: dict[str, Any],
+    *,
+    dataset_columns: set[str] | None = None,
+    dataset_column_types: Mapping[str, str] | None = None,
+    allowed_ops_profile: Mapping[str, Any] | None = None,
+    contract_input_schema: Mapping[str, Any] | None = None,
+    vault_catalog: Mapping[str, Any] | None = None,
+) -> CriticReport:
+    rep_validate = validate_plan(
+        plan,
+        dataset_columns=dataset_columns,
+        dataset_column_types=dataset_column_types,
+        allowed_ops_profile=allowed_ops_profile,
+        contract_input_schema=contract_input_schema,
+        vault_catalog=vault_catalog,
+    )
+
+    rep_lint = CriticReport(ok=True, errors=[], warnings=[])
+
+    # Only lint if schema passed; otherwise linter assumptions may be noisy.
+    if validate_plan_schema(plan).ok:
+        from hdt_mapping_plan.lint import lint_plan  # local import avoids circular import
+        rep_lint = lint_plan(plan, profile=allowed_ops_profile)
+
+    return merge_reports([rep_validate, rep_lint])
 
