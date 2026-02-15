@@ -1,0 +1,23 @@
+Your MappingPlan validator works like a gatekeeper + auditor for plans that an LLM may propose. It doesn’t “judge intent” or do anything probabilistic; it applies a fixed set of rules and produces a stable, machine-readable report. That’s deliberate: it makes the plan safe to execute later (including inside a TEE/enclave) and it makes LLM repair loops predictable.
+
+Here’s how it works, in simple terms.
+
+First, it checks the plan’s shape. The validator loads your mapping-plan.schema.json and runs JSON Schema validation. This is the “is this even a MappingPlan?” step: required fields must exist, types must be correct, and unknown fields are rejected. If the shape is wrong, validation stops there, because later checks can’t reliably interpret the data.
+
+If the shape is correct, it checks meaning in a deterministic way. The plan is supposed to tell an enclave “read only these columns, compute these expressions, and write results here.” So the validator enforces that:
+
+Every column the plan refers to actually exists in the dataset you say you’ll read from.
+
+Every referenced column is also listed in required_columns, so the plan cannot “accidentally” use extra data; that’s your minimization control.
+
+Every expression and filter uses only operations you permit. If you don’t provide an ops profile yet, it defaults to what the schema itself allows, so behavior can’t silently drift.
+
+Next, it enforces complexity limits. Even if a plan is technically valid, you don’t want giant or deeply nested expressions, because they’re harder to audit and increase the attack/exfiltration surface. So you cap things like number of mapped fields, maximum nesting depth, total expression node count, and maximum arguments per op. This is a practical security and reliability measure: it prevents “clever” LLM-generated plans from becoming unreviewable.
+
+Then it checks contract correctness. The plan’s record_mapping keys are JSON Pointer-like paths into the provider’s expected input object. The validator loads the provider input schema (the same schema used during negotiation) and verifies that every mapping target actually exists in that schema. On top of that, the plan includes contract_hash, and the validator recomputes the hash of the fetched input schema and requires it to match. This is how you prevent subtle version mismatches: a plan negotiated against schema v1 cannot be executed against schema v2 without being caught.
+
+After that, it enforces type correctness. The validator infers the type of each mapping expression bottom-up from the dataset column types and the semantics of your DSL ops (cast, parse_date, lower, round, etc.). It also derives what type the contract expects at the target pointer (string vs number vs date/datetime). If those don’t match, it errors. Similarly, it checks row_filter not just for allowed ops but for actual logical correctness: comparisons must compare compatible types, boolean ops must combine boolean expressions, and arity must be correct. This prevents plans that are “valid JSON” but meaningless at runtime.
+
+Finally, it enforces output confinement. Even if everything else is correct, a plan could try to write results to an external location. So you restrict output destinations to a vault-only namespace (e.g., vault://...) and reject external schemes, absolute paths, and traversal patterns. This closes a major exfil path.
+
+All of these checks produce a stable critic report: a list of error/warning objects with codes and JSON-pointer paths. Importantly, after the schema gate passes, the validator doesn’t stop at the first error—it runs all safe checks and merges results into one report. That’s why it’s designed this way: the report becomes actionable feedback for a repair loop (“fix exactly these fields”), it’s reproducible in tests, it’s cheap to run, and it’s enforceable inside a trusted execution environment later. In other words, the LLM can propose plans, but only this deterministic validator decides whether a plan is acceptable to execute.

@@ -1,0 +1,13 @@
+{
+  "expr_ops": ["column", "const", "cast", "parse_date", "parse_datetime", "scale", "round", "lower", "upper", "coalesce", "to_string"],
+  "filter_ops": ["and", "or", "not", "eq", "neq", "lt", "lte", "gt", "gte", "is_null", "not_null"],
+  "limits": {
+    "max_record_mappings": 200,
+    "max_expr_depth": 12,
+    "max_expr_nodes_per_mapping": 80,
+    "max_total_expr_nodes": 800,
+    "max_filter_depth": 8,
+    "max_filter_nodes": 80,
+    "max_args": 6
+  }
+}

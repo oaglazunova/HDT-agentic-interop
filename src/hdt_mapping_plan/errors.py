@@ -1,0 +1,50 @@
+from __future__ import annotations
+
+from typing import Final
+
+# Machine-readable error codes for deterministic MappingPlan validation.
+# Keep these stable: they are part of the "critic report" contract used in the
+# LLM repair loop and later inside the enclave execution environment.
+
+# Structural validation
+SCHEMA_INVALID: Final[str] = "SCHEMA_INVALID"
+
+# Semantic validation
+DATASET_SCHEMA_MISSING: Final[str] = "DATASET_SCHEMA_MISSING"
+UNKNOWN_COLUMN: Final[str] = "UNKNOWN_COLUMN"
+COLUMN_NOT_DECLARED: Final[str] = "COLUMN_NOT_DECLARED"
+OP_NOT_ALLOWED: Final[str] = "OP_NOT_ALLOWED"
+FILTER_OP_NOT_ALLOWED: Final[str] = "FILTER_OP_NOT_ALLOWED"
+
+# Complexity / budgets
+TOO_MANY_RECORD_MAPPINGS: Final[str] = "TOO_MANY_RECORD_MAPPINGS"
+MAX_DEPTH_EXCEEDED: Final[str] = "MAX_DEPTH_EXCEEDED"
+MAX_NODES_EXCEEDED: Final[str] = "MAX_NODES_EXCEEDED"
+MAX_ARGS_EXCEEDED: Final[str] = "MAX_ARGS_EXCEEDED"
+
+# Contract pointers validation
+CONTRACT_SCHEMA_MISSING = "CONTRACT_SCHEMA_MISSING"
+CONTRACT_POINTER_INVALID = "CONTRACT_POINTER_INVALID"
+UNKNOWN_CONTRACT_FIELD = "UNKNOWN_CONTRACT_FIELD"
+
+# Contract hash integrity
+CONTRACT_HASH_MISSING = "CONTRACT_HASH_MISSING"
+CONTRACT_HASH_MISMATCH = "CONTRACT_HASH_MISMATCH"
+
+# Record mapping validation
+TYPE_INFO_MISSING = "TYPE_INFO_MISSING"
+TYPE_INFERENCE_FAILED = "TYPE_INFERENCE_FAILED"
+TYPE_MISMATCH = "TYPE_MISMATCH"
+UNSUPPORTED_CONTRACT_TYPE = "UNSUPPORTED_CONTRACT_TYPE"
+
+# Argument validation
+ARITY_MISMATCH = "ARITY_MISMATCH"
+ARG_TYPE_MISMATCH = "ARG_TYPE_MISMATCH"
+
+# Output confinement validation
+OUTPUT_DEST_NOT_ALLOWED = "OUTPUT_DEST_NOT_ALLOWED"
+OUTPUT_DEST_MALFORMED = "OUTPUT_DEST_MALFORMED"
+OUTPUT_FORMAT_NOT_ALLOWED = "OUTPUT_FORMAT_NOT_ALLOWED"
+
+
+

@@ -1,0 +1,46 @@
+{
+  "plan_version": "1.0",
+  "plan_id": "plan_2026_02_09_001",
+  "algo": { "algo_id": "provider.riskScore", "algo_version": "1.2.0" },
+  "dataset": { "dataset_id": "vault_dataset_A", "table_name": "transactions" },
+  "contract": {
+    "contract_ref": "oci://harbor.local/contracts/provider.riskScore:1.2.0",
+    "input_schema_ref": "oci://harbor.local/contracts/provider.riskScore:1.2.0#input.schema.json",
+    "contract_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "limits": {
+    "max_rows": 5000000,
+    "batch_rows": 5000,
+    "max_record_bytes": 16384,
+    "max_total_output_bytes": 200000000
+  },
+  "required_columns": ["dob", "country_code", "amount_eur"],
+  "record_mapping": {
+    "/person/birthDate": {
+      "op": "cast",
+      "type": "string",
+      "args": [
+        { "op": "parse_date", "format": "%Y-%m-%d", "args": [ { "op": "column", "name": "dob" } ] }
+      ]
+    },
+    "/person/country": { "op": "column", "name": "country_code" },
+    "/metrics/amountCents": {
+      "op": "cast",
+      "type": "int64",
+      "args": [
+        {
+          "op": "round",
+          "mode": "half_even",
+          "args": [
+            { "op": "scale", "factor": 100.0, "args": [ { "op": "column", "name": "amount_eur" } ] }
+          ]
+        }
+      ]
+    }
+  },
+  "output": {
+    "destination": "vault://results/provider.riskScore/job_${JOB_ID}.jsonl",
+    "format": "jsonl",
+    "result_schema_ref": "oci://harbor.local/contracts/provider.riskScore:1.2.0#output.schema.json"
+  }
+}

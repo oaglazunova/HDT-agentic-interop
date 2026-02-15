@@ -16,6 +16,7 @@ dependencies = [
   "requests>=2.31",
   "python-dotenv>=1.0",
   "mcp>=1.24,<2",
+  "jsonschema>=4.22",
 ]
 
 [project.optional-dependencies]
@@ -59,7 +60,11 @@ include = [
   "hdt_sources_mcp*",
   "hdt_config*",
   "hdt_common*",
+  "hdt_mapping_plan*",
 ]
+
+[tool.setuptools.package-data]
+hdt_mapping_plan = ["schema/*.json", "examples/*.json"]
 
 exclude = [
   "data*",
