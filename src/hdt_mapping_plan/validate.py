@@ -4,10 +4,6 @@
 # That’s not wrong, but can be annoying. If that becomes an issue, the next deterministic refinement is:
 # normalize schema before hashing (drop description, maybe drop title, keep structural keywords)
 
-# TODO: Typing strictness policy: decide strictness for “unknown” typing. Now unknown types usually become warnings or “compatible”. Decide if some cases should be hard errors (e.g., contract expects date but inference unknown).
-# TODO: Critic payload control: cap total errors/warnings (e.g., 50) so repair prompts don’t explode; optionally group by code.
-
-# TODO: Normalization / canonicalization (normalize.py): sort required_columns; stable ordering for record_mapping keys when writing files; remove null/empty optional fields. Yields stable diffs and stable hashes if we later hash the plan.
 
 # only when real provider schemas force it:
 # TODO: Better contract schema traversal: current pointer/type extraction is MVP (properties + allOf + local refs). Extend to handle more patterns if provider schemas use them (anyOf/oneOf more robustly, nested refs, etc.).
@@ -850,6 +846,44 @@ def _dedupe_issues(items: list[CriticIssue]) -> list[CriticIssue]:
     return out
 
 
+def _typing_policy(profile: Mapping[str, Any] | None) -> str:
+    """
+    Returns typing mode:
+      - "strict_dates" (default): unknown inference is error only for date/datetime expectations
+      - "permissive": unknown inference is always a warning
+      - "strict_all": unknown inference is always an error
+    """
+    if not profile:
+        return "strict_dates"
+    t = profile.get("typing")
+    if not isinstance(t, dict):
+        return "strict_dates"
+    mode = str(t.get("mode") or "strict_dates")
+    if mode not in {"strict_dates", "permissive", "strict_all"}:
+        return "strict_dates"
+    return mode
+
+
+def _critic_limits(profile: Mapping[str, Any] | None) -> tuple[int, int]:
+    """
+    Returns (max_errors, max_warnings) for CriticReport payloads.
+    Defaults: 50/50.
+    """
+    max_errors, max_warnings = 50, 50
+    if not profile:
+        return max_errors, max_warnings
+    c = profile.get("critic")
+    if not isinstance(c, dict):
+        return max_errors, max_warnings
+    me = c.get("max_errors")
+    mw = c.get("max_warnings")
+    if isinstance(me, int) and me > 0:
+        max_errors = me
+    if isinstance(mw, int) and mw > 0:
+        max_warnings = mw
+    return max_errors, max_warnings
+
+
 # === end helpers ==================================================================================
 
 def validate_plan_schema(plan: dict[str, Any]) -> CriticReport:
@@ -1334,6 +1368,7 @@ def validate_plan_type_compatibility(
     *,
     dataset_column_types: Mapping[str, str] | None,
     contract_input_schema: Mapping[str, Any] | None,
+    allowed_ops_profile: Mapping[str, Any] | None = None,
 ) -> CriticReport:
     if not contract_input_schema:
         return CriticReport(
@@ -1391,15 +1426,52 @@ def validate_plan_type_compatibility(
                 path_parts=["record_mapping", out_ptr],
             )
 
+            # if inferred == "unknown":
+            #     warnings.append(
+            #         CriticIssue(
+            #             code=E.TYPE_INFERENCE_FAILED,
+            #             path=_json_pointer_from_path(["record_mapping", out_ptr]),
+            #             detail=f"cannot infer expression type for mapping to {out_ptr}",
+            #             severity="warning",
+            #         )
+            #     )
+            #     continue
+
+            mode = _typing_policy(None)  # temporary default
+            # ...but actually pass allowed_ops_profile into validate_plan_type_compatibility:
+
+            mode = _typing_policy(allowed_ops_profile)
+
             if inferred == "unknown":
-                warnings.append(
-                    CriticIssue(
-                        code=E.TYPE_INFERENCE_FAILED,
-                        path=_json_pointer_from_path(["record_mapping", out_ptr]),
-                        detail=f"cannot infer expression type for mapping to {out_ptr}",
-                        severity="warning",
+                if mode == "strict_all":
+                    issues.append(
+                        CriticIssue(
+                            code=E.TYPE_INFERENCE_REQUIRED,
+                            path=_json_pointer_from_path(["record_mapping", out_ptr]),
+                            detail=f"cannot infer expression type, but contract expects {expected}",
+                            severity="error",
+                            hint="Provide dataset_column_types, or make the expression explicit (cast/parse_date/parse_datetime).",
+                        )
                     )
-                )
+                elif mode == "strict_dates" and expected in {"date", "datetime"}:
+                    issues.append(
+                        CriticIssue(
+                            code=E.TYPE_INFERENCE_REQUIRED,
+                            path=_json_pointer_from_path(["record_mapping", out_ptr]),
+                            detail=f"cannot infer expression type for {out_ptr}, but contract expects {expected}",
+                            severity="error",
+                            hint="Use parse_date/parse_datetime or cast to an explicit type, or pass dataset_column_types from the vault catalog.",
+                        )
+                    )
+                else:
+                    warnings.append(
+                        CriticIssue(
+                            code=E.TYPE_INFERENCE_FAILED,
+                            path=_json_pointer_from_path(["record_mapping", out_ptr]),
+                            detail=f"cannot infer expression type for mapping to {out_ptr} (expected {expected})",
+                            severity="warning",
+                        )
+                    )
                 continue
 
             if not _is_kind_compatible(inferred, expected):
@@ -1418,20 +1490,52 @@ def validate_plan_type_compatibility(
     return CriticReport(ok=(len(issues_sorted) == 0), errors=issues_sorted, warnings=warnings_sorted)
 
 
-def merge_reports(reports: list[CriticReport]) -> CriticReport:
+def merge_reports(reports: list[CriticReport], *, profile: Mapping[str, Any] | None = None) -> CriticReport:
     errors: list[CriticIssue] = []
     warnings: list[CriticIssue] = []
+
     for r in reports:
-        errors.extend(r.errors or [])
-        warnings.extend(r.warnings or [])
+        if r.errors:
+            errors.extend(r.errors)
+        if r.warnings:
+            warnings.extend(r.warnings)
 
     errors = _dedupe_issues(errors)
     warnings = _dedupe_issues(warnings)
 
-    errors_sorted = sorted(errors, key=lambda e: (e.path, e.code, e.detail, e.severity, e.hint or ""))
-    warnings_sorted = sorted(warnings, key=lambda e: (e.path, e.code, e.detail, e.severity, e.hint or ""))
+    # Deterministic order so diffs/prompts are stable
+    errors_sorted = sorted(
+        errors,
+        key=lambda e: (e.path, e.code, e.detail, e.severity, e.hint or ""),
+    )
+    warnings_sorted = sorted(
+        warnings,
+        key=lambda e: (e.path, e.code, e.detail, e.severity, e.hint or ""),
+    )
+
+    max_errors, max_warnings = _critic_limits(profile)
+
+    truncated = False
+    if len(errors_sorted) > max_errors:
+        errors_sorted = errors_sorted[:max_errors]
+        truncated = True
+    if len(warnings_sorted) > max_warnings:
+        warnings_sorted = warnings_sorted[:max_warnings]
+        truncated = True
+
+    if truncated:
+        warnings_sorted.append(
+            CriticIssue(
+                code=E.REPORT_TRUNCATED,
+                path="",
+                detail=f"critic report truncated to max_errors={max_errors}, max_warnings={max_warnings}",
+                severity="warning",
+                hint="Fix issues iteratively; increase critic.max_errors/max_warnings in profile if needed.",
+            )
+        )
 
     return CriticReport(ok=(len(errors_sorted) == 0), errors=errors_sorted, warnings=warnings_sorted)
+
 
 
 def resolve_dataset_schema_from_catalog(
@@ -1519,10 +1623,11 @@ def validate_plan(
         plan,
         dataset_column_types=dataset_column_types,
         contract_input_schema=contract_input_schema,
+        allowed_ops_profile=allowed_ops_profile,
     )
     reports.append(s_types)
 
-    return merge_reports(reports)
+    return merge_reports(reports, profile=allowed_ops_profile)
 
 
 def validate_and_lint_plan(
@@ -1550,5 +1655,6 @@ def validate_and_lint_plan(
         from hdt_mapping_plan.lint import lint_plan  # local import avoids circular import
         rep_lint = lint_plan(plan, profile=allowed_ops_profile)
 
-    return merge_reports([rep_validate, rep_lint])
+    return merge_reports([rep_validate, rep_lint], profile=allowed_ops_profile)
+
 
