@@ -18,6 +18,8 @@ dependencies = [
   "mcp>=1.24,<2",
   "jsonschema>=4.22",
   "httpx>=0.27",
+  "a2a-sdk[http-server]>=0.3.0",
+  "uvicorn>=0.27",
 ]
 
 [project.optional-dependencies]
@@ -62,10 +64,13 @@ include = [
   "hdt_config*",
   "hdt_common*",
   "hdt_mapping_plan*",
+  "hdt_a2a*",
+  "hdt_provider_a2a*",
 ]
 
 [tool.setuptools.package-data]
 hdt_mapping_plan = ["schema/*.json", "examples/*.json"]
+hdt_provider_a2a = ["contracts/*/*/*.json"]
 
 exclude = [
   "data*",

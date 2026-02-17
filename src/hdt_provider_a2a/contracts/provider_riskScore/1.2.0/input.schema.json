@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "properties": {
+    "person": {
+      "type": "object",
+      "properties": {
+        "birthDate": { "type": "string" }
+      }
+    }
+  }
+}
