@@ -5,7 +5,7 @@ from typing import Any, Mapping
 from hdt_a2a.llm.ollama_client import OllamaClient, OllamaConfig
 from hdt_a2a.llm.plan_synthesis import build_base_messages
 from hdt_a2a.llm.repair import repair_mapping_plan_candidate
-from hdt_mapping_plan.validate import CriticIssue, CriticReport
+from hdt_mapping_plan.validate import CriticIssue, CriticReport, compute_contract_schema_hash
 from hdt_mapping_plan import errors as E
 
 
@@ -54,11 +54,18 @@ def test_repair_appends_repair_message() -> None:
         ]
     }
 
+    expected_hash = compute_contract_schema_hash(contract_input_schema)
+
     base_messages = build_base_messages(
         contract=contract,
         contract_input_schema=contract_input_schema,
         vault_catalog=vault_catalog,
         allowed_ops_profile=None,
+        expected_contract_hash=expected_hash,
+        dataset_id="vault_dataset_A",
+        table_name="transactions",
+        dataset_columns={"dob"},
+        dataset_column_types={"dob": "date"},
     )
 
     prev_plan = {

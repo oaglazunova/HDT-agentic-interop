@@ -2,19 +2,17 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
-import pytest
-
 from hdt_a2a.llm.plan_synthesis import generate_mapping_plan_candidate
 from hdt_a2a.llm.ollama_client import OllamaClient, OllamaConfig
+from hdt_mapping_plan.validate import compute_contract_schema_hash
 
 
 class FakeOllama(OllamaClient):
-    def __init__(self) -> None:
+    def __init__(self, *, contract_hash: str) -> None:
         super().__init__(OllamaConfig(model="dummy"))
+        self.contract_hash = contract_hash
 
     def chat_json(self, messages, *, json_schema: Mapping[str, Any]) -> dict[str, Any]:
-        # Return a minimal plan matching your schema.
-        # Keep it consistent with your example schema requirements.
         return {
             "plan_version": "1.0",
             "plan_id": "plan_test_0001",
@@ -23,14 +21,9 @@ class FakeOllama(OllamaClient):
             "contract": {
                 "contract_ref": "oci://x/contracts/provider.riskScore:1.2.0",
                 "input_schema_ref": "oci://x/contracts/provider.riskScore:1.2.0#input.schema.json",
-                "contract_hash": "a" * 64,
+                "contract_hash": self.contract_hash,
             },
-            "limits": {
-                "max_rows": 10,
-                "batch_rows": 5,
-                "max_record_bytes": 1024,
-                "max_total_output_bytes": 4096,
-            },
+            "limits": {"max_rows": 10, "batch_rows": 5, "max_record_bytes": 1024, "max_total_output_bytes": 4096},
             "required_columns": ["dob"],
             "record_mapping": {
                 "/person/birthDate": {
@@ -48,8 +41,6 @@ class FakeOllama(OllamaClient):
 
 
 def test_generate_mapping_plan_candidate_smoke() -> None:
-    client = FakeOllama()
-
     contract = {"algo_id": "provider.riskScore", "algo_version": "1.2.0"}
     contract_input_schema = {
         "type": "object",
@@ -57,14 +48,13 @@ def test_generate_mapping_plan_candidate_smoke() -> None:
     }
     vault_catalog = {
         "datasets": [
-            {
-                "dataset_id": "vault_dataset_A",
-                "tables": [
-                    {"table_name": "transactions", "columns": [{"name": "dob", "type": "date"}]},
-                ],
-            }
+            {"dataset_id": "vault_dataset_A",
+             "tables": [{"table_name": "transactions", "columns": [{"name": "dob", "type": "date"}]}]},
         ]
     }
+
+    expected_hash = compute_contract_schema_hash(contract_input_schema)
+    client = FakeOllama(contract_hash=expected_hash)
 
     plan = generate_mapping_plan_candidate(
         client=client,
@@ -73,5 +63,7 @@ def test_generate_mapping_plan_candidate_smoke() -> None:
         vault_catalog=vault_catalog,
         allowed_ops_profile=None,
     )
+
     assert plan["plan_version"] == "1.0"
     assert "record_mapping" in plan
+    assert plan["contract"]["contract_hash"] == expected_hash

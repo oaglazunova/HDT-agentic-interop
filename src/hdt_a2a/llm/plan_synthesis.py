@@ -2,10 +2,39 @@ from __future__ import annotations
 
 import json
 from importlib import resources
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
-from hdt_a2a.llm.ollama_client import OllamaClient
-from hdt_a2a.llm.prompts import build_messages
+from hdt_mapping_plan.validate import compute_contract_schema_hash
+
+
+def _extract_dataset_schema(
+    vault_catalog: Mapping[str, Any],
+    dataset_id: str,
+    table_name: str,
+) -> tuple[set[str], dict[str, str]]:
+    cols: set[str] = set()
+    types: dict[str, str] = {}
+
+    for ds in vault_catalog.get("datasets", []) or []:
+        if not isinstance(ds, dict) or ds.get("dataset_id") != dataset_id:
+            continue
+        for tbl in ds.get("tables", []) or []:
+            if not isinstance(tbl, dict) or tbl.get("table_name") != table_name:
+                continue
+            for c in tbl.get("columns", []) or []:
+                if not isinstance(c, dict):
+                    continue
+                name = str(c.get("name") or "")
+                if not name:
+                    continue
+                cols.add(name)
+                t = c.get("type")
+                if isinstance(t, str) and t:
+                    types[name] = t
+            return cols, types
+
+    return cols, types
+
 
 
 def load_mapping_plan_schema() -> dict[str, Any]:
@@ -19,35 +48,145 @@ def build_base_messages(
     contract: Mapping[str, Any],
     contract_input_schema: Mapping[str, Any],
     vault_catalog: Mapping[str, Any],
-    allowed_ops_profile: Mapping[str, Any] | None = None,
+    allowed_ops_profile: Mapping[str, Any] | None,
+    expected_contract_hash: str,
+    dataset_id: str,
+    table_name: str,
+    dataset_columns: set[str] | None = None,
+    dataset_column_types: Mapping[str, str] | None = None,
 ) -> list[dict[str, str]]:
-    return build_messages(
-        contract=contract,
-        contract_input_schema=contract_input_schema,
-        vault_catalog=vault_catalog,
-        allowed_ops_profile=allowed_ops_profile,
-    )
+
+    # If caller didn't provide schema details for the selected dataset/table, extract them
+    # from the vault catalog.
+    if dataset_columns is None or dataset_column_types is None:
+        extracted_cols, extracted_types = _extract_dataset_schema(
+            vault_catalog=vault_catalog,
+            dataset_id=dataset_id,
+            table_name=table_name,
+        )
+        if dataset_columns is None:
+            dataset_columns = extracted_cols
+        if dataset_column_types is None:
+            dataset_column_types = extracted_types
+
+    cols = sorted(dataset_columns or [])
+    types = {k: dataset_column_types[k] for k in sorted(dataset_column_types or {})}
+
+    return [
+        {
+            "role": "system",
+            "content": (
+                "You output ONLY a single JSON object. No markdown, no comments, no extra keys. "
+                "All expressions in record_mapping MUST be objects like "
+                '{"op":"column","name":"dob"} (never strings like ${dob}).'
+            ),
+        },
+        {
+            "role": "user",
+            "content": json.dumps(
+                {
+                    "task": "Create a Mapping Plan JSON that will pass deterministic validation.",
+                    "immutables": {
+                        "plan_version": "1.0",
+                        "algo": {
+                            "algo_id": contract["algo_id"],
+                            "algo_version": contract["algo_version"],
+                        },
+                        "dataset": {"dataset_id": dataset_id, "table_name": table_name},
+                        "contract": {
+                            "contract_hash": expected_contract_hash,
+                            "contract_ref": "oci://local/contracts/UNKNOWN",
+                            "input_schema_ref": "oci://local/contracts/UNKNOWN#input.schema.json",
+                        },
+                    },
+                    "dataset_columns": cols,
+                    "dataset_column_types": types,
+                    "must_include": {
+                        "required_columns": ["dob"],
+                        "record_mapping": {
+                            "/person/birthDate": {"op": "column", "name": "dob"}
+                        },
+                        "output": {
+                            "destination": "vault://results/job_${JOB_ID}.jsonl",
+                            "format": "jsonl",
+                            "result_schema_ref": "oci://local/contracts/UNKNOWN#output.schema.json",
+                        },
+                        "limits": {
+                            "max_rows": 100000,
+                            "batch_rows": 5000,
+                            "max_record_bytes": 16384,
+                            "max_total_output_bytes": 200000000,
+                        },
+                    },
+                    "rules": [
+                        "required_columns must contain every referenced column, and only those needed.",
+                        "record_mapping keys MUST be JSON Pointers like /person/birthDate.",
+                        "record_mapping values MUST be expression objects with 'op'.",
+                        f"contract.contract_hash MUST equal exactly {expected_contract_hash}.",
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+        },
+    ]
 
 
 def generate_mapping_plan_candidate(
     *,
-    client: OllamaClient,
-    contract: Mapping[str, Any],
-    contract_input_schema: Mapping[str, Any],
-    vault_catalog: Mapping[str, Any],
+    client,
+    base_messages: Sequence[Mapping[str, Any]] | None = None,
+    contract: Mapping[str, Any] | None = None,
+    contract_input_schema: Mapping[str, Any] | None = None,
+    vault_catalog: Mapping[str, Any] | None = None,
     allowed_ops_profile: Mapping[str, Any] | None = None,
+    # Optional convenience parameters (used only when base_messages is None)
+    expected_contract_hash: str | None = None,
+    dataset_id: str | None = None,
+    table_name: str | None = None,
+    dataset_columns: set[str] | None = None,
+    dataset_column_types: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
-    """
-    Calls Ollama structured output to produce a MappingPlan candidate dict.
-    No validation here; the host/validator does that.
-    """
+    if base_messages is None:
+        if contract is None or contract_input_schema is None or vault_catalog is None:
+            raise TypeError("pass base_messages OR contract+contract_input_schema+vault_catalog")
+
+        if expected_contract_hash is None:
+            expected_contract_hash = compute_contract_schema_hash(contract_input_schema)
+
+        # Infer dataset/table only if unambiguous
+        if dataset_id is None or table_name is None:
+            datasets = [ds for ds in (vault_catalog.get("datasets", []) or []) if isinstance(ds, dict)]
+            if len(datasets) != 1:
+                raise TypeError(
+                    "vault_catalog contains multiple datasets; pass dataset_id and table_name explicitly "
+                    "(or pre-build base_messages via build_base_messages)."
+                )
+            ds0 = datasets[0]
+            tables = [t for t in (ds0.get("tables", []) or []) if isinstance(t, dict)]
+            if len(tables) != 1:
+                raise TypeError(
+                    "vault_catalog contains multiple tables; pass dataset_id and table_name explicitly "
+                    "(or pre-build base_messages via build_base_messages)."
+                )
+            dataset_id = str(ds0.get("dataset_id") or "")
+            table_name = str(tables[0].get("table_name") or "")
+            if not dataset_id or not table_name:
+                raise TypeError("vault_catalog is missing dataset_id/table_name for the selected dataset/table")
+
+        base_messages = build_base_messages(
+            contract=contract,
+            contract_input_schema=contract_input_schema,
+            vault_catalog=vault_catalog,
+            allowed_ops_profile=allowed_ops_profile,
+            expected_contract_hash=expected_contract_hash,
+            dataset_id=dataset_id,
+            table_name=table_name,
+            dataset_columns=dataset_columns,
+            dataset_column_types=dataset_column_types,
+        )
+
     schema = load_mapping_plan_schema()
-    messages = build_base_messages(
-        contract=contract,
-        contract_input_schema=contract_input_schema,
-        vault_catalog=vault_catalog,
-        allowed_ops_profile=allowed_ops_profile,
-    )
+    messages = list(base_messages) + [
+        {"role": "user", "content": "Return ONE Mapping Plan JSON object only (no markdown, no commentary)."}
+    ]
     return client.chat_json(messages, json_schema=schema)
-
-
