@@ -81,3 +81,58 @@ def test_synthesize_plan_with_repairs_stops_on_ok() -> None:
     assert res.plan["plan_id"] == "good_plan"
     assert res.iterations == 2
     assert len(res.reports) == 2
+
+
+def test_loop_lifts_must_include_to_root() -> None:
+    contract = {"algo_id": "provider.riskScore", "algo_version": "1.2.0"}
+    contract_input_schema = {
+        "type": "object",
+        "properties": {"person": {"type": "object", "properties": {"birthDate": {"type": "string"}}}},
+    }
+
+    expected_hash = compute_contract_schema_hash(contract_input_schema)
+
+    class FakeOllamaMustInclude(OllamaClient):
+        def __init__(self) -> None:
+            super().__init__(OllamaConfig(model="dummy"))
+
+        def chat_json(self, messages, *, json_schema: Mapping[str, Any]) -> dict[str, Any]:
+            return {
+                "plan_version": "1.0",
+                "plan_id": "example_plan",
+                "algo": {"algo_id": "provider.riskScore", "algo_version": "1.2.0"},
+                "dataset": {"dataset_id": "vault_dataset_A", "table_name": "transactions"},
+                "contract": {
+                    "contract_ref": "oci://local/contracts/UNKNOWN",
+                    "input_schema_ref": "oci://local/contracts/UNKNOWN#input.schema.json",
+                    "contract_hash": expected_hash,
+                },
+                "must_include": {
+                    "limits": {"max_rows": 10, "batch_rows": 5, "max_record_bytes": 1024, "max_total_output_bytes": 4096},
+                    "required_columns": ["dob"],
+                    "record_mapping": {"/person/birthDate": {"op": "column", "name": "dob"}},
+                    "output": {"destination": "vault://results/x.jsonl", "format": "jsonl", "result_schema_ref": "oci://x#out"},
+                },
+                "rules": ["not allowed in schema"],
+            }
+
+    vault_catalog = {
+        "datasets": [
+            {"dataset_id": "vault_dataset_A", "tables": [{"table_name": "transactions", "columns": [{"name": "dob", "type": "date"}]}]}
+        ]
+    }
+
+    res = synthesize_plan_with_repairs(
+        client=FakeOllamaMustInclude(),
+        contract=contract,
+        contract_input_schema=contract_input_schema,
+        vault_catalog=vault_catalog,
+        dataset_columns={"dob"},
+        dataset_column_types={"dob": "date"},
+        max_iters=1,
+    )
+
+    assert res.ok is True
+    assert "must_include" not in res.plan
+    assert "rules" not in res.plan
+    assert "limits" in res.plan and "output" in res.plan and "record_mapping" in res.plan and "required_columns" in res.plan

@@ -66,6 +66,7 @@ include = [
   "hdt_mapping_plan*",
   "hdt_a2a*",
   "hdt_provider_a2a*",
+  "hdt_user_a2a*",
 ]
 
 [tool.setuptools.package-data]

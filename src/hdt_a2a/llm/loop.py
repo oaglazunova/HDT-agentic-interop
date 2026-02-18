@@ -7,6 +7,7 @@ from hdt_a2a.llm.ollama_client import OllamaClient
 from hdt_a2a.llm.plan_synthesis import build_base_messages, generate_mapping_plan_candidate
 from hdt_a2a.llm.repair import repair_mapping_plan_candidate
 from hdt_mapping_plan.validate import CriticReport, validate_and_lint_plan, compute_contract_schema_hash
+from hdt_mapping_plan.vault_catalog import get_dataset_schema
 
 _IMMUTABLE_TOP_LEVEL = ("plan_version", "algo", "dataset", "contract")
 
@@ -54,20 +55,58 @@ def _apply_immutables(
     }
     return plan
 
+
+def _infer_dataset_target(vault_catalog: Mapping[str, Any]) -> tuple[str, str]:
+    datasets = vault_catalog.get("datasets") or []
+    if not isinstance(datasets, list) or len(datasets) != 1 or not isinstance(datasets[0], dict):
+        raise ValueError("vault_catalog ambiguous: pass dataset_id and table_name explicitly")
+    ds = datasets[0]
+    dataset_id = str(ds.get("dataset_id") or "")
+    tables = ds.get("tables") or []
+    if not dataset_id or not isinstance(tables, list) or len(tables) != 1 or not isinstance(tables[0], dict):
+        raise ValueError("vault_catalog ambiguous: pass dataset_id and table_name explicitly")
+    table_name = str(tables[0].get("table_name") or "")
+    if not table_name:
+        raise ValueError("vault_catalog missing table_name")
+    return dataset_id, table_name
+
+
+def _normalize_llm_plan_shape(plan: dict[str, Any]) -> dict[str, Any]:
+    """
+    Deterministic fix-ups for common LLM output mistakes:
+    - If model wraps required keys under must_include, lift them to root.
+    - Drop helper keys that are not allowed by schema (additionalProperties=false).
+    """
+    mi = plan.get("must_include")
+    if isinstance(mi, dict):
+        for k in ("limits", "output", "record_mapping", "required_columns"):
+            if k not in plan and k in mi:
+                plan[k] = mi[k]
+        plan.pop("must_include", None)
+
+    # These are prompt scaffolding / helper keys and must not be in the final plan
+    for k in ("rules", "task", "immutables"):
+        plan.pop(k, None)
+
+    return plan
+
+
 # === emd helpers ===========================
 
 
 def synthesize_plan_with_repairs(
-    *,
-    client: OllamaClient,
-    contract: Mapping[str, Any],
-    contract_input_schema: Mapping[str, Any],
-    vault_catalog: Mapping[str, Any],
-    allowed_ops_profile: Mapping[str, Any] | None = None,
-    dataset_columns: set[str] | None = None,
-    dataset_column_types: Mapping[str, str] | None = None,
-    contract_hash_strict: bool = True,
-    max_iters: int = 3,
+        *,
+        client: OllamaClient,
+        contract: Mapping[str, Any],
+        contract_input_schema: Mapping[str, Any],
+        vault_catalog: Mapping[str, Any],
+        allowed_ops_profile: Mapping[str, Any] | None = None,
+        dataset_id: str | None = None,
+        table_name: str | None = None,
+        dataset_columns: set[str] | None = None,
+        dataset_column_types: Mapping[str, str] | None = None,
+        contract_hash_strict: bool = True,
+        max_iters: int = 3,
 ) -> LoopResult:
     """
     Generate a MappingPlan candidate via structured output and repair using deterministic validation.
@@ -81,30 +120,38 @@ def synthesize_plan_with_repairs(
       If False, we still pass contract_input_schema to validators if available, but caller may choose to
       tolerate missing schema earlier (not recommended for strict mode).
     """
-    # 0) strict-mode precompute
     expected_hash = compute_contract_schema_hash(contract_input_schema)
 
-    # Decide dataset target (in your MVP you always use A/transactions; keep explicit)
-    dataset_id = "vault_dataset_A"
-    table_name = "transactions"
+    if dataset_id is None or table_name is None:
+        dataset_id, table_name = _infer_dataset_target(vault_catalog)
+
+    # If caller didn't provide column metadata, derive it deterministically from vault_catalog
+    if dataset_columns is None or dataset_column_types is None:
+        cols, types = get_dataset_schema(vault_catalog, dataset_id=dataset_id, table_name=table_name)
+        if dataset_columns is None:
+            dataset_columns = cols
+        if dataset_column_types is None:
+            dataset_column_types = types
 
     base_messages = build_base_messages(
         contract=contract,
         contract_input_schema=contract_input_schema,
         vault_catalog=vault_catalog,
         allowed_ops_profile=allowed_ops_profile,
-        expected_contract_hash=expected_hash,  # <-- add
-        dataset_id=dataset_id,  # <-- add
-        table_name=table_name,  # <-- add
-        dataset_columns=dataset_columns,  # <-- add (optional but helps)
-        dataset_column_types=dataset_column_types,  # <-- add (optional but helps)
+        expected_contract_hash=expected_hash,
+        dataset_id=dataset_id,
+        table_name=table_name,
+        dataset_columns=dataset_columns,
+        dataset_column_types=dataset_column_types,
     )
 
     # 1) initial synthesis
     plan = generate_mapping_plan_candidate(
         client=client,
-        base_messages=base_messages,  # <-- pass base messages
+        base_messages=base_messages,
     )
+
+    plan = _normalize_llm_plan_shape(plan)
 
     plan = _apply_immutables(
         plan,
@@ -113,6 +160,8 @@ def synthesize_plan_with_repairs(
         dataset_id=dataset_id,
         table_name=table_name,
     )
+
+    plan = _normalize_llm_plan_shape(plan)  # <-- optional but safe (drops any extras)
 
     reports: list[CriticReport] = []
     iterations = 0
