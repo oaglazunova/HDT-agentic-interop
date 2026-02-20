@@ -1,3 +1,6 @@
+# TODO: Prompt cleanup (stop biasing the model toward must_include / rules)
+# TODO: Lock down glue tests (without live servers)
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -8,8 +11,7 @@ from hdt_a2a.llm.plan_synthesis import build_base_messages, generate_mapping_pla
 from hdt_a2a.llm.repair import repair_mapping_plan_candidate
 from hdt_mapping_plan.validate import CriticReport, validate_and_lint_plan, compute_contract_schema_hash
 from hdt_mapping_plan.vault_catalog import get_dataset_schema
-
-_IMMUTABLE_TOP_LEVEL = ("plan_version", "algo", "dataset", "contract")
+from hdt_mapping_plan.normalize import apply_limits_policy, fill_contract_refs
 
 
 @dataclass(frozen=True)
@@ -152,7 +154,7 @@ def synthesize_plan_with_repairs(
     )
 
     plan = _normalize_llm_plan_shape(plan)
-
+    # enforce immutables / integrity first (hash + dataset)
     plan = _apply_immutables(
         plan,
         contract=contract,
@@ -160,7 +162,14 @@ def synthesize_plan_with_repairs(
         dataset_id=dataset_id,
         table_name=table_name,
     )
-
+    # refs (deterministic)
+    algo_id = str(contract.get("algo_id") or "")
+    algo_version = str(contract.get("algo_version") or "")
+    if not algo_id or not algo_version:
+        raise ValueError("contract must include algo_id and algo_version")
+    plan = fill_contract_refs(plan, algo_id=algo_id, algo_version=algo_version)
+    # limits (deterministic)
+    plan = apply_limits_policy(plan)
     plan = _normalize_llm_plan_shape(plan)  # <-- optional but safe (drops any extras)
 
     reports: list[CriticReport] = []
@@ -191,7 +200,8 @@ def synthesize_plan_with_repairs(
             previous_plan=plan,
             critic_report=report,
         )
-
+        # normalize plan shape
+        plan = _normalize_llm_plan_shape(plan)
         # Critical: re-apply immutables after every repair (model will try to “helpfully” change them)
         plan = _apply_immutables(
             plan,
@@ -200,3 +210,8 @@ def synthesize_plan_with_repairs(
             dataset_id=dataset_id,
             table_name=table_name,
         )
+        # refs (deterministic)
+        plan = fill_contract_refs(plan, algo_id=algo_id, algo_version=algo_version)
+        # limits (deterministic)
+        plan = apply_limits_policy(plan)
+        plan = _normalize_llm_plan_shape(plan)  # <-- optional but safe (drops any extras)
