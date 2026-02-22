@@ -17,8 +17,8 @@ def test_fill_contract_refs_overrides_unknown() -> None:
         },
     }
 
-    out = fill_contract_refs(plan, algo_id="provider.riskScore", algo_version="1.2.0")
-    assert out["contract"]["contract_ref"] == "oci://local/contracts/provider.riskScore/1.2.0"
+    out = fill_contract_refs(plan, algo_id="provider.obesityCoach", algo_version="0.1.0")
+    assert out["contract"]["contract_ref"] == "oci://local/contracts/provider.obesityCoach/0.1.0"
     assert out["contract"]["input_schema_ref"].endswith("#input.schema.json")
     assert out["output"]["result_schema_ref"].endswith("#output.schema.json")
 

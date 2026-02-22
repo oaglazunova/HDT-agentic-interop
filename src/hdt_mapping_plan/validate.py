@@ -884,7 +884,66 @@ def _critic_limits(profile: Mapping[str, Any] | None) -> tuple[int, int]:
     return max_errors, max_warnings
 
 
+def _required_leaf_contract_pointers(schema: Mapping[str, Any], prefix: str = "") -> list[str]:
+    props = schema.get("properties")
+    if not isinstance(props, dict):
+        return []
+    required = set(schema.get("required") or [])
+    out: list[str] = []
+    for name, sub in props.items():
+        p = f"{prefix}/{name}"
+        if isinstance(sub, dict) and isinstance(sub.get("properties"), dict):
+            if name in required:
+                out.extend(_required_leaf_contract_pointers(sub, p))
+        else:
+            if name in required:
+                out.append(p)
+    return out
+
+
+
 # === end helpers ==================================================================================
+
+def validate_plan_contract_required_fields(
+    plan: dict[str, Any],
+    *,
+    contract_input_schema: Mapping[str, Any] | None,
+) -> CriticReport:
+    """S2 Contract completeness: required fields in input schema must be mapped."""
+    if not contract_input_schema:
+        return CriticReport(
+            ok=False,
+            errors=[
+                CriticIssue(
+                    code=E.CONTRACT_SCHEMA_MISSING,
+                    path="/contract",
+                    detail="contract_input_schema not provided; cannot validate required contract fields",
+                    severity="error",
+                    hint="Host must pass the provider input.schema.json dict.",
+                )
+            ],
+            warnings=[],
+        )
+
+    required_ptrs = _required_leaf_contract_pointers(contract_input_schema)
+    rm = plan.get("record_mapping") or {}
+    rm_keys = set(rm.keys()) if isinstance(rm, dict) else set()
+
+    missing = [p for p in required_ptrs if p not in rm_keys]
+    issues: list[CriticIssue] = []
+    for ptr in missing:
+        issues.append(
+            CriticIssue(
+                code=E.CONTRACT_REQUIRED_FIELD_MISSING,
+                path=_json_pointer_from_path(["record_mapping"]),
+                detail=f"missing required contract field mapping: {ptr}",
+                severity="error",
+                hint="Add a record_mapping entry for this pointer (usually op:'column' with an existing dataset column).",
+            )
+        )
+
+    return CriticReport(ok=(len(issues) == 0), errors=issues, warnings=[])
+
 
 def validate_plan_schema(plan: dict[str, Any]) -> CriticReport:
     """
@@ -1556,7 +1615,6 @@ def resolve_dataset_schema_from_catalog(
 
     return get_dataset_schema(vault_catalog, dataset_id=dataset_id, table_name=table_name)
 
-
 def validate_plan(
     plan: dict[str, Any],
     *,
@@ -1611,7 +1669,12 @@ def validate_plan(
     reports.append(s2)
 
     # Contract checks (safe to run; they self-report CONTRACT_SCHEMA_MISSING if schema not provided)
+    # s_ptr = validate_plan_contract_pointers(plan, contract_input_schema=contract_input_schema)
+    # reports.append(s_ptr)
+    # Contract checks (safe to run; they self-report CONTRACT_SCHEMA_MISSING if schema not provided)
     s_ptr = validate_plan_contract_pointers(plan, contract_input_schema=contract_input_schema)
+    s_req = validate_plan_contract_required_fields(plan, contract_input_schema=contract_input_schema)
+    reports.append(s_req)
     reports.append(s_ptr)
 
     s_hash = validate_plan_contract_hash(plan, contract_input_schema=contract_input_schema)
@@ -1656,5 +1719,3 @@ def validate_and_lint_plan(
         rep_lint = lint_plan(plan, profile=allowed_ops_profile)
 
     return merge_reports([rep_validate, rep_lint], profile=allowed_ops_profile)
-
-

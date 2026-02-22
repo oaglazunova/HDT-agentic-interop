@@ -1,11 +1,11 @@
 {
   "plan_version": "1.0",
   "plan_id": "plan_2026_02_09_001",
-  "algo": { "algo_id": "provider.riskScore", "algo_version": "1.2.0" },
+  "algo": { "algo_id": "provider.obesityCoach", "algo_version": "0.1.0" },
   "dataset": { "dataset_id": "vault_dataset_A", "table_name": "transactions" },
   "contract": {
-    "contract_ref": "oci://harbor.local/contracts/provider.riskScore:1.2.0",
-    "input_schema_ref": "oci://harbor.local/contracts/provider.riskScore:1.2.0#input.schema.json",
+    "contract_ref": "oci://harbor.local/contracts/provider.obesityCoach:0.1.0",
+    "input_schema_ref": "oci://harbor.local/contracts/provider.obesityCoach:0.1.0#input.schema.json",
     "contract_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
   },
   "limits": {
@@ -39,8 +39,8 @@
     }
   },
   "output": {
-    "destination": "vault://results/provider.riskScore/job_${JOB_ID}.jsonl",
+    "destination": "vault://results/provider.obesityCoach/job_${JOB_ID}.jsonl",
     "format": "jsonl",
-    "result_schema_ref": "oci://harbor.local/contracts/provider.riskScore:1.2.0#output.schema.json"
+    "result_schema_ref": "oci://harbor.local/contracts/provider.obesityCoach:0.1.0#output.schema.json"
   }
 }

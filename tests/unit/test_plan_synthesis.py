@@ -16,11 +16,11 @@ class FakeOllama(OllamaClient):
         return {
             "plan_version": "1.0",
             "plan_id": "plan_test_0001",
-            "algo": {"algo_id": "provider.riskScore", "algo_version": "1.2.0"},
+            "algo": {"algo_id": "provider.obesityCoach", "algo_version": "0.1.0"},
             "dataset": {"dataset_id": "vault_dataset_A", "table_name": "transactions"},
             "contract": {
-                "contract_ref": "oci://x/contracts/provider.riskScore:1.2.0",
-                "input_schema_ref": "oci://x/contracts/provider.riskScore:1.2.0#input.schema.json",
+                "contract_ref": "oci://x/contracts/provider.obesityCoach:0.1.0",
+                "input_schema_ref": "oci://x/contracts/provider.obesityCoach:0.1.0#input.schema.json",
                 "contract_hash": self.contract_hash,
             },
             "limits": {"max_rows": 10, "batch_rows": 5, "max_record_bytes": 1024, "max_total_output_bytes": 4096},
@@ -35,13 +35,13 @@ class FakeOllama(OllamaClient):
             "output": {
                 "destination": "vault://results/x.jsonl",
                 "format": "jsonl",
-                "result_schema_ref": "oci://x/contracts/provider.riskScore:1.2.0#output.schema.json",
+                "result_schema_ref": "oci://x/contracts/provider.obesityCoach:0.1.0#output.schema.json",
             },
         }
 
 
 def test_generate_mapping_plan_candidate_smoke() -> None:
-    contract = {"algo_id": "provider.riskScore", "algo_version": "1.2.0"}
+    contract = {"algo_id": "provider.obesityCoach", "algo_version": "0.1.0"}
     contract_input_schema = {
         "type": "object",
         "properties": {"person": {"type": "object", "properties": {"birthDate": {"type": "string"}}}},

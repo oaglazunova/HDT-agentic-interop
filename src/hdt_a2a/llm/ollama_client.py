@@ -3,9 +3,9 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence, Literal
-
 import httpx
-
+import re
+import logging
 
 @dataclass(frozen=True)
 class OllamaConfig:
@@ -35,6 +35,51 @@ class OllamaConfig:
 class OllamaError(RuntimeError):
     pass
 
+# === helpers =====================================
+
+_JSON_FENCE_RE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$", re.IGNORECASE | re.MULTILINE)
+_TRAILING_COMMAS_RE = re.compile(r",(\s*[}\]])")
+
+def _extract_json_object(text: str) -> str:
+    """Best-effort: take substring from first '{' to last '}'."""
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return text.strip()
+    return text[start : end + 1].strip()
+
+def _loads_relaxed_json(content: Any) -> dict[str, Any]:
+    # Already parsed by Ollama / httpx?
+    if isinstance(content, dict):
+        return content
+
+    if isinstance(content, bytes):
+        text = content.decode("utf-8-sig", errors="replace")
+    else:
+        text = str(content)
+
+    # strip BOM + fences
+    text = text.lstrip("\ufeff")
+    text = _JSON_FENCE_RE.sub("", text).strip()
+
+    # if model included extra chatter, try to isolate the object
+    candidate = _extract_json_object(text)
+
+    # 1) strict parse
+    try:
+        obj = json.loads(candidate)
+        if isinstance(obj, dict):
+            return obj
+        raise ValueError(f"expected JSON object, got {type(obj).__name__}")
+    except json.JSONDecodeError:
+        pass
+
+    # 2) remove trailing commas and retry
+    candidate2 = _TRAILING_COMMAS_RE.sub(r"\1", candidate)
+    obj = json.loads(candidate2)
+    if not isinstance(obj, dict):
+        raise ValueError(f"expected JSON object, got {type(obj).__name__}")
+    return obj
 
 def _normalize_messages(messages: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     """
@@ -84,10 +129,12 @@ def _contains_ref(obj: Any) -> bool:
 class OllamaClient:
     def __init__(self, cfg: OllamaConfig) -> None:
         self.cfg = cfg
+        self._log = logging.getLogger(__name__)
 
     def chat_text(self, messages: Sequence[Mapping[str, Any]]) -> str:
         payload = {"model": self.cfg.model, "messages": _normalize_messages(messages), "stream": False}
-        with httpx.Client(timeout=self.cfg.timeout_s) as client:
+        timeout = httpx.Timeout(connect=5.0, read=self.cfg.timeout_s, write=30.0, pool=5.0)
+        with httpx.Client(timeout=timeout) as client:
             r = client.post(f"{self.cfg.base_url}/api/chat", json=payload)
 
         if r.status_code != 200:
@@ -133,6 +180,9 @@ class OllamaClient:
             return schema_min, True
 
         fmt, used_schema = _choose_format()
+        self._log.info(
+            "ollama chat_json: model=%s structured_mode=%s used_schema=%s timeout_s=%.1f num_ctx=%s num_predict=%s", self.cfg.model, self.cfg.structured_mode, used_schema, self.cfg.timeout_s, self.cfg.num_ctx, self.cfg.num_predict
+        )
 
         payload_base: dict[str, Any] = {
             "model": self.cfg.model,
@@ -149,7 +199,8 @@ class OllamaClient:
             payload = dict(payload_base)
             payload["format"] = format_value
 
-            with httpx.Client(timeout=self.cfg.timeout_s) as client:
+            timeout = httpx.Timeout(connect=5.0, read=self.cfg.timeout_s, write=30.0, pool=5.0)
+            with httpx.Client(timeout=timeout) as client:
                 r = client.post(f"{self.cfg.base_url}/api/chat", json=payload)
 
             if r.status_code != 200:
@@ -162,20 +213,22 @@ class OllamaClient:
             msg = data.get("message") or {}
             content = msg.get("content")
 
-            if isinstance(content, dict):
-                return content
+            msg = data.get("message") or {}
+            content = msg.get("content")
 
-            if isinstance(content, str):
-                s = content.strip()
-                if not s:
-                    raise OllamaError(f"Ollama returned empty content for structured output: {data}")
+            # Accept either dict (already parsed) or string/bytes that need parsing.
+            if isinstance(content, (dict, str, bytes)):
                 try:
-                    parsed = json.loads(s)
+                    return _loads_relaxed_json(content)
                 except Exception as ex:
-                    raise OllamaError(f"Failed to parse JSON from message.content: {ex}; startswith={s[:300]!r}")
-                if not isinstance(parsed, dict):
-                    raise OllamaError(f"Structured output is not a JSON object: {type(parsed)} {parsed!r}")
-                return parsed
+                    # Make debugging actionable: show head+tail (content can be long)
+                    raw = content.decode("utf-8", errors="replace") if isinstance(content, bytes) else str(content)
+                    head = raw[:300]
+                    tail = raw[-200:] if len(raw) > 200 else raw
+                    raise OllamaError(
+                        "Failed to parse JSON from message.content: "
+                        f"{ex}; head={head!r}; tail={tail!r}"
+                    )
 
             raise OllamaError(f"Unexpected structured output type: {type(content)}; response={data}")
 

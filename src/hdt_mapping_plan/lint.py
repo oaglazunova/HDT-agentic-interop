@@ -271,8 +271,9 @@ def lint_plan(
         max_rows = limits.get("max_rows")
         if isinstance(max_total, int) and isinstance(max_record, int) and isinstance(max_rows, int):
             # if max_total is extremely close to the theoretical worst case, warn
-            # (worst case ~ max_rows * max_record, but capped; we just flag "near cap" + huge potential)
-            if max_total >= th["max_total_output_bytes_warn_ratio"] * max_total and max_rows * max_record > max_total * 2:
+            worst_case = max_rows * max_record
+            # warn when max_total is near the theoretical worst-case output budget
+            if worst_case > 0 and max_total >= th["max_total_output_bytes_warn_ratio"] * worst_case:
                 warnings.append(
                     CriticIssue(
                         code=E.LINT_OUTPUT_LIMITS_SUSPICIOUS,

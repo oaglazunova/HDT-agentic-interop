@@ -62,6 +62,13 @@ class UserAgentExecutor(AgentExecutor):
                 cfg = OllamaConfig(
                     base_url=os.getenv("OLLAMA_URL", "http://localhost:11434"),
                     model=os.getenv("OLLAMA_MODEL", "qwen2.5:7b-instruct-q4_0"),
+                    timeout_s=float(os.getenv("OLLAMA_TIMEOUT_S", "300")),
+                    # optional speed knobs (recommended):
+                    num_predict=int(os.getenv("OLLAMA_NUM_PREDICT", "1600")),
+                    num_ctx=int(os.getenv("OLLAMA_NUM_CTX", "4096")),
+
+                    structured_mode=os.getenv("OLLAMA_STRUCTURED_MODE", "json"),
+                    fallback_to_json_on_error=bool(int(os.getenv("OLLAMA_FALLBACK_TO_JSON", "0"))),
                 )
                 client = OllamaClient(cfg)
 

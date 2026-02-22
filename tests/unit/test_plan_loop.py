@@ -17,30 +17,29 @@ class FakeOllama(OllamaClient):
         self.calls += 1
 
         if self.calls == 1:
+            # "bad" output: MUST still fail after deterministic normalizers
+            # Use an unknown column so validation fails and triggers repair.
             return {
                 "plan_version": "1.0",
                 "plan_id": "bad_plan",
-                "algo": {"algo_id": "provider.riskScore", "algo_version": "1.2.0"},
+                "algo": {"algo_id": "provider.obesityCoach", "algo_version": "0.1.0"},
                 "dataset": {"dataset_id": "vault_dataset_A", "table_name": "transactions"},
-                "contract": {
-                    "contract_ref": "oci://x/contracts/provider.riskScore:1.2.0",
-                    "input_schema_ref": "oci://x/contracts/provider.riskScore:1.2.0#input.schema.json",
-                    "contract_hash": self.contract_hash,  # <-- use computed
-                },
+                "contract": {"contract_ref": "x", "input_schema_ref": "x", "contract_hash": self.contract_hash},
                 "limits": {"max_rows": 10, "batch_rows": 5, "max_record_bytes": 1024, "max_total_output_bytes": 4096},
-                "required_columns": [],  # schema-invalid on purpose
-                "record_mapping": {"/person/birthDate": {"op": "column", "name": "dob"}},
-                "output": {"destination": "vault://results/x.jsonl", "format": "jsonl", "result_schema_ref": "oci://x#out"},
+                # Even if your code auto-fills required_columns, the unknown column will still fail.
+                "required_columns": ["UNKNOWN_COLUMN"],
+                "record_mapping": {"/person/birthDate": {"op": "column", "name": "UNKNOWN_COLUMN"}},
+                "output": {"destination": "vault://results/x.jsonl", "format": "jsonl", "result_schema_ref": "x"},
             }
 
         return {
             "plan_version": "1.0",
             "plan_id": "good_plan",
-            "algo": {"algo_id": "provider.riskScore", "algo_version": "1.2.0"},
+            "algo": {"algo_id": "provider.obesityCoach", "algo_version": "0.1.0"},
             "dataset": {"dataset_id": "vault_dataset_A", "table_name": "transactions"},
             "contract": {
-                "contract_ref": "oci://x/contracts/provider.riskScore:1.2.0",
-                "input_schema_ref": "oci://x/contracts/provider.riskScore:1.2.0#input.schema.json",
+                "contract_ref": "oci://x/contracts/provider.obesityCoach:0.1.0",
+                "input_schema_ref": "oci://x/contracts/provider.obesityCoach:0.1.0#input.schema.json",
                 "contract_hash": self.contract_hash,  # <-- use computed
             },
             "limits": {"max_rows": 10, "batch_rows": 5, "max_record_bytes": 1024, "max_total_output_bytes": 4096},
@@ -51,7 +50,7 @@ class FakeOllama(OllamaClient):
 
 
 def test_synthesize_plan_with_repairs_stops_on_ok() -> None:
-    contract = {"algo_id": "provider.riskScore", "algo_version": "1.2.0"}
+    contract = {"algo_id": "provider.obesityCoach", "algo_version": "0.1.0"}
     contract_input_schema = {
         "type": "object",
         "properties": {"person": {"type": "object", "properties": {"birthDate": {"type": "string"}}}},
@@ -78,13 +77,15 @@ def test_synthesize_plan_with_repairs_stops_on_ok() -> None:
 
     assert res.ok is True
     assert res.report.errors == []
-    assert res.plan["plan_id"] == "good_plan"
+    assert res.plan["record_mapping"]["/person/birthDate"]["op"] == "column"
+    assert res.plan["record_mapping"]["/person/birthDate"]["name"] == "dob"
+    assert res.plan["required_columns"] == ["dob"]
     assert res.iterations == 2
     assert len(res.reports) == 2
 
 
 def test_loop_lifts_must_include_to_root() -> None:
-    contract = {"algo_id": "provider.riskScore", "algo_version": "1.2.0"}
+    contract = {"algo_id": "provider.obesityCoach", "algo_version": "0.1.0"}
     contract_input_schema = {
         "type": "object",
         "properties": {"person": {"type": "object", "properties": {"birthDate": {"type": "string"}}}},
@@ -100,7 +101,7 @@ def test_loop_lifts_must_include_to_root() -> None:
             return {
                 "plan_version": "1.0",
                 "plan_id": "example_plan",
-                "algo": {"algo_id": "provider.riskScore", "algo_version": "1.2.0"},
+                "algo": {"algo_id": "provider.obesityCoach", "algo_version": "0.1.0"},
                 "dataset": {"dataset_id": "vault_dataset_A", "table_name": "transactions"},
                 "contract": {
                     "contract_ref": "oci://local/contracts/UNKNOWN",

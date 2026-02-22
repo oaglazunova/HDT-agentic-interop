@@ -1,0 +1,69 @@
+﻿{
+  "type": "object",
+  "properties": {
+    "recordId": { "type": "string" },
+    "person": {
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "birthDate": { "type": "string", "format": "date" }
+      },
+      "required": ["birthDate"]
+    },
+    "day": {
+      "type": "object",
+      "properties": {
+        "date": { "type": "string", "format": "date" }
+      },
+      "required": ["date"]
+    },
+    "activity": {
+      "type": "object",
+      "properties": {
+        "steps": { "type": "integer", "minimum": 0 },
+        "activeMinutesModerate": { "type": "integer", "minimum": 0 },
+        "activeMinutesVigorous": { "type": "integer", "minimum": 0 },
+        "primaryType": { "type": "string" }
+      },
+      "required": ["steps"]
+    },
+    "nutrition": {
+      "type": "object",
+      "properties": {
+        "caloriesIn": { "type": "number", "minimum": 0 }
+      },
+      "required": ["caloriesIn"]
+    },
+    "hydration": {
+      "type": "object",
+      "properties": {
+        "waterMl": { "type": "integer", "minimum": 0 },
+        "sugaryDrinksMl": { "type": "integer", "minimum": 0 },
+        "alcoholUnits": { "type": "number", "minimum": 0 }
+      },
+      "required": ["waterMl"]
+    },
+    "sleep": {
+      "type": "object",
+      "properties": {
+        "minutes": { "type": "integer", "minimum": 0 }
+      },
+      "required": ["minutes"]
+    },
+    "body": {
+      "type": "object",
+      "properties": {
+        "weightKg": { "type": "number", "minimum": 0 },
+        "waistCm": { "type": "number", "minimum": 0 }
+      }
+    },
+    "psycho": {
+      "type": "object",
+      "properties": {
+        "moodScore": { "type": "integer", "minimum": 1, "maximum": 10 },
+        "stressScore": { "type": "integer", "minimum": 1, "maximum": 10 }
+      }
+    }
+  },
+  "required": ["recordId", "person", "day", "activity", "nutrition", "hydration"]
+}

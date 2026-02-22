@@ -26,7 +26,7 @@ class ContractRegistry:
     def __init__(self) -> None:
         # Map (algo_id, algo_version) -> resource path within package
         self._index: dict[ContractKey, str] = {
-            ContractKey("provider.riskScore", "1.2.0"): "contracts/provider_riskScore/1.2.0/input.schema.json",
+            ContractKey("provider.obesityCoach", "0.1.0"): "contracts/provider_obesityCoach/0.1.0/input.schema.json",
         }
 
     def list_contracts(self) -> list[dict[str, str]]:
