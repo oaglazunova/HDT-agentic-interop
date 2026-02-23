@@ -39,6 +39,46 @@ def _report_to_dict(report: Any) -> dict[str, Any]:
         "warnings": [getattr(w, "__dict__", {"message": str(w)}) for w in getattr(report, "warnings", [])],
     }
 
+def _get_str(d: dict[str, Any], key: str) -> str | None:
+    v = d.get(key)
+    if isinstance(v, str):
+        v = v.strip()
+        return v or None
+    return None
+
+
+def _parse_ollama_overrides(req: dict[str, Any]) -> tuple[str | None, str | None]:
+    """
+    Allows host to override LLM settings per run without restarting the agent.
+
+    Accepted shapes:
+      - {"ollama_url": "...", "ollama_model": "..."}
+      - {"ollama": {"base_url": "...", "model": "..."}}
+      - {"ollama": {"url": "...", "model": "..."}}
+      - (optional convenience) {"model": "..."}  # if you choose to allow it
+    """
+    ollama_cfg = req.get("ollama")
+    if not isinstance(ollama_cfg, dict):
+        ollama_cfg = {}
+
+    url = (
+        _get_str(req, "ollama_url")
+        or _get_str(req, "ollama_base_url")
+        or _get_str(ollama_cfg, "base_url")
+        or _get_str(ollama_cfg, "url")
+    )
+
+    model = (
+        _get_str(req, "ollama_model")
+        or _get_str(ollama_cfg, "model")
+        or _get_str(req, "model")  # optional convenience; safe because we still strip/None-check
+    )
+
+    return url, model
+
+
+# === end helpers ===========================
+
 
 class UserAgentExecutor(AgentExecutor):
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
@@ -53,22 +93,27 @@ class UserAgentExecutor(AgentExecutor):
             algo_version = str(req.get("algo_version") or "")
             vault_catalog = req.get("vault_catalog")
 
+            allowed_ops_profile = req.get("allowed_ops_profile")
+            if allowed_ops_profile is not None and not isinstance(allowed_ops_profile, dict):
+                allowed_ops_profile = None  # ignore invalid shape instead of crashing
+
             if not provider_url or not algo_id or not algo_version or not isinstance(vault_catalog, dict):
                 payload = {
                     "ok": False,
                     "error": {"code": "BAD_REQUEST", "message": "missing provider_url/algo_id/algo_version/vault_catalog"},
                 }
             else:
+                ollama_url_override, ollama_model_override = _parse_ollama_overrides(req)
+
                 cfg = OllamaConfig(
-                    base_url=os.getenv("OLLAMA_URL", "http://localhost:11434"),
-                    model=os.getenv("OLLAMA_MODEL", "qwen2.5:7b-instruct-q4_0"),
+                    base_url=ollama_url_override or os.getenv("OLLAMA_URL", "http://localhost:11434"),
+                    model=ollama_model_override or os.getenv("OLLAMA_MODEL", "qwen2.5:7b-instruct-q4_0"),
                     timeout_s=float(os.getenv("OLLAMA_TIMEOUT_S", "300")),
+                    structured_mode=os.getenv("OLLAMA_STRUCTURED_MODE", "json"),
+                    fallback_to_json_on_error=bool(int(os.getenv("OLLAMA_FALLBACK_TO_JSON", "0"))),
                     # optional speed knobs (recommended):
                     num_predict=int(os.getenv("OLLAMA_NUM_PREDICT", "1600")),
                     num_ctx=int(os.getenv("OLLAMA_NUM_CTX", "4096")),
-
-                    structured_mode=os.getenv("OLLAMA_STRUCTURED_MODE", "json"),
-                    fallback_to_json_on_error=bool(int(os.getenv("OLLAMA_FALLBACK_TO_JSON", "0"))),
                 )
                 client = OllamaClient(cfg)
 
@@ -79,6 +124,7 @@ class UserAgentExecutor(AgentExecutor):
                         algo_id=algo_id,
                         algo_version=algo_version,
                         vault_catalog=vault_catalog,
+                        allowed_ops_profile=allowed_ops_profile,
                         dataset_id=req.get("dataset_id"),
                         table_name=req.get("table_name"),
                         max_iters=int(req.get("max_iters") or 3),
