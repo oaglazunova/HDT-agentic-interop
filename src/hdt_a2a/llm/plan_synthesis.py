@@ -137,12 +137,18 @@ def build_base_messages(
             "/sleep/minutes": ["sleep_minutes"],
         }
 
-    # Keep candidate hints only for REQUIRED contract pointers (avoid nudging optional fields)
-    pointer_to_candidate_cols = {
-        ptr: cols
-        for ptr, cols in pointer_to_candidate_cols.items()
-        if ptr in set(req_ptrs)
-    }
+    req_ptr_set = set(req_ptrs)
+    dataset_col_set = set(cols)
+
+    filtered_pointer_to_candidate_cols: dict[str, list[str]] = {}
+    for ptr, candidate_cols in pointer_to_candidate_cols.items():
+        if ptr not in req_ptr_set:
+            continue
+        valid_candidates = [c for c in candidate_cols if c in dataset_col_set]
+        if valid_candidates:
+            filtered_pointer_to_candidate_cols[ptr] = valid_candidates
+
+    pointer_to_candidate_cols = filtered_pointer_to_candidate_cols
 
     types = {k: dataset_column_types[k] for k in sorted(dataset_column_types or {})}
 

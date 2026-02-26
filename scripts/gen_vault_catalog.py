@@ -5,11 +5,21 @@ from hdt_mapping_plan.vault_catalog import generate_vault_catalog
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(
+        description=(
+            "Generate a temporary vault_catalog.json from a concrete SQLite schema. "
+            "Secondary path for Phase-1; preferred path is a hand-authored logical --vault-catalog."
+        )
+    )
     ap.add_argument("--vault-db", required=True)
     ap.add_argument("--dataset-id", required=True)
     ap.add_argument("--out", required=True)
-    ap.add_argument("--table", action="append", default=None, help="repeatable; limit to specific table(s)")
+    ap.add_argument(
+        "--table",
+        action="append",
+        default=None,
+        help="repeatable; limit to specific table(s) when generating a temporary catalog from SQLite",
+    )
     args = ap.parse_args()
 
     generate_vault_catalog(

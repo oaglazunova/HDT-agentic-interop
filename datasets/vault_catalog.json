@@ -1,0 +1,123 @@
+{
+  "catalog_version": "1.1",
+  "source": {
+    "kind": "logical-placeholder",
+    "note": "Architecture-first logical view for the obesityCoach demo contract; not yet bound to final physical storage"
+  },
+  "datasets": [
+    {
+      "dataset_id": "vault_dataset_A",
+      "schema_hash": "draft-wide-obesitycoach-view",
+      "schema_version": "draft-1",
+      "tables": [
+        {
+          "table_name": "daily_profile",
+          "schema_hash": "draft-wide-obesitycoach-view-daily_profile",
+          "schema_version": "draft-1",
+          "columns": [
+            {
+              "name": "txn_id",
+              "type": "string",
+              "nullable": false,
+              "semantic_tags": ["record_identifier"]
+            },
+            {
+              "name": "user_id",
+              "type": "string",
+              "nullable": true,
+              "semantic_tags": ["subject_identifier"]
+            },
+            {
+              "name": "dob",
+              "type": "string",
+              "nullable": false,
+              "semantic_tags": ["birth_date"],
+              "timezone": "none"
+            },
+            {
+              "name": "date",
+              "type": "string",
+              "nullable": false,
+              "semantic_tags": ["temporal", "date"],
+              "timezone": "user-local"
+            },
+            {
+              "name": "steps",
+              "type": "int64",
+              "nullable": false,
+              "semantic_tags": ["activity", "steps"],
+              "unit": "count"
+            },
+            {
+              "name": "calories_in",
+              "type": "float64",
+              "nullable": false,
+              "semantic_tags": ["nutrition", "energy_intake"],
+              "unit": "kcal"
+            },
+            {
+              "name": "water_ml",
+              "type": "int64",
+              "nullable": false,
+              "semantic_tags": ["hydration", "water_intake"],
+              "unit": "ml"
+            },
+            {
+              "name": "sleep_minutes",
+              "type": "int64",
+              "nullable": true,
+              "semantic_tags": ["sleep", "duration"],
+              "unit": "min"
+            },
+            {
+              "name": "active_minutes_moderate",
+              "type": "int64",
+              "nullable": true,
+              "semantic_tags": ["activity", "moderate_minutes"],
+              "unit": "min"
+            },
+            {
+              "name": "active_minutes_vigorous",
+              "type": "int64",
+              "nullable": true,
+              "semantic_tags": ["activity", "vigorous_minutes"],
+              "unit": "min"
+            },
+            {
+              "name": "primary_type",
+              "type": "string",
+              "nullable": true,
+              "semantic_tags": ["activity", "type"]
+            },
+            {
+              "name": "weight_kg",
+              "type": "float64",
+              "nullable": true,
+              "semantic_tags": ["body", "weight"],
+              "unit": "kg"
+            },
+            {
+              "name": "waist_cm",
+              "type": "float64",
+              "nullable": true,
+              "semantic_tags": ["body", "waist"],
+              "unit": "cm"
+            },
+            {
+              "name": "mood_score",
+              "type": "int64",
+              "nullable": true,
+              "semantic_tags": ["psycho", "mood_score"]
+            },
+            {
+              "name": "stress_score",
+              "type": "int64",
+              "nullable": true,
+              "semantic_tags": ["psycho", "stress_score"]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

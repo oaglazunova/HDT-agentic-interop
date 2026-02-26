@@ -1,3 +1,6 @@
+# Now datasets/vault_catalog.json is the source of truth for negotiations.
+# TODO: redesign the real SQLite schema, make vault_catalog.py more complex right, treat data/hdt_vault.sqlite as canonical.
+
 from __future__ import annotations
 
 import json
@@ -70,6 +73,7 @@ def generate_vault_catalog(
     dataset_id: str,
     out_path: str | None = None,
     only_tables: List[str] | None = None,
+    tags_dir: str | None = None,
 ) -> Dict[str, Any]:
     """
     Introspect a vault SQLite DB and generate a catalog with column types.

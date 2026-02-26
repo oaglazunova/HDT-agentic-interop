@@ -184,7 +184,13 @@ def call_user_agent_synthesize(
 
 def main() -> None:
 	init_runtime()
-	ap = argparse.ArgumentParser(description="Host runner: negotiate MappingPlan via User A2A agent (7A).")
+	ap = argparse.ArgumentParser(
+		description=(
+			"Host runner: negotiate MappingPlan via User A2A agent. "
+			"In Phase-1, prefer a hand-authored logical --vault-catalog; "
+			"--vault-db is a secondary convenience path."
+		)
+	)
 	ap.add_argument("--user-url", default=os.getenv("HDT_USER_A2A_URL", "http://localhost:9200/"))
 	ap.add_argument("--provider-url", default=os.getenv("HDT_PROVIDER_A2A_URL", "http://localhost:9100/"))
 	ap.add_argument("--algo-id", required=True)
@@ -194,12 +200,18 @@ def main() -> None:
 	vault_group.add_argument(
 		"--vault-catalog",
 		default=None,
-		help="Path to a vault_catalog.json. If omitted, use --vault-db to generate one.",
+		help=(
+			"Preferred Phase-1 path: hand-authored logical vault_catalog.json. "
+			"If omitted, --vault-db can generate a temporary catalog from SQLite."
+		),
 	)
 	vault_group.add_argument(
 		"--vault-db",
 		default=None,
-		help="Path to vault SQLite DB. Used only if --vault-catalog is omitted.",
+		help=(
+			"Secondary path: derive a temporary vault catalog from a concrete SQLite schema. "
+			"Used only if --vault-catalog is omitted."
+		),
 	)
 	vault_group.add_argument(
 		"--dataset-id",
@@ -218,7 +230,7 @@ def main() -> None:
 		"--only-table",
 		action="append",
 		default=None,
-		help="(repeatable) When generating catalog from --vault-db, include only these tables.",
+		help="(repeatable) When generating a temporary catalog from --vault-db, include only these tables.",
 	)
 
 	ap.add_argument(
@@ -365,6 +377,7 @@ def main() -> None:
 			"user_url": args.user_url,
 			"vault_catalog_path": args.vault_catalog,
 			"vault_db_path": args.vault_db,
+			"vault_catalog_mode": ("provided" if args.vault_catalog else "generated_from_db"),
 			"dataset_id": args.dataset_id,
 			"table_name": args.table_name,
 			"max_iters": args.max_iters,
