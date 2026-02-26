@@ -19,9 +19,9 @@ a machine-executable **Mapping Plan**.
   - Canonicalization/normalization for stable diffs
 
 - **A2A agents + host runner** (`src/hdt_a2a/`, `src/hdt_provider_a2a/`, `src/hdt_user_a2a/`)
-  - **Provider Agent** serves contract bundle (contract + input/output schemas + hash)
-  - **User Agent** synthesizes a Mapping Plan Candidate via **Ollama structured outputs** + repair loop
-  - **Host runner** orchestrates calls, validates deterministically, writes artifacts
+  - **Provider Agent** serves a contract bundle (contract + input/output schemas + expected hash)
+  - **User Agent** synthesizes a Mapping Plan Candidate via **Ollama structured outputs** plus repair loop
+  - **Host runner** orchestrates calls, validates deterministically, and writes artifacts
 
 - **MCP servers** (existing flows)
   - `src/hdt_mcp/gateway.py`
@@ -35,9 +35,12 @@ a machine-executable **Mapping Plan**.
 - `src/hdt_a2a/` — shared A2A utilities + host runner
 - `src/hdt_provider_a2a/` — Provider A2A server + contract registry
 - `src/hdt_user_a2a/` — User A2A server + LLM/repair loop integration
-- `artifacts/` — generated outputs (plans, run manifests, demo vaults, logs)
-- `data/` — sample data assets (e.g., example vault DB)
-- `tests/` — unit tests
+- `demo/` — frozen demonstration scenarios (catalogs + walkthrough assets)
+- `scripts/` — helper scripts (including demo runners)
+- `artifacts/` — generated outputs (plans, run manifests, demo outputs, logs)
+- `data/` — sample data assets (example/demo vaults)
+- `datasets/` — working logical vault catalogs for current development
+- `tests/` — unit tests and golden regression fixtures
 
 ---
 
@@ -77,25 +80,34 @@ pytest -q
 
 ## A2A Mapping Plan negotiation (Phase-1)
 
-Phase-1 workflow to synthesize a `MappingPlanCandidate` using:
+Phase-1 synthesizes a `MappingPlanCandidate` using:
 
 - **Provider A2A agent**: deterministic contract bundle (schema + expected hash)
-- **User A2A agent**: uses Ollama (`/api/chat`) with JSON Schema **structured outputs** to generate a plan and iteratively repairs it using deterministic validator feedback
+- **User A2A agent**: uses Ollama (`/api/chat`) with JSON Schema **structured outputs** to generate a candidate and iteratively repair it using deterministic validator feedback
 - **Host runner**: orchestrates calls and writes artifacts to `artifacts/mapping_plans/`
 
+### Current Phase-1 source-of-truth
+
+At the current architecture-first stage, the **preferred** source-of-truth is a **hand-authored logical vault catalog**:
+
+- Preferred: `--vault-catalog datasets/vault_catalog.json`
+- Secondary convenience path: `--vault-db ...` to derive a temporary catalog from a concrete SQLite schema
+
+This keeps the negotiation interface stable **before** the final physical vault schema is fixed.
+
 ### PowerShell note about line continuation
-PowerShell uses backtick (`` ` ``) for line continuation — **not** `\`.
+PowerShell uses backtick (`` ` ``) for line continuation - **not** `\`.
 
 ### Start the A2A agents (two terminals)
 
-**Terminal 1 — Provider agent**
+**Terminal 1 - Provider agent**
 ```powershell
 hdt-provider-a2a
-# If you don't have console scripts yet, equivalent:
+# Equivalent:
 # python -m hdt_provider_a2a.server
 ```
 
-**Terminal 2 — User agent**
+**Terminal 2 - User agent**
 ```powershell
 $env:OLLAMA_URL="http://localhost:11434"
 $env:OLLAMA_MODEL="qwen2.5:7b-instruct-q4_0"
@@ -104,24 +116,20 @@ hdt-user-a2a
 # python -m hdt_user_a2a.server
 ```
 
-### Run the host negotiation (writes artifacts)
-
-Use a Vault SQLite DB as the source-of-truth catalog (Phase-1 MVP):
+### Run the host negotiation (logical catalog path)
 
 ```powershell
 hdt-a2a-negotiate `
   --algo-id provider.obesityCoach `
   --algo-version 0.1.0 `
-  --vault-db artifacts\vault\hdt_vault_ieee_demo.sqlite `
-  --dataset-id vault_dataset_A `
-  --table-name transactions `
+  --vault-catalog datasets\vault_catalog.json `
   --ollama-url http://localhost:11434 `
   --model qwen2.5:7b-instruct-q4_0
 ```
 
 Outputs:
-- `artifacts/mapping_plans/<plan_id>.json` — **plan only**
-- `artifacts/mapping_plans/<plan_id>.run.json` — run manifest (inputs + hashes + reports + iterations)
+- `artifacts/mapping_plans/<plan_id>.json` - final Mapping Plan
+- `artifacts/mapping_plans/<plan_id>.run.json` - run manifest (inputs + hashes + reports + iterations)
 
 ### Common issues
 
@@ -140,9 +148,89 @@ If you copied a command that uses `\` line continuation (bash style), rewrite us
 
 ---
 
+## Demonstration scenario
+
+The repo includes a **frozen, presentation-friendly** demo scenario for mapping-plan negotiation:
+
+- Scenario folder: `demo/scenarios/obesitycoach_daily_profile/`
+- Frozen demo catalog: `demo/scenarios/obesitycoach_daily_profile/vault_catalog.json`
+- Runner script: `scripts/demo_mapping_negotiation.ps1`
+
+### Demo storyline
+
+A provider-side algorithm (`provider.obesityCoach`, version `0.1.0`) publishes the fields it needs.
+The user side does **not** expose a finalized physical database schema. Instead, it exposes a **logical vault view**:
+
+- Dataset: `vault_dataset_A`
+- Table: `daily_profile`
+
+The negotiation goal is to synthesize a Mapping Plan that safely maps the logical user columns into the provider contract.
+
+### Run the demo
+
+**Terminal 1 - Provider agent**
+```powershell
+python -m hdt_provider_a2a.server
+```
+
+**Terminal 2 - User agent**
+```powershell
+python -m hdt_user_a2a.server
+```
+
+**Terminal 3 - Demo runner**
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\demo_mapping_negotiation.ps1
+```
+
+The demo script runs the host against the frozen scenario catalog, writes artifacts to a dedicated demo output folder,
+and prints a concise summary of the resulting Mapping Plan.
+
+### What the demo proves
+
+- contract retrieval from the Provider Agent
+- use of a **logical** vault catalog instead of a finalized physical DB schema
+- synthesis plus deterministic validation
+- repair-loop convergence when the first candidate is imperfect
+- final artifact persistence (`*.json`, `*.run.json`)
+
+---
+
+## Golden regression fixtures
+
+The repo also includes deterministic end-to-end **golden fixtures** for mapping-plan negotiation under:
+
+- `tests/fixtures/mapping_plan_golden/`
+
+These freeze representative negotiation cases so future changes to prompts, repair logic, or validation do not silently break behavior.
+
+### Demo-aligned golden fixture
+
+The demonstration scenario has a matching test fixture:
+
+- `tests/fixtures/mapping_plan_golden/demo_obesitycoach_daily_profile.json`
+
+This keeps the live demo and the test suite aligned:
+
+- **Live demo**: human-runnable scenario for walkthroughs and presentations
+- **Golden fixture**: deterministic pytest case for regression protection
+
+### Golden fixture test harness
+
+The harness lives in:
+
+- `tests/unit/test_mapping_plan_golden.py`
+
+It loads fixture files (for example `case_*.json` and `demo_*.json`), feeds deterministic fake LLM outputs into the repair loop,
+and asserts that the final Mapping Plan matches the expected result.
+
+This is the key reproducibility layer for the negotiation prototype.
+
+---
+
 ## Mapping Plan validation (deterministic critic)
 
-The deterministic validator is the source of truth (reproducible and enclave-friendly later).
+The deterministic validator is the source of truth (reproducible now, enclave-friendly later).
 
 - Schema: `src/hdt_mapping_plan/schema/mapping-plan.schema.json`
 - Validator: `src/hdt_mapping_plan/validate.py`
@@ -153,7 +241,7 @@ Typical checks include:
 - contract hash integrity
 - JSON pointers exist in the provider input schema
 - type compatibility between vault columns and contract fields
-- output confinement rules (e.g., destination allowlists)
+- output confinement rules (for example, destination allowlists)
 
 ---
 
@@ -175,6 +263,9 @@ hdt-a2a-negotiate --help
 
 Useful flags:
 - `--user-url` and `--provider-url` (override default agent endpoints)
+- `--vault-catalog` (preferred Phase-1 logical catalog path)
+- `--vault-db` (secondary temporary catalog generation path)
+- `--dataset-id` and `--table-name` (force a specific dataset/table when needed)
 - `--ollama-url` and `--model` (forwarded to User Agent per run)
 - `--max-iters` (repair iterations inside User Agent)
 - `--out-dir` (where artifacts are written)
@@ -199,6 +290,10 @@ python -m hdt_sources_mcp.server
 
 ### Artifacts
 Generated artifacts go under `artifacts/`. Keep large or sensitive files out of git.
+
+### Demo stability
+Keep frozen demo assets under `demo/` separate from the evolving working files under `datasets/`.
+This prevents routine architecture changes from accidentally breaking the walkthrough scenario.
 
 ---
 
