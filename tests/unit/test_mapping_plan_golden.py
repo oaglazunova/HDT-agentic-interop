@@ -15,7 +15,9 @@ FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "mapping_plan_
 
 
 def _fixture_paths() -> list[Path]:
-    return sorted(FIXTURES_DIR.glob("case_*.json"))
+    paths = list(FIXTURES_DIR.glob("case_*.json"))
+    paths.extend(FIXTURES_DIR.glob("demo_*.json"))
+    return sorted(paths)
 
 
 class SequenceOllama(OllamaClient):
