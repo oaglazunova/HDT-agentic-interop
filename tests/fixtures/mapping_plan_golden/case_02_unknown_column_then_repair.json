@@ -1,0 +1,144 @@
+{
+  "contract": {
+    "algo_id": "provider.obesityCoach",
+    "algo_version": "0.1.0"
+  },
+  "contract_input_schema": {
+    "type": "object",
+    "properties": {
+      "recordId": { "type": "string" },
+      "person": {
+        "type": "object",
+        "properties": {
+          "birthDate": { "type": "string", "format": "date" }
+        },
+        "required": ["birthDate"]
+      },
+      "day": {
+        "type": "object",
+        "properties": {
+          "date": { "type": "string", "format": "date" }
+        },
+        "required": ["date"]
+      },
+      "activity": {
+        "type": "object",
+        "properties": {
+          "steps": { "type": "integer" }
+        },
+        "required": ["steps"]
+      },
+      "nutrition": {
+        "type": "object",
+        "properties": {
+          "caloriesIn": { "type": "number" }
+        },
+        "required": ["caloriesIn"]
+      },
+      "hydration": {
+        "type": "object",
+        "properties": {
+          "waterMl": { "type": "integer" }
+        },
+        "required": ["waterMl"]
+      }
+    },
+    "required": ["recordId", "person", "day", "activity", "nutrition", "hydration"]
+  },
+  "vault_catalog": {
+    "datasets": [
+      {
+        "dataset_id": "vault_dataset_A",
+        "tables": [
+          {
+            "table_name": "daily_profile",
+            "columns": [
+              { "name": "txn_id", "type": "string" },
+              { "name": "dob", "type": "string" },
+              { "name": "date", "type": "string" },
+              { "name": "steps", "type": "int64" },
+              { "name": "calories_in", "type": "float64" },
+              { "name": "water_ml", "type": "int64" }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "llm_outputs": [
+    {
+      "plan_id": "case02_example",
+      "record_mapping": {
+        "/recordId": { "op": "column", "name": "txn_id_typo" },
+        "/person/birthDate": {
+          "op": "parse_date",
+          "format": "%Y-%m-%d",
+          "args": [{ "op": "column", "name": "dob" }]
+        },
+        "/day/date": {
+          "op": "parse_date",
+          "format": "%Y-%m-%d",
+          "args": [{ "op": "column", "name": "date" }]
+        },
+        "/activity/steps": { "op": "column", "name": "steps" },
+        "/nutrition/caloriesIn": { "op": "column", "name": "calories_in" },
+        "/hydration/waterMl": { "op": "column", "name": "water_ml" }
+      },
+      "output": {
+        "destination": "vault://results/case02.jsonl",
+        "format": "jsonl",
+        "result_schema_ref": "oci://local/contracts/provider.obesityCoach/0.1.0#output.schema.json"
+      }
+    },
+    {
+      "plan_id": "case02_repaired",
+      "record_mapping": {
+        "/recordId": { "op": "column", "name": "txn_id" },
+        "/person/birthDate": {
+          "op": "parse_date",
+          "format": "%Y-%m-%d",
+          "args": [{ "op": "column", "name": "dob" }]
+        },
+        "/day/date": {
+          "op": "parse_date",
+          "format": "%Y-%m-%d",
+          "args": [{ "op": "column", "name": "date" }]
+        },
+        "/activity/steps": { "op": "column", "name": "steps" },
+        "/nutrition/caloriesIn": { "op": "column", "name": "calories_in" },
+        "/hydration/waterMl": { "op": "column", "name": "water_ml" }
+      },
+      "output": {
+        "destination": "vault://results/case02.jsonl",
+        "format": "jsonl",
+        "result_schema_ref": "oci://local/contracts/provider.obesityCoach/0.1.0#output.schema.json"
+      }
+    }
+  ],
+  "expected": {
+    "ok": true,
+    "iterations": 2,
+    "max_iters": 3,
+    "dataset": {
+      "dataset_id": "vault_dataset_A",
+      "table_name": "daily_profile"
+    },
+    "required_columns": ["calories_in", "date", "dob", "steps", "txn_id", "water_ml"],
+    "pointer_to_op": {
+      "/recordId": "column",
+      "/person/birthDate": "parse_date",
+      "/day/date": "parse_date",
+      "/activity/steps": "column",
+      "/nutrition/caloriesIn": "column",
+      "/hydration/waterMl": "column"
+    },
+    "pointer_to_column": {
+      "/recordId": "txn_id",
+      "/person/birthDate": "dob",
+      "/day/date": "date",
+      "/activity/steps": "steps",
+      "/nutrition/caloriesIn": "calories_in",
+      "/hydration/waterMl": "water_ml"
+    }
+  }
+}
