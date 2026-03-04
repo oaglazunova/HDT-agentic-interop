@@ -5,7 +5,7 @@ from importlib import resources
 from typing import Any, Mapping, Sequence
 
 from hdt_mapping_plan.validate import compute_contract_schema_hash
-
+from hdt_mapping_plan.candidate_retrieval import build_pointer_candidate_cols
 
 
 
@@ -182,8 +182,8 @@ def build_base_messages(
 
     contract_input_schema_dict = dict(contract_input_schema)
     prompt_contract_input_schema = _sanitize_schema_for_prompt(contract_input_schema_dict)
-
     req_ptrs = _required_leaf_pointers(contract_input_schema_dict)
+    contract_schema_for_retrieval = contract_input_schema_dict
 
     # If caller didn't provide schema details for the selected dataset/table, extract them
     # from the vault catalog.
@@ -200,31 +200,21 @@ def build_base_messages(
 
     cols = sorted(dataset_columns or [])
 
+    types = {k: dataset_column_types[k] for k in sorted(dataset_column_types or {})}
     algo_id = str(contract.get("algo_id") or "")
-    pointer_to_candidate_cols: dict[str, list[str]] = {}
-    if algo_id == "provider.obesityCoach":
-        pointer_to_candidate_cols = {
-            "/recordId": ["txn_id"],
-            "/person/birthDate": ["dob"],
-            "/day/date": ["date"],
-            "/activity/steps": ["steps"],
-            "/nutrition/caloriesIn": ["calories_in"],
-            "/hydration/waterMl": ["water_ml"],
-            "/sleep/minutes": ["sleep_minutes"],
-        }
 
-    req_ptr_set = set(req_ptrs)
-    dataset_col_set = set(cols)
+    # Use the original contract schema structure (not the prompt-sanitized copy)
+    # so retrieval can still see type/format hints.
+    contract_schema_for_retrieval = dict(contract_input_schema)
 
-    filtered_pointer_to_candidate_cols: dict[str, list[str]] = {}
-    for ptr, candidate_cols in pointer_to_candidate_cols.items():
-        if ptr not in req_ptr_set:
-            continue
-        valid_candidates = [c for c in candidate_cols if c in dataset_col_set]
-        if valid_candidates:
-            filtered_pointer_to_candidate_cols[ptr] = valid_candidates
-
-    pointer_to_candidate_cols = filtered_pointer_to_candidate_cols
+    pointer_to_candidate_cols = build_pointer_candidate_cols(
+        required_pointers=req_ptrs,
+        dataset_columns=cols,
+        dataset_column_types=types,
+        contract_input_schema=contract_schema_for_retrieval,
+        algo_id=algo_id,
+        top_k=3,
+    )
 
     types = {k: dataset_column_types[k] for k in sorted(dataset_column_types or {})}
 
