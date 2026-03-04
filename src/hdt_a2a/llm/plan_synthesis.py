@@ -7,6 +7,41 @@ from typing import Any, Mapping, Sequence
 from hdt_mapping_plan.validate import compute_contract_schema_hash
 
 
+
+
+_PROMPT_SCHEMA_KEYS = {
+    "type",
+    "properties",
+    "required",
+    "items",
+    "prefixItems",
+    "additionalProperties",
+    "enum",
+    "const",
+    "format",
+    "pattern",
+    "minimum",
+    "maximum",
+    "exclusiveMinimum",
+    "exclusiveMaximum",
+    "minLength",
+    "maxLength",
+    "minItems",
+    "maxItems",
+    "$ref",
+    "$defs",
+    "definitions",
+    "allOf",
+    "anyOf",
+    "oneOf",
+}
+
+_SCHEMA_NAME_PRESERVING_KEYS = {"properties", "$defs", "definitions"}
+
+
+# === helpers: ===============
+
+
 def _extract_dataset_schema(
     vault_catalog: Mapping[str, Any],
     dataset_id: str,
@@ -73,6 +108,44 @@ def _required_leaf_pointers(schema: dict, prefix: str = "") -> list[str]:
     return out
 
 
+def _sanitize_schema_for_prompt(node: Any) -> Any:
+    """
+    Keep only structural JSON Schema content for prompting.
+
+    Drops free-text / presentation metadata such as:
+      - title
+      - description
+      - examples
+      - default
+      - $comment
+
+    Important:
+    - This is for LLM prompt context only.
+    - Validation and hashing must still use the original schema.
+    """
+    if isinstance(node, list):
+        return [_sanitize_schema_for_prompt(x) for x in node]
+
+    if not isinstance(node, dict):
+        return node
+
+    out: dict[str, Any] = {}
+
+    for key, value in node.items():
+        if key in _SCHEMA_NAME_PRESERVING_KEYS and isinstance(value, dict):
+            # Preserve arbitrary property names / definition names,
+            # but sanitize each subschema beneath them.
+            cleaned_children: dict[str, Any] = {}
+            for child_name, child_schema in value.items():
+                cleaned_children[str(child_name)] = _sanitize_schema_for_prompt(child_schema)
+            out[key] = cleaned_children
+            continue
+
+        if key in _PROMPT_SCHEMA_KEYS:
+            out[key] = _sanitize_schema_for_prompt(value)
+
+    return out
+
 # === end helpers =========================
 
 def load_mapping_plan_schema() -> dict[str, Any]:
@@ -107,7 +180,10 @@ def build_base_messages(
     dataset_column_types: Mapping[str, str] | None = None,
 ) -> list[dict[str, str]]:
 
-    req_ptrs = _required_leaf_pointers(dict(contract_input_schema))
+    contract_input_schema_dict = dict(contract_input_schema)
+    prompt_contract_input_schema = _sanitize_schema_for_prompt(contract_input_schema_dict)
+
+    req_ptrs = _required_leaf_pointers(contract_input_schema_dict)
 
     # If caller didn't provide schema details for the selected dataset/table, extract them
     # from the vault catalog.
@@ -176,7 +252,7 @@ def build_base_messages(
                             "input_schema_ref": "oci://local/contracts/UNKNOWN#input.schema.json",
                         },
                     },
-                    "contract_input_schema": contract_input_schema,
+                    "contract_input_schema": prompt_contract_input_schema,
                     "contract_required_leaf_pointers": req_ptrs,
                     "pointer_to_candidate_cols": pointer_to_candidate_cols,
                     "dataset_columns": cols,
