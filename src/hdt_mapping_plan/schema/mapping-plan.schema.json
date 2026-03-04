@@ -1,0 +1,212 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.org/neutral-room/mapping-plan.schema.json",
+  "title": "NeutralRoom Mapping Plan",
+  "type": "object",
+  "required": ["plan_version", "plan_id", "algo", "dataset", "contract", "limits", "required_columns", "record_mapping", "output"],
+  "additionalProperties": false,
+  "properties": {
+    "plan_version": { "type": "string", "const": "1.0" },
+    "plan_id": { "type": "string", "minLength": 8, "maxLength": 128 },
+
+    "algo": {
+      "type": "object",
+      "required": ["algo_id", "algo_version"],
+      "additionalProperties": false,
+      "properties": {
+        "algo_id": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "algo_version": { "type": "string", "minLength": 1, "maxLength": 64 }
+      }
+    },
+
+    "dataset": {
+      "type": "object",
+      "required": ["dataset_id", "table_name"],
+      "additionalProperties": false,
+      "properties": {
+        "dataset_id": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "table_name": { "type": "string", "minLength": 1, "maxLength": 200 }
+      }
+    },
+
+    "contract": {
+      "type": "object",
+      "required": ["contract_ref", "input_schema_ref", "contract_hash"],
+      "additionalProperties": false,
+      "properties": {
+        "contract_ref": { "type": "string", "minLength": 1, "maxLength": 400 },
+        "input_schema_ref": { "type": "string", "minLength": 1, "maxLength": 400 },
+        "contract_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+
+    "limits": {
+      "type": "object",
+      "required": ["max_rows", "batch_rows", "max_record_bytes", "max_total_output_bytes"],
+      "additionalProperties": false,
+      "properties": {
+        "max_rows": { "type": "integer", "minimum": 1, "maximum": 1000000000 },
+        "batch_rows": { "type": "integer", "minimum": 1, "maximum": 1000000 },
+        "max_record_bytes": { "type": "integer", "minimum": 128, "maximum": 10000000 },
+        "max_total_output_bytes": { "type": "integer", "minimum": 1024, "maximum": 1000000000 }
+      }
+    },
+
+    "required_columns": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1, "maxLength": 200 }
+    },
+
+    "row_filter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "args"],
+      "properties": {
+        "op": { "type": "string", "enum": ["and", "or", "not", "eq", "neq", "lt", "lte", "gt", "gte", "is_null", "not_null"] },
+        "args": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/filterExpr" }
+        }
+      }
+    },
+
+    "record_mapping": {
+      "type": "object",
+      "description": "Maps JSON Pointer paths to expressions evaluated per row.",
+      "additionalProperties": { "$ref": "#/$defs/expr" },
+      "propertyNames": {
+        "type": "string",
+        "description": "JSON Pointer-like path",
+        "pattern": "^/([A-Za-z0-9_\\-]+)(/[A-Za-z0-9_\\-]+)*$"
+      }
+    },
+
+    "grouping": {
+      "type": "object",
+      "description": "Optional constrained grouping. Avoid unless needed.",
+      "additionalProperties": false,
+      "required": ["group_by", "max_group_size"],
+      "properties": {
+        "group_by": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "items": { "type": "string", "minLength": 1, "maxLength": 200 }
+        },
+        "order_by": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "items": { "type": "string", "minLength": 1, "maxLength": 200 }
+        },
+        "max_group_size": { "type": "integer", "minimum": 1, "maximum": 100000 }
+      }
+    },
+
+    "output": {
+      "type": "object",
+      "required": ["destination", "format", "result_schema_ref"],
+      "additionalProperties": false,
+      "properties": {
+        "destination": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "format": { "type": "string", "enum": ["json", "jsonl", "parquet"] },
+        "result_schema_ref": { "type": "string", "minLength": 1, "maxLength": 400 }
+      }
+    }
+  },
+
+  "$defs": {
+    "filterExpr": {
+      "oneOf": [
+        { "$ref": "#/properties/row_filter" },
+        { "$ref": "#/$defs/columnRef" },
+        { "$ref": "#/$defs/literal" }
+      ]
+    },
+
+    "expr": {
+      "type": "object",
+      "required": ["op"],
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "type": "string",
+          "enum": [
+            "column",
+            "const",
+            "cast",
+            "to_string",
+            "parse_date",
+            "parse_datetime",
+            "scale",
+            "round",
+            "lower",
+            "upper",
+            "coalesce"
+          ]
+        },
+        "name": { "type": "string" },
+        "value": { "$ref": "#/$defs/literal" },
+        "type": { "type": "string", "enum": ["string", "int64", "float64", "bool", "date", "datetime"] },
+        "format": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "factor": { "type": "number" },
+        "mode": { "type": "string", "enum": ["half_even", "half_up", "floor", "ceil"] },
+        "args": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": { "$ref": "#/$defs/expr" }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "op": { "const": "column" } } },
+          "then": { "required": ["name"] }
+        },
+        {
+          "if": { "properties": { "op": { "const": "const" } } },
+          "then": { "required": ["value"] }
+        },
+        {
+          "if": { "properties": { "op": { "const": "cast" } } },
+          "then": { "required": ["type", "args"] }
+        },
+        {
+          "if": { "properties": { "op": { "enum": ["parse_date", "parse_datetime"] } } },
+          "then": { "required": ["format", "args"] }
+        },
+        {
+          "if": { "properties": { "op": { "const": "scale" } } },
+          "then": { "required": ["factor", "args"] }
+        },
+        {
+          "if": { "properties": { "op": { "const": "round" } } },
+          "then": { "required": ["mode", "args"] }
+        }
+      ]
+    },
+
+    "columnRef": {
+      "type": "object",
+      "required": ["op", "name"],
+      "additionalProperties": false,
+      "properties": {
+        "op": { "const": "column" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 200 }
+      }
+    },
+
+    "literal": {
+      "oneOf": [
+        { "type": "string", "maxLength": 2048 },
+        { "type": "number" },
+        { "type": "integer" },
+        { "type": "boolean" },
+        { "type": "null" }
+      ]
+    }
+  }
+}

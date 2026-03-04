@@ -16,6 +16,10 @@ dependencies = [
   "requests>=2.31",
   "python-dotenv>=1.0",
   "mcp>=1.24,<2",
+  "jsonschema>=4.22",
+  "httpx>=0.27",
+  "a2a-sdk[http-server]>=0.3.0",
+  "uvicorn>=0.27",
 ]
 
 [project.optional-dependencies]
@@ -37,6 +41,9 @@ Issues = "https://github.com/oaglazunova/HDT-agentic-interop/issues"
 [project.scripts]
 hdt-mcp = "hdt_mcp.gateway:main"
 hdt-sources = "hdt_sources_mcp.server:main"
+hdt-provider-a2a = "hdt_provider_a2a.server:main"
+hdt-user-a2a = "hdt_user_a2a.server:main"
+hdt-a2a-negotiate = "hdt_a2a.host.run_negotiation:main"
 
 [tool.pytest.ini_options]
 addopts = "-q"
@@ -59,7 +66,15 @@ include = [
   "hdt_sources_mcp*",
   "hdt_config*",
   "hdt_common*",
+  "hdt_mapping_plan*",
+  "hdt_a2a*",
+  "hdt_provider_a2a*",
+  "hdt_user_a2a*",
 ]
+
+[tool.setuptools.package-data]
+hdt_mapping_plan = ["schema/*.json", "examples/*.json", "allowed_ops_profile.json"]
+hdt_provider_a2a = ["contracts/**/*.json"]
 
 exclude = [
   "data*",

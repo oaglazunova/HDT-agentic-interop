@@ -1,0 +1,154 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "plan_id",
+    "plan_version",
+    "algo",
+    "contract",
+    "dataset",
+    "limits",
+    "output",
+    "record_mapping",
+    "required_columns"
+  ],
+  "properties": {
+    "plan_id": {
+      "type": "string"
+    },
+    "plan_version": {
+      "type": "string"
+    },
+    "algo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "algo_id",
+        "algo_version"
+      ],
+      "properties": {
+        "algo_id": {
+          "type": "string"
+        },
+        "algo_version": {
+          "type": "string"
+        }
+      }
+    },
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract_ref",
+        "input_schema_ref",
+        "contract_hash"
+      ],
+      "properties": {
+        "contract_ref": {
+          "type": "string"
+        },
+        "input_schema_ref": {
+          "type": "string"
+        },
+        "contract_hash": {
+          "type": "string"
+        }
+      }
+    },
+    "dataset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dataset_id",
+        "table_name"
+      ],
+      "properties": {
+        "dataset_id": {
+          "type": "string"
+        },
+        "table_name": {
+          "type": "string"
+        }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_rows",
+        "batch_rows",
+        "max_record_bytes",
+        "max_total_output_bytes"
+      ],
+      "properties": {
+        "max_rows": {
+          "type": "integer"
+        },
+        "batch_rows": {
+          "type": "integer"
+        },
+        "max_record_bytes": {
+          "type": "integer"
+        },
+        "max_total_output_bytes": {
+          "type": "integer"
+        }
+      }
+    },
+    "output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "destination",
+        "format",
+        "result_schema_ref"
+      ],
+      "properties": {
+        "destination": {
+          "type": "string"
+        },
+        "format": {
+          "type": "string"
+        },
+        "result_schema_ref": {
+          "type": "string"
+        }
+      }
+    },
+    "required_columns": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 25,
+      "uniqueItems": true
+    },
+    "record_mapping": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^/([A-Za-z0-9_\\-]+)(/[A-Za-z0-9_\\-]+)*$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["op"],
+        "properties": {
+          "op": { "type": "string", "enum": ["column", "const"] },
+          "name": { "type": "string" },
+          "value": {}
+        },
+        "allOf": [
+          {
+            "if": { "properties": { "op": { "const": "column" } } },
+            "then": { "required": ["name"] }
+          },
+          {
+            "if": { "properties": { "op": { "const": "const" } } },
+            "then": { "required": ["value"] }
+          }
+        ]
+      }
+    }
+  }
+}
