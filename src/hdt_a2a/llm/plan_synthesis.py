@@ -343,3 +343,44 @@ def generate_mapping_plan_candidate(
     ]
     schema = load_mapping_plan_llm_schema()
     return client.chat_json(messages, json_schema=schema)
+
+
+def generate_mapping_plan_candidates(
+    *,
+    client,
+    n: int = 1,
+    base_messages: Sequence[Mapping[str, Any]] | None = None,
+    contract: Mapping[str, Any] | None = None,
+    contract_input_schema: Mapping[str, Any] | None = None,
+    vault_catalog: Mapping[str, Any] | None = None,
+    allowed_ops_profile: Mapping[str, Any] | None = None,
+    expected_contract_hash: str | None = None,
+    dataset_id: str | None = None,
+    table_name: str | None = None,
+    dataset_columns: set[str] | None = None,
+    dataset_column_types: Mapping[str, str] | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Generate multiple independent initial MappingPlan candidates.
+
+    This is intentionally a thin wrapper around generate_mapping_plan_candidate()
+    so all prompt-building behavior stays identical.
+    """
+    count = max(int(n), 1)
+
+    return [
+        generate_mapping_plan_candidate(
+            client=client,
+            base_messages=base_messages,
+            contract=contract,
+            contract_input_schema=contract_input_schema,
+            vault_catalog=vault_catalog,
+            allowed_ops_profile=allowed_ops_profile,
+            expected_contract_hash=expected_contract_hash,
+            dataset_id=dataset_id,
+            table_name=table_name,
+            dataset_columns=dataset_columns,
+            dataset_column_types=dataset_column_types,
+        )
+        for _ in range(count)
+    ]

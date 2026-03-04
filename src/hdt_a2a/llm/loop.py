@@ -7,11 +7,16 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 from hdt_a2a.llm.ollama_client import OllamaClient
-from hdt_a2a.llm.plan_synthesis import build_base_messages, generate_mapping_plan_candidate
 from hdt_a2a.llm.repair import repair_mapping_plan_candidate
 from hdt_mapping_plan.validate import CriticReport, validate_and_lint_plan, compute_contract_schema_hash
 from hdt_mapping_plan.vault_catalog import get_dataset_schema
 from hdt_mapping_plan.normalize import apply_limits_policy, fill_contract_refs
+from hdt_a2a.llm.plan_synthesis import (
+    build_base_messages,
+    generate_mapping_plan_candidate,
+    generate_mapping_plan_candidates,
+)
+from hdt_mapping_plan.select import select_best_plan
 
 
 @dataclass(frozen=True)
@@ -24,7 +29,7 @@ class LoopResult:
     reports: list[CriticReport]
 
 
-# === helpers =========================
+# === helpers: =========================
 
 def _apply_immutables(
     plan: dict[str, Any],
@@ -277,7 +282,46 @@ def _enforce_plan_invariants(
     return plan
 
 
-# === emd helpers ===========================
+def _postprocess_generated_plan(
+    plan: dict[str, Any],
+    *,
+    contract: Mapping[str, Any],
+    expected_hash: str,
+    dataset_id: str,
+    table_name: str,
+    algo_id: str,
+    algo_version: str,
+    contract_input_schema: Mapping[str, Any],
+    dataset_columns: set[str],
+) -> dict[str, Any]:
+    """
+    Apply the deterministic host-side post-processing pipeline to a newly
+    generated or repaired candidate.
+    """
+    plan = _normalize_llm_plan_shape(plan)
+
+    plan = _apply_immutables(
+        plan,
+        contract=contract,
+        expected_hash=expected_hash,
+        dataset_id=dataset_id,
+        table_name=table_name,
+    )
+
+    plan = fill_contract_refs(plan, algo_id=algo_id, algo_version=algo_version)
+    plan = apply_limits_policy(plan)
+    plan = _normalize_llm_plan_shape(plan)
+
+    plan = _enforce_plan_invariants(
+        plan,
+        contract_input_schema=contract_input_schema,
+        dataset_columns=dataset_columns,
+        algo_id=algo_id,
+    )
+
+    return plan
+
+# === end helpers ===========================
 
 
 def synthesize_plan_with_repairs(
@@ -293,6 +337,7 @@ def synthesize_plan_with_repairs(
         dataset_column_types: Mapping[str, str] | None = None,
         contract_hash_strict: bool = True,
         max_iters: int = 3,
+        initial_candidates: int = 1,
 ) -> LoopResult:
     """
     Generate a MappingPlan candidate via structured output and repair using deterministic validation.
@@ -355,37 +400,57 @@ def synthesize_plan_with_repairs(
         dataset_column_types=dataset_column_types,
     )
 
-    # 1) initial synthesis
-    plan = generate_mapping_plan_candidate(
-        client=client,
-        base_messages=base_messages,
-    )
-
-    plan = _normalize_llm_plan_shape(plan)
-    # enforce immutables / integrity first (hash + dataset)
-    plan = _apply_immutables(
-        plan,
-        contract=contract,
-        expected_hash=expected_hash,
-        dataset_id=dataset_id,
-        table_name=table_name,
-    )
-    # refs (deterministic)
     algo_id = str(contract.get("algo_id") or "")
     algo_version = str(contract.get("algo_version") or "")
     if not algo_id or not algo_version:
         raise ValueError("contract must include algo_id and algo_version")
-    plan = fill_contract_refs(plan, algo_id=algo_id, algo_version=algo_version)
 
-    # limits (deterministic)
-    plan = apply_limits_policy(plan)
-    plan = _normalize_llm_plan_shape(plan)  # <-- optional but safe (drops any extras)
-    plan = _enforce_plan_invariants(
-        plan,
-        contract_input_schema=contract_input_schema,
-        dataset_columns=dataset_columns,
-        algo_id=algo_id,
+    # 1) initial synthesis: generate one or more candidates, then deterministically
+    # select the best valid one (if any) before entering the repair loop.
+    initial_candidates = max(int(initial_candidates), 1)
+
+    raw_candidates = generate_mapping_plan_candidates(
+        client=client,
+        base_messages=base_messages,
+        n=initial_candidates,
     )
+
+    candidates = [
+        _postprocess_generated_plan(
+            p,
+            contract=contract,
+            expected_hash=expected_hash,
+            dataset_id=dataset_id,
+            table_name=table_name,
+            algo_id=algo_id,
+            algo_version=algo_version,
+            contract_input_schema=contract_input_schema,
+            dataset_columns=dataset_columns,
+        )
+        for p in raw_candidates
+    ]
+
+    # Fallback seed if none are immediately valid.
+    plan = candidates[0]
+
+    if len(candidates) > 1:
+        selection = select_best_plan(
+            candidates,
+            dataset_columns=dataset_columns,
+            dataset_column_types=dataset_column_types,
+            allowed_ops_profile=allowed_ops_profile,
+            contract_input_schema=contract_input_schema,
+        )
+
+        if selection.best_plan is not None:
+            assert selection.best_report is not None
+            return LoopResult(
+                ok=True,
+                plan=selection.best_plan,
+                report=selection.best_report,
+                iterations=1,
+                reports=[selection.best_report],
+            )
 
     reports: list[CriticReport] = []
     iterations = 0
@@ -415,26 +480,15 @@ def synthesize_plan_with_repairs(
             previous_plan=plan,
             critic_report=report,
         )
-        # normalize plan shape
-        plan = _normalize_llm_plan_shape(plan)
-        # Critical: re-apply immutables after every repair (model will try to “helpfully” change them)
-        plan = _apply_immutables(
+
+        plan = _postprocess_generated_plan(
             plan,
             contract=contract,
             expected_hash=expected_hash,
             dataset_id=dataset_id,
             table_name=table_name,
-        )
-        # refs (deterministic)
-        plan = fill_contract_refs(plan, algo_id=algo_id, algo_version=algo_version)
-
-        # limits (deterministic)
-        plan = apply_limits_policy(plan)
-        plan = _normalize_llm_plan_shape(plan)  # <-- optional but safe (drops any extras)
-        # deterministic enforcement: required pointers + required_columns minimization
-        plan = _enforce_plan_invariants(
-            plan,
+            algo_id=algo_id,
+            algo_version=algo_version,
             contract_input_schema=contract_input_schema,
             dataset_columns=dataset_columns,
-            algo_id=algo_id,
         )

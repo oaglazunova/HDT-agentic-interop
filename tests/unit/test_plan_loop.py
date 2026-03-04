@@ -137,3 +137,87 @@ def test_loop_lifts_must_include_to_root() -> None:
     assert "must_include" not in res.plan
     assert "rules" not in res.plan
     assert "limits" in res.plan and "output" in res.plan and "record_mapping" in res.plan and "required_columns" in res.plan
+
+
+
+def test_loop_returns_valid_initial_candidate_without_repair_when_multiple_are_requested() -> None:
+    contract = {"algo_id": "provider.obesityCoach", "algo_version": "0.1.0"}
+    contract_input_schema = {
+        "type": "object",
+        "properties": {"person": {"type": "object", "properties": {"birthDate": {"type": "string"}}}},
+    }
+
+    expected_hash = compute_contract_schema_hash(contract_input_schema)
+
+    class FakeOllamaMultiInitial(OllamaClient):
+        def __init__(self) -> None:
+            super().__init__(OllamaConfig(model="dummy"))
+            self.calls = 0
+
+        def chat_json(self, messages, *, json_schema: Mapping[str, Any]) -> dict[str, Any]:
+            self.calls += 1
+
+            if self.calls == 1:
+                # invalid first candidate
+                return {
+                    "plan_version": "1.0",
+                    "plan_id": "bad_initial",
+                    "algo": {"algo_id": "provider.obesityCoach", "algo_version": "0.1.0"},
+                    "dataset": {"dataset_id": "vault_dataset_A", "table_name": "transactions"},
+                    "contract": {
+                        "contract_ref": "x",
+                        "input_schema_ref": "x",
+                        "contract_hash": expected_hash,
+                    },
+                    "limits": {"max_rows": 10, "batch_rows": 5, "max_record_bytes": 1024, "max_total_output_bytes": 4096},
+                    "required_columns": ["UNKNOWN_COLUMN"],
+                    "record_mapping": {"/person/birthDate": {"op": "column", "name": "UNKNOWN_COLUMN"}},
+                    "output": {"destination": "vault://results/x.jsonl", "format": "jsonl", "result_schema_ref": "x"},
+                }
+
+            if self.calls == 2:
+                # valid second candidate
+                return {
+                    "plan_version": "1.0",
+                    "plan_id": "good_initial",
+                    "algo": {"algo_id": "provider.obesityCoach", "algo_version": "0.1.0"},
+                    "dataset": {"dataset_id": "vault_dataset_A", "table_name": "transactions"},
+                    "contract": {
+                        "contract_ref": "oci://x/contracts/provider.obesityCoach:0.1.0",
+                        "input_schema_ref": "oci://x/contracts/provider.obesityCoach:0.1.0#input.schema.json",
+                        "contract_hash": expected_hash,
+                    },
+                    "limits": {"max_rows": 10, "batch_rows": 5, "max_record_bytes": 1024, "max_total_output_bytes": 4096},
+                    "required_columns": ["dob"],
+                    "record_mapping": {"/person/birthDate": {"op": "column", "name": "dob"}},
+                    "output": {"destination": "vault://results/x.jsonl", "format": "jsonl", "result_schema_ref": "oci://x#out"},
+                }
+
+            raise AssertionError("repair should not be called when a valid initial candidate exists")
+
+    vault_catalog = {
+        "datasets": [
+            {"dataset_id": "vault_dataset_A", "tables": [{"table_name": "transactions", "columns": [{"name": "dob", "type": "date"}]}]}
+        ]
+    }
+
+    client = FakeOllamaMultiInitial()
+
+    res = synthesize_plan_with_repairs(
+        client=client,
+        contract=contract,
+        contract_input_schema=contract_input_schema,
+        vault_catalog=vault_catalog,
+        dataset_columns={"dob"},
+        dataset_column_types={"dob": "date"},
+        max_iters=3,
+        initial_candidates=2,
+    )
+
+    assert res.ok is True
+    assert res.plan is not None
+    assert res.plan["plan_id"] == "good_initial"
+    assert res.plan["record_mapping"]["/person/birthDate"]["name"] == "dob"
+    assert res.iterations == 1
+    assert len(res.reports) == 1
+    assert client.calls == 2
