@@ -18,7 +18,7 @@ from jsonschema import Draft202012Validator
 import re
 
 from hdt_mapping_plan import errors as E
-from hdt_mapping_plan.hashing import sha256_hex_of_json
+from hdt_mapping_plan.hashing import sha256_hex_of_structural_schema
 from hdt_mapping_plan.vault_catalog import get_dataset_schema  # ok to import; no file I/O
 
 
@@ -1342,10 +1342,20 @@ def validate_plan_contract_pointers(
 
 def compute_contract_schema_hash(schema_obj: Mapping[str, Any]) -> str:
     """
-    Compute a stable hash for a provider schema.
-    Output format: 64 hex chars (SHA-256 of canonical JSON serialization).
+    Compute a stable structural hash for a provider input schema.
+
+    The hash ignores clearly cosmetic / annotation-only metadata such as:
+      - $id
+      - title
+      - description
+      - examples
+      - default
+      - $comment
+
+    This keeps contract hashes stable across harmless presentation edits,
+    while still changing when structural content changes.
     """
-    return sha256_hex_of_json(schema_obj)
+    return sha256_hex_of_structural_schema(schema_obj)
 
 
 def validate_plan_contract_hash(
