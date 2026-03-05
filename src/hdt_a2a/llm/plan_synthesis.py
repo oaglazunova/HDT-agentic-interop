@@ -178,6 +178,8 @@ def build_base_messages(
     table_name: str,
     dataset_columns: set[str] | None = None,
     dataset_column_types: Mapping[str, str] | None = None,
+    use_candidate_retrieval: bool = True,
+    use_seed_hints: bool = True,
 ) -> list[dict[str, str]]:
 
     contract_input_schema_dict = dict(contract_input_schema)
@@ -214,6 +216,8 @@ def build_base_messages(
         contract_input_schema=contract_schema_for_retrieval,
         algo_id=algo_id,
         top_k=3,
+        use_candidate_retrieval=use_candidate_retrieval,
+        use_seed_hints=use_seed_hints,
     )
 
     types = {k: dataset_column_types[k] for k in sorted(dataset_column_types or {})}
@@ -298,6 +302,8 @@ def generate_mapping_plan_candidate(
     table_name: str | None = None,
     dataset_columns: set[str] | None = None,
     dataset_column_types: Mapping[str, str] | None = None,
+    use_candidate_retrieval: bool = True,
+    use_seed_hints: bool = True,
 ) -> dict[str, Any]:
     if base_messages is None:
         if contract is None or contract_input_schema is None or vault_catalog is None:
@@ -336,6 +342,8 @@ def generate_mapping_plan_candidate(
             table_name=table_name,
             dataset_columns=dataset_columns,
             dataset_column_types=dataset_column_types,
+            use_candidate_retrieval=use_candidate_retrieval,
+            use_seed_hints=use_seed_hints,
         )
 
     messages = list(base_messages) + [
@@ -359,6 +367,8 @@ def generate_mapping_plan_candidates(
     table_name: str | None = None,
     dataset_columns: set[str] | None = None,
     dataset_column_types: Mapping[str, str] | None = None,
+    use_candidate_retrieval: bool = True,
+    use_seed_hints: bool = True,
 ) -> list[dict[str, Any]]:
     """
     Generate multiple independent initial MappingPlan candidates.
@@ -381,6 +391,8 @@ def generate_mapping_plan_candidates(
             table_name=table_name,
             dataset_columns=dataset_columns,
             dataset_column_types=dataset_column_types,
+            use_candidate_retrieval=use_candidate_retrieval,
+            use_seed_hints=use_seed_hints,
         )
         for _ in range(count)
     ]

@@ -338,6 +338,8 @@ def synthesize_plan_with_repairs(
         contract_hash_strict: bool = True,
         max_iters: int = 3,
         initial_candidates: int = 1,
+        use_candidate_retrieval: bool = True,
+        use_seed_hints: bool = True,
 ) -> LoopResult:
     """
     Generate a MappingPlan candidate via structured output and repair using deterministic validation.
@@ -398,6 +400,8 @@ def synthesize_plan_with_repairs(
         table_name=table_name,
         dataset_columns=dataset_columns,
         dataset_column_types=dataset_column_types,
+        use_candidate_retrieval=use_candidate_retrieval,
+        use_seed_hints=use_seed_hints,
     )
 
     algo_id = str(contract.get("algo_id") or "")

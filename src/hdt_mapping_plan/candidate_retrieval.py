@@ -139,6 +139,7 @@ def rank_candidate_columns_for_pointer(
     contract_input_schema: Mapping[str, Any] | None = None,
     algo_id: str = "",
     top_k: int = 3,
+    use_seed_hints: bool = True,
 ) -> list[str]:
     """
     Deterministically rank likely source columns for one contract pointer.
@@ -163,7 +164,7 @@ def rank_candidate_columns_for_pointer(
 
     expected_kind = _expected_kind_for_pointer(contract_input_schema, pointer)
 
-    seed_map = provider_seed_pointer_candidates(algo_id)
+    seed_map = provider_seed_pointer_candidates(algo_id) if use_seed_hints else {}
     seeded = seed_map.get(pointer, [])
     seed_bonus = {name: 100 - idx for idx, name in enumerate(seeded)}
 
@@ -225,11 +226,16 @@ def build_pointer_candidate_cols(
     contract_input_schema: Mapping[str, Any] | None = None,
     algo_id: str = "",
     top_k: int = 3,
+    use_candidate_retrieval: bool = True,
+    use_seed_hints: bool = True,
 ) -> dict[str, list[str]]:
     """
     Build pointer -> ranked candidate columns for required contract pointers only.
     Only includes pointers with at least one candidate.
     """
+    if not use_candidate_retrieval:
+        return {}
+
     out: dict[str, list[str]] = {}
 
     for ptr in required_pointers:
@@ -240,6 +246,7 @@ def build_pointer_candidate_cols(
             contract_input_schema=contract_input_schema,
             algo_id=algo_id,
             top_k=top_k,
+            use_seed_hints=use_seed_hints,
         )
         if ranked:
             out[ptr] = ranked

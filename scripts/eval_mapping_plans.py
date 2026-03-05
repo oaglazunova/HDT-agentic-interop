@@ -47,6 +47,8 @@ class EvalResult:
 	lint_warning_count: int
 	used_required_columns: list[str]
 	output_destination: str | None
+	use_candidate_retrieval: bool
+	use_seed_hints: bool
 
 
 def _toy_tasks() -> list[EvalTask]:
@@ -175,6 +177,8 @@ def run_one(
 	task: EvalTask,
 	max_iters: int,
 	initial_candidates: int,
+	use_candidate_retrieval: bool,
+	use_seed_hints: bool,
 ) -> EvalResult:
 	client = client_factory()
 
@@ -188,6 +192,8 @@ def run_one(
 		dataset_column_types=task.dataset_column_types,
 		max_iters=max_iters,
 		initial_candidates=initial_candidates,
+		use_candidate_retrieval=use_candidate_retrieval,
+		use_seed_hints=use_seed_hints,
 	)
 	elapsed_ms = int((time.perf_counter() - start) * 1000)
 
@@ -236,6 +242,8 @@ def run_one(
 		lint_warning_count=lint_warning_count,
 		used_required_columns=used_required_columns,
 		output_destination=output_destination,
+		use_candidate_retrieval=use_candidate_retrieval,
+		use_seed_hints=use_seed_hints,
 	)
 
 
@@ -246,6 +254,8 @@ def run_suite(
 	tasks: list[EvalTask],
 	max_iters: int,
 	initial_candidates: int,
+	use_candidate_retrieval: bool,
+	use_seed_hints: bool,
 ) -> list[EvalResult]:
 	return [
 		run_one(
@@ -254,6 +264,8 @@ def run_suite(
 			task=task,
 			max_iters=max_iters,
 			initial_candidates=initial_candidates,
+			use_candidate_retrieval=use_candidate_retrieval,
+			use_seed_hints=use_seed_hints,
 		)
 		for task in tasks
 	]
@@ -266,6 +278,16 @@ def _parse_args() -> argparse.Namespace:
 	parser.add_argument("--out", required=True, help="Output JSONL file path.")
 	parser.add_argument("--max-iters", type=int, default=3)
 	parser.add_argument("--initial-candidates", type=int, default=1)
+	parser.add_argument(
+		"--disable-retriever",
+		action="store_true",
+		help="Disable pointer-to-candidate retrieval hints in prompts.",
+	)
+	parser.add_argument(
+		"--disable-seed-hints",
+		action="store_true",
+		help="Disable provider-specific seed hints while keeping generic retrieval on.",
+	)
 	return parser.parse_args()
 
 
@@ -275,12 +297,17 @@ def main() -> int:
 	tasks = _load_tasks_from_json(Path(args.tasks_json)) if args.tasks_json else _toy_tasks()
 	client_factory = _build_client_factory(args.model)
 
+	use_candidate_retrieval = not bool(args.disable_retriever)
+	use_seed_hints = not bool(args.disable_seed_hints)
+
 	results = run_suite(
 		client_factory=client_factory,
 		model_label=args.model,
 		tasks=tasks,
 		max_iters=max(int(args.max_iters), 1),
 		initial_candidates=max(int(args.initial_candidates), 1),
+		use_candidate_retrieval=use_candidate_retrieval,
+		use_seed_hints=use_seed_hints,
 	)
 
 	out_path = Path(args.out)
@@ -300,6 +327,8 @@ def main() -> int:
 		"success_rate": (ok_count / total) if total else 0.0,
 		"avg_elapsed_ms": (sum(r.elapsed_ms for r in results) / total) if total else 0.0,
 		"avg_iterations": (sum(r.iterations for r in results) / total) if total else 0.0,
+		"use_candidate_retrieval": use_candidate_retrieval,
+		"use_seed_hints": use_seed_hints,
 	}
 	print(json.dumps(summary, ensure_ascii=False))
 
