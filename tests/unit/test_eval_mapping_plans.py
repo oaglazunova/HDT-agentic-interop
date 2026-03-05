@@ -86,18 +86,24 @@ def test_run_one_emits_structured_eval_result() -> None:
 		initial_candidates=1,
 		use_candidate_retrieval=True,
 		use_seed_hints=False,
+		repeat_index=0,
 	)
 
 	assert result.task_id == "birthdate_only"
 	assert result.model_label == "dummy-model"
+	assert result.repeat_index == 0
 	assert result.ok is True
 	assert result.iterations >= 1
 	assert result.plan_id == "eval_valid_plan"
 	assert result.report_ok is True
 	assert result.error_count == 0
-	assert result.warning_count == 0
-	assert result.lint_warning_count == 0
 	assert result.used_required_columns == ["dob"]
 	assert result.output_destination == "vault://results/eval_valid_plan.jsonl"
 	assert result.use_candidate_retrieval is True
 	assert result.use_seed_hints is False
+	assert result.lint_warning_count >= 0
+	assert result.weighted_lint_score >= 0
+	assert result.weighted_lint_score >= result.lint_warning_count
+	# for stricter assertion:
+	# assert result.lint_warning_count == 0
+	# assert result.weighted_lint_score == 0

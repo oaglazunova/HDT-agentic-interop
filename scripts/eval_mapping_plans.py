@@ -21,6 +21,17 @@ from hdt_a2a.llm.ollama_client import OllamaClient, OllamaConfig
 from hdt_mapping_plan.validate import compute_contract_schema_hash
 
 
+_LINT_WARNING_WEIGHTS: dict[str, int] = {
+	"LINT_GROUPING_USED": 3,
+	"LINT_ROW_FILTER_USED": 2,
+	"LINT_MANY_CASTS": 2,
+	"LINT_MANY_CONSTANTS": 1,
+}
+
+_DEFAULT_LINT_WARNING_WEIGHT = 1
+
+
+
 @dataclass
 class EvalTask:
 	task_id: str
@@ -35,20 +46,50 @@ class EvalTask:
 class EvalResult:
 	task_id: str
 	model_label: str
+	repeat_index: int
 	ok: bool
 	iterations: int
 	elapsed_ms: int
 	initial_candidates: int
 	max_iters: int
+	use_candidate_retrieval: bool
+	use_seed_hints: bool
 	plan_id: str | None
 	report_ok: bool | None
 	error_count: int
 	warning_count: int
 	lint_warning_count: int
+	weighted_lint_score: int
 	used_required_columns: list[str]
 	output_destination: str | None
-	use_candidate_retrieval: bool
-	use_seed_hints: bool
+
+
+# === helpers: ==============
+
+
+def _compute_lint_metrics(report: Any) -> tuple[int, int]:
+	"""
+	Return:
+	- lint_warning_count
+	- weighted_lint_score
+
+	Only warnings whose code starts with 'LINT_' are counted.
+	Unknown lint codes get the default weight.
+	"""
+	if report is None:
+		return 0, 0
+
+	lint_warning_count = 0
+	weighted_lint_score = 0
+
+	for w in getattr(report, "warnings", []):
+		code = str(getattr(w, "code", "") or "")
+		if not code.startswith("LINT_"):
+			continue
+		lint_warning_count += 1
+		weighted_lint_score += _LINT_WARNING_WEIGHTS.get(code, _DEFAULT_LINT_WARNING_WEIGHT)
+
+	return lint_warning_count, weighted_lint_score
 
 
 def _toy_tasks() -> list[EvalTask]:
@@ -179,6 +220,7 @@ def run_one(
 	initial_candidates: int,
 	use_candidate_retrieval: bool,
 	use_seed_hints: bool,
+	repeat_index: int,
 ) -> EvalResult:
 	client = client_factory()
 
@@ -213,37 +255,31 @@ def run_one(
 		if isinstance(output, dict) and output.get("destination") is not None:
 			output_destination = str(output["destination"])
 
-
 	error_count = len(report.errors) if report is not None else 0
 	warning_count = len(report.warnings) if report is not None else 0
-
-	lint_warning_count = 0
-	if report is not None:
-		lint_warning_count = sum(
-			1
-			for w in report.warnings
-			if str(getattr(w, "code", "")).startswith("LINT_")
-		)
+	lint_warning_count, weighted_lint_score = _compute_lint_metrics(report)
 
 	report_ok = report.ok if report is not None else None
 
 	return EvalResult(
 		task_id=task.task_id,
 		model_label=model_label,
+		repeat_index=repeat_index,
 		ok=res.ok,
 		iterations=res.iterations,
 		elapsed_ms=elapsed_ms,
 		initial_candidates=initial_candidates,
 		max_iters=max_iters,
+		use_candidate_retrieval=use_candidate_retrieval,
+		use_seed_hints=use_seed_hints,
 		plan_id=plan_id,
 		report_ok=report_ok,
 		error_count=error_count,
 		warning_count=warning_count,
 		lint_warning_count=lint_warning_count,
+		weighted_lint_score=weighted_lint_score,
 		used_required_columns=used_required_columns,
 		output_destination=output_destination,
-		use_candidate_retrieval=use_candidate_retrieval,
-		use_seed_hints=use_seed_hints,
 	)
 
 
@@ -256,20 +292,129 @@ def run_suite(
 	initial_candidates: int,
 	use_candidate_retrieval: bool,
 	use_seed_hints: bool,
+	repeats: int = 1,
 ) -> list[EvalResult]:
-	return [
-		run_one(
-			client_factory=client_factory,
-			model_label=model_label,
-			task=task,
-			max_iters=max_iters,
-			initial_candidates=initial_candidates,
-			use_candidate_retrieval=use_candidate_retrieval,
-			use_seed_hints=use_seed_hints,
-		)
-		for task in tasks
-	]
 
+	results: list[EvalResult] = []
+	total_repeats = max(int(repeats), 1)
+
+	for repeat_index in range(total_repeats):
+		for task in tasks:
+			results.append(
+				run_one(
+					client_factory=client_factory,
+					model_label=model_label,
+					task=task,
+					max_iters=max_iters,
+					initial_candidates=initial_candidates,
+					use_candidate_retrieval=use_candidate_retrieval,
+					use_seed_hints=use_seed_hints,
+					repeat_index=repeat_index,
+				)
+			)
+
+	return results
+
+
+def summarize_results(results: list[EvalResult]) -> dict[str, Any]:
+	total = len(results)
+	ok_count = sum(1 for r in results if r.ok)
+
+	return {
+		"runs": total,
+		"ok": ok_count,
+		"success_rate": (ok_count / total) if total else 0.0,
+		"avg_elapsed_ms": (sum(r.elapsed_ms for r in results) / total) if total else 0.0,
+		"avg_iterations": (sum(r.iterations for r in results) / total) if total else 0.0,
+		"avg_error_count": (sum(r.error_count for r in results) / total) if total else 0.0,
+		"avg_warning_count": (sum(r.warning_count for r in results) / total) if total else 0.0,
+		"avg_lint_warning_count": (
+			sum(r.lint_warning_count for r in results) / total
+		) if total else 0.0,
+		"avg_weighted_lint_score": (
+			sum(r.weighted_lint_score for r in results) / total
+		) if total else 0.0,
+	}
+
+
+def summarize_results_grouped(results: list[EvalResult]) -> list[dict[str, Any]]:
+    groups: dict[tuple[Any, ...], list[EvalResult]] = {}
+
+    for r in results:
+        key = (
+            r.model_label,
+            r.initial_candidates,
+            r.use_candidate_retrieval,
+            r.use_seed_hints,
+        )
+        groups.setdefault(key, []).append(r)
+
+    rows: list[dict[str, Any]] = []
+
+    for key, group_rows in sorted(groups.items(), key=lambda item: item[0]):
+        model_label, initial_candidates, use_candidate_retrieval, use_seed_hints = key
+        total = len(group_rows)
+        ok_count = sum(1 for r in group_rows if r.ok)
+
+        rows.append(
+            {
+                "model_label": model_label,
+                "initial_candidates": initial_candidates,
+                "use_candidate_retrieval": use_candidate_retrieval,
+                "use_seed_hints": use_seed_hints,
+                "runs": total,
+                "ok": ok_count,
+                "success_rate": (ok_count / total) if total else 0.0,
+                "avg_elapsed_ms": (sum(r.elapsed_ms for r in group_rows) / total) if total else 0.0,
+                "avg_iterations": (sum(r.iterations for r in group_rows) / total) if total else 0.0,
+                "avg_error_count": (sum(r.error_count for r in group_rows) / total) if total else 0.0,
+                "avg_warning_count": (sum(r.warning_count for r in group_rows) / total) if total else 0.0,
+				"avg_lint_warning_count": (
+						sum(r.lint_warning_count for r in group_rows) / total
+				) if total else 0.0,
+				"avg_weighted_lint_score": (
+						sum(r.weighted_lint_score for r in group_rows) / total
+				) if total else 0.0,
+            }
+        )
+
+    return rows
+
+
+def summarize_results_by_task(results: list[EvalResult]) -> list[dict[str, Any]]:
+    groups: dict[tuple[str, str], list[EvalResult]] = {}
+
+    for r in results:
+        key = (r.model_label, r.task_id)
+        groups.setdefault(key, []).append(r)
+
+    rows: list[dict[str, Any]] = []
+
+    for (model_label, task_id), group_rows in sorted(groups.items(), key=lambda item: item[0]):
+        total = len(group_rows)
+        ok_count = sum(1 for r in group_rows if r.ok)
+
+        rows.append(
+            {
+                "model_label": model_label,
+                "task_id": task_id,
+                "runs": total,
+                "ok": ok_count,
+                "success_rate": (ok_count / total) if total else 0.0,
+                "avg_elapsed_ms": (sum(r.elapsed_ms for r in group_rows) / total) if total else 0.0,
+                "avg_iterations": (sum(r.iterations for r in group_rows) / total) if total else 0.0,
+                "avg_error_count": (sum(r.error_count for r in group_rows) / total) if total else 0.0,
+                "avg_warning_count": (sum(r.warning_count for r in group_rows) / total) if total else 0.0,
+				"avg_lint_warning_count": (
+						sum(r.lint_warning_count for r in group_rows) / total
+				) if total else 0.0,
+				"avg_weighted_lint_score": (
+						sum(r.weighted_lint_score for r in group_rows) / total
+				) if total else 0.0,
+            }
+        )
+
+    return rows
 
 def _parse_args() -> argparse.Namespace:
 	parser = argparse.ArgumentParser(description="Evaluate mapping-plan synthesis across models.")
@@ -288,7 +433,15 @@ def _parse_args() -> argparse.Namespace:
 		action="store_true",
 		help="Disable provider-specific seed hints while keeping generic retrieval on.",
 	)
+	parser.add_argument("--repeats", type=int, default=1, help="Number of repeated runs per task.")
+	parser.add_argument("--summary-out", default="", help="Optional JSON file for aggregate summary.")
+	parser.add_argument("--grouped-out", default="", help="Optional JSON file for grouped summary rows.")
+	parser.add_argument("--task-summary-out", default="", help="Optional JSON file for task-level grouped rows.")
+
 	return parser.parse_args()
+
+
+# === end helpers =============
 
 
 def main() -> int:
@@ -308,6 +461,7 @@ def main() -> int:
 		initial_candidates=max(int(args.initial_candidates), 1),
 		use_candidate_retrieval=use_candidate_retrieval,
 		use_seed_hints=use_seed_hints,
+		repeats=max(int(args.repeats), 1),
 	)
 
 	out_path = Path(args.out)
@@ -317,19 +471,37 @@ def main() -> int:
 		for row in results:
 			f.write(json.dumps(asdict(row), ensure_ascii=False) + "\n")
 
-	total = len(results)
-	ok_count = sum(1 for r in results if r.ok)
+	overall = summarize_results(results)
+	grouped = summarize_results_grouped(results)
+	by_task = summarize_results_by_task(results)
 
 	summary = {
 		"model": args.model,
-		"tasks": total,
-		"ok": ok_count,
-		"success_rate": (ok_count / total) if total else 0.0,
-		"avg_elapsed_ms": (sum(r.elapsed_ms for r in results) / total) if total else 0.0,
-		"avg_iterations": (sum(r.iterations for r in results) / total) if total else 0.0,
+		"repeats": max(int(args.repeats), 1),
+		"tasks_defined": len(tasks),
+		"initial_candidates": max(int(args.initial_candidates), 1),
+		"max_iters": max(int(args.max_iters), 1),
 		"use_candidate_retrieval": use_candidate_retrieval,
 		"use_seed_hints": use_seed_hints,
+		"task_groups": len(by_task),
+		**overall,
 	}
+
+	if args.summary_out:
+		summary_path = Path(args.summary_out)
+		summary_path.parent.mkdir(parents=True, exist_ok=True)
+		summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+
+	if args.grouped_out:
+		grouped_path = Path(args.grouped_out)
+		grouped_path.parent.mkdir(parents=True, exist_ok=True)
+		grouped_path.write_text(json.dumps(grouped, ensure_ascii=False, indent=2), encoding="utf-8")
+
+	if args.task_summary_out:
+		task_path = Path(args.task_summary_out)
+		task_path.parent.mkdir(parents=True, exist_ok=True)
+		task_path.write_text(json.dumps(by_task, ensure_ascii=False, indent=2), encoding="utf-8")
+
 	print(json.dumps(summary, ensure_ascii=False))
 
 	return 0
