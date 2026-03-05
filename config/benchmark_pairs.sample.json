@@ -1,0 +1,52 @@
+{
+  "pairs": [
+    {
+      "pair_id": "pair_birthdate_only",
+      "contract": {
+        "algo_id": "provider.obesityCoach",
+        "algo_version": "0.1.0"
+      },
+      "dataset": {
+        "dataset_id": "vault_dataset_A",
+        "table_name": "transactions",
+        "columns": [
+          { "name": "dob", "type": "TEXT" },
+          { "name": "noise", "type": "TEXT" }
+        ]
+      },
+      "required_fields": [
+        { "pointer": "/person/birthDate", "type": "string", "format": "date" }
+      ],
+      "metadata": {
+        "source_benchmark": "sample",
+        "difficulty": "easy",
+        "notes": "Simple one-field matching case"
+      }
+    },
+    {
+      "pair_id": "pair_birthdate_and_steps",
+      "contract": {
+        "algo_id": "provider.generic",
+        "algo_version": "0.1.0"
+      },
+      "dataset": {
+        "dataset_id": "vault_dataset_A",
+        "table_name": "daily_profile",
+        "columns": [
+          { "name": "birth_date", "type": "TEXT" },
+          { "name": "step_count", "type": "INTEGER" },
+          { "name": "noise", "type": "TEXT" }
+        ]
+      },
+      "required_fields": [
+        { "pointer": "/person/birthDate", "type": "string", "format": "date" },
+        { "pointer": "/activity/stepCount", "type": "integer" }
+      ],
+      "metadata": {
+        "source_benchmark": "sample",
+        "difficulty": "medium",
+        "notes": "Two-field case with mixed types"
+      }
+    }
+  ]
+}
