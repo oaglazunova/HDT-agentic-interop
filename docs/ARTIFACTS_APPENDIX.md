@@ -10,6 +10,7 @@ This artifact contains a research prototype of a Human Digital Twin (HDT) integr
 - A telemetry-driven **guardian (auditor) agent** demo that detects suspicious cross-lane tool use by querying telemetry through `hdt.telemetry.query.v1`.
 - A filtered telemetry query tool (`hdt.telemetry.query.v1`) and optional privacy-preserving `subject_hash` support for per-citizen governance (enabled by `HDT_TELEMETRY_SUBJECT_SALT`).
 - A **user-facing transparency agent** demo that produces a human-readable transparency report.
+- A reproducible evaluation harness for comparing mapping-plan synthesis across models and ablation settings, including repeated runs and JSON summaries.
 - 
 ## B. System requirements
 - OS: Linux, macOS, or Windows.
@@ -29,6 +30,18 @@ source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -e ".[dev]"
 ```
+
+## Mapping-plan evaluation harness
+
+The repository also includes `scripts/eval_mapping_plans.py`, which can run repeated mapping-plan synthesis experiments over an external task set and emit:
+
+- per-run JSONL traces
+- overall summary JSON
+- grouped summary JSON
+- task-level summary JSON
+
+This is intended for artifact evaluation and paper-table reproduction.
+
 
 ## Telemetry governance (guardian demo)
 

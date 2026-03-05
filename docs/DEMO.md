@@ -7,6 +7,9 @@ This repo includes a deterministic, offline-friendly demo that showcases key fea
 - auditable telemetry with correlation IDs
 - policy matrix across clients × purposes × tools
 
+> Note: the scripts in this file are **demo / walkthrough** flows.  
+> For model-comparison and ablation experiments, use `scripts/eval_mapping_plans.py` instead (see `docs/EVALUATION.md`).
+
 ## Prerequisites
 
 - Windows + PowerShell

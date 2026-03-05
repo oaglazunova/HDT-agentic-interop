@@ -31,15 +31,19 @@ a machine-executable **Mapping Plan**.
 
 ## Repository layout (high-level)
 
-- `src/hdt_mapping_plan/` — Mapping Plan schema, validator, linter, normalization
+- `src/hdt_mapping_plan/` — Mapping Plan schema, validator, linter, normalization, candidate retrieval
 - `src/hdt_a2a/` — shared A2A utilities + host runner
 - `src/hdt_provider_a2a/` — Provider A2A server + contract registry
 - `src/hdt_user_a2a/` — User A2A server + LLM/repair loop integration
 - `demo/` — frozen demonstration scenarios (catalogs + walkthrough assets)
-- `scripts/` — helper scripts (including demo runners)
-- `artifacts/` — generated outputs (plans, run manifests, demo outputs, logs)
+- `scripts/` — helper scripts, demo runners, and evaluation harnesses
+  - `scripts/eval_mapping_plans.py` — multi-model evaluation runner for mapping-plan synthesis
+- `config/` — runtime config plus sample evaluation task sets
+  - `config/eval_tasks.sample.json` — example external task-set for the evaluation harness
+- `artifacts/` — generated outputs (plans, run manifests, demo outputs, logs, evaluation JSONL/summary files)
 - `data/` — sample data assets (example/demo vaults)
 - `datasets/` — working logical vault catalogs for current development
+- `docs/` — demo notes, appendix notes, and evaluation documentation
 - `tests/` — unit tests and golden regression fixtures
 
 ---
@@ -245,6 +249,135 @@ Typical checks include:
 
 ---
 
+---
+
+## Evaluation harness (multi-model and ablation experiments)
+
+The repo includes a lightweight experiment runner for comparing **different LLMs** and **prompting/runtime conditions** on the same mapping-plan synthesis tasks:
+
+- Script: `scripts/eval_mapping_plans.py`
+- Sample task file: `config/eval_tasks.sample.json`
+
+This harness runs the same deterministic synthesis pipeline (`synthesize_plan_with_repairs`) while varying:
+
+- LLM / model name
+- number of initial candidates (`--initial-candidates`)
+- repair budget (`--max-iters`)
+- repeated runs per task (`--repeats`)
+- retrieval hints on/off (`--disable-retriever`)
+- provider seed hints on/off (`--disable-seed-hints`)
+
+### What it writes
+
+The harness writes:
+
+- **per-run JSONL** (`--out`)  
+  one row per task execution
+- **overall summary JSON** (`--summary-out`)
+- **grouped summary JSON** (`--grouped-out`)  
+  grouped by model + ablation settings
+- **task-level summary JSON** (`--task-summary-out`)
+
+This is the recommended path for producing reproducible experiment artifacts for paper tables.
+
+### Quick example
+
+```powershell
+python scripts/eval_mapping_plans.py `
+  --model qwen2.5:7b-instruct-q4_0 `
+  --tasks-json config\eval_tasks.sample.json `
+  --out artifacts\eval_qwen25.jsonl `
+  --summary-out artifacts\eval_qwen25.summary.json `
+  --grouped-out artifacts\eval_qwen25.grouped.json `
+  --task-summary-out artifacts\eval_qwen25.by_task.json `
+  --repeats 5 `
+  --initial-candidates 3 ```
+  --max-iters 3 `
+ ``` 
+
+Example ablations
+
+Disable retrieval hints entirely:
+ ```
+python scripts/eval_mapping_plans.py `
+  --model qwen2.5:7b-instruct-q4_0 `
+  --tasks-json config\eval_tasks.sample.json `
+  --out artifacts\eval_no_retriever.jsonl `
+  --disable-retriever
+ ```  
+
+Keep generic retrieval, but disable provider-specific seed hints:
+ ```
+python scripts/eval_mapping_plans.py `
+  --model qwen2.5:7b-instruct-q4_0 `
+  --tasks-json config\eval_tasks.sample.json `
+  --out artifacts\eval_no_seed_hints.jsonl `
+  --disable-seed-hints
+  ```
+
+Notes on reproducibility
+
+The deterministic validator remains the source of truth for plan acceptance.
+Repeated runs are recommended even when using structured outputs, because different models (or non-zero-temperature settings, if used) may still vary.
+If --tasks-json is omitted, the harness falls back to small built-in toy tasks intended only for smoke testing. For real comparisons, prefer an external task file.
+
+
+----
+
+### External task-set format
+
+The evaluation harness accepts task files in JSON via `--tasks-json`.
+
+Two task shapes are supported:
+
+1. **Compact shape (recommended)**  
+   Best for benchmark conversion and hand-authored evaluation cases.  
+   It uses `dataset_spec` and derives the internal vault catalog automatically.
+
+2. **Explicit shape**  
+   Mirrors the in-memory `EvalTask` structure and lets you provide `vault_catalog`, `dataset_columns`, and `dataset_column_types` directly.
+
+The recommended compact shape looks like this:
+
+```json
+{
+  "tasks": [
+    {
+      "task_id": "birthdate_only_compact",
+      "contract": {
+        "algo_id": "provider.obesityCoach",
+        "algo_version": "0.1.0"
+      },
+      "contract_input_schema": {
+        "type": "object",
+        "properties": {
+          "person": {
+            "type": "object",
+            "required": ["birthDate"],
+            "properties": {
+              "birthDate": { "type": "string", "format": "date" }
+            }
+          }
+        },
+        "required": ["person"]
+      },
+      "dataset_spec": {
+        "dataset_id": "vault_dataset_A",
+        "table_name": "transactions",
+        "columns": [
+          { "name": "dob", "type": "TEXT" }
+        ]
+      }
+    }
+  ]
+}
+```
+
+For a fuller example, see `config/eval_tasks.sample.json`
+For the full loader rules and experiment workflow, see `docs/EVALUATION.md`
+
+----
+
 ## Configuration
 
 ### Env vars (used by LLM adapter / user agent)
@@ -289,7 +422,13 @@ python -m hdt_sources_mcp.server
 - Ensure tests pass: `pytest -q`
 
 ### Artifacts
-Generated artifacts go under `artifacts/`. Keep large or sensitive files out of git.
+Generated artifacts go under `artifacts/`. This includes:
+
+- Mapping Plans and run manifests from negotiation runs
+- demo outputs and telemetry
+- evaluation JSONL traces and summary JSON files from `scripts/eval_mapping_plans.py`
+
+Keep large or sensitive files out of git.
 
 ### Demo stability
 Keep frozen demo assets under `demo/` separate from the evolving working files under `datasets/`.
