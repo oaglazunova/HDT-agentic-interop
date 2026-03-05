@@ -1,0 +1,75 @@
+{
+  "tasks": [
+    {
+      "task_id": "birthdate_only_compact",
+      "contract": {
+        "algo_id": "provider.obesityCoach",
+        "algo_version": "0.1.0"
+      },
+      "contract_input_schema": {
+        "type": "object",
+        "properties": {
+          "person": {
+            "type": "object",
+            "required": ["birthDate"],
+            "properties": {
+              "birthDate": {
+                "type": "string",
+                "format": "date"
+              }
+            }
+          }
+        },
+        "required": ["person"]
+      },
+      "dataset_spec": {
+        "dataset_id": "vault_dataset_A",
+        "table_name": "transactions",
+        "columns": [
+          { "name": "dob", "type": "TEXT" }
+        ]
+      }
+    },
+    {
+      "task_id": "birthdate_and_steps_compact",
+      "contract": {
+        "algo_id": "provider.generic",
+        "algo_version": "0.1.0"
+      },
+      "contract_input_schema": {
+        "type": "object",
+        "properties": {
+          "person": {
+            "type": "object",
+            "required": ["birthDate"],
+            "properties": {
+              "birthDate": {
+                "type": "string",
+                "format": "date"
+              }
+            }
+          },
+          "activity": {
+            "type": "object",
+            "required": ["stepCount"],
+            "properties": {
+              "stepCount": {
+                "type": "integer"
+              }
+            }
+          }
+        },
+        "required": ["person", "activity"]
+      },
+      "dataset_spec": {
+        "dataset_id": "vault_dataset_A",
+        "table_name": "transactions",
+        "columns": [
+          { "name": "birth_date", "type": "TEXT" },
+          { "name": "step_count", "type": "INTEGER" },
+          { "name": "noise", "type": "TEXT" }
+        ]
+      }
+    }
+  ]
+}

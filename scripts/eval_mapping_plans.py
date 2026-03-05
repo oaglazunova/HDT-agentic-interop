@@ -181,23 +181,168 @@ def _toy_tasks() -> list[EvalTask]:
 	return [task_1, task_2]
 
 
+def _require_mapping(value: Any, *, field_name: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ValueError(f"{field_name} must be an object")
+    return dict(value)
+
+
+def _require_non_empty_string(value: Any, *, field_name: str) -> str:
+    s = str(value or "").strip()
+    if not s:
+        raise ValueError(f"{field_name} must be a non-empty string")
+    return s
+
+
+def _normalize_column_list(columns_value: Any, *, field_name: str) -> list[dict[str, str]]:
+    if not isinstance(columns_value, list) or not columns_value:
+        raise ValueError(f"{field_name} must be a non-empty list")
+
+    out: list[dict[str, str]] = []
+    seen: set[str] = set()
+
+    for idx, col in enumerate(columns_value):
+        if not isinstance(col, dict):
+            raise ValueError(f"{field_name}[{idx}] must be an object")
+
+        name = _require_non_empty_string(col.get("name"), field_name=f"{field_name}[{idx}].name")
+        typ = _require_non_empty_string(col.get("type"), field_name=f"{field_name}[{idx}].type")
+
+        if name in seen:
+            raise ValueError(f"{field_name} contains duplicate column name: {name}")
+        seen.add(name)
+
+        out.append({"name": name, "type": typ})
+
+    return out
+
+
+def _task_from_explicit_record(item: Mapping[str, Any]) -> EvalTask:
+    task_id = _require_non_empty_string(item.get("task_id"), field_name="task_id")
+    contract = _require_mapping(item.get("contract"), field_name=f"{task_id}.contract")
+    contract_input_schema = _require_mapping(
+        item.get("contract_input_schema"),
+        field_name=f"{task_id}.contract_input_schema",
+    )
+    vault_catalog = _require_mapping(item.get("vault_catalog"), field_name=f"{task_id}.vault_catalog")
+
+    dataset_columns_raw = item.get("dataset_columns")
+    if not isinstance(dataset_columns_raw, list) or not dataset_columns_raw:
+        raise ValueError(f"{task_id}.dataset_columns must be a non-empty list")
+
+    dataset_columns = {_require_non_empty_string(x, field_name=f"{task_id}.dataset_columns[]") for x in dataset_columns_raw}
+
+    dataset_column_types_raw = item.get("dataset_column_types")
+    if not isinstance(dataset_column_types_raw, dict) or not dataset_column_types_raw:
+        raise ValueError(f"{task_id}.dataset_column_types must be a non-empty object")
+
+    dataset_column_types = {
+        _require_non_empty_string(k, field_name=f"{task_id}.dataset_column_types key"): _require_non_empty_string(
+            v, field_name=f"{task_id}.dataset_column_types[{k}]"
+        )
+        for k, v in dataset_column_types_raw.items()
+    }
+
+    missing = sorted(dataset_columns - set(dataset_column_types))
+    if missing:
+        raise ValueError(f"{task_id}.dataset_column_types is missing entries for columns: {missing}")
+
+    return EvalTask(
+        task_id=task_id,
+        contract=contract,
+        contract_input_schema=contract_input_schema,
+        vault_catalog=vault_catalog,
+        dataset_columns=dataset_columns,
+        dataset_column_types=dataset_column_types,
+    )
+
+
+def _task_from_compact_record(item: Mapping[str, Any]) -> EvalTask:
+    task_id = _require_non_empty_string(item.get("task_id"), field_name="task_id")
+    contract = _require_mapping(item.get("contract"), field_name=f"{task_id}.contract")
+    contract_input_schema = _require_mapping(
+        item.get("contract_input_schema"),
+        field_name=f"{task_id}.contract_input_schema",
+    )
+
+    dataset_spec = _require_mapping(item.get("dataset_spec"), field_name=f"{task_id}.dataset_spec")
+    dataset_id = _require_non_empty_string(dataset_spec.get("dataset_id"), field_name=f"{task_id}.dataset_spec.dataset_id")
+    table_name = _require_non_empty_string(dataset_spec.get("table_name"), field_name=f"{task_id}.dataset_spec.table_name")
+    columns = _normalize_column_list(dataset_spec.get("columns"), field_name=f"{task_id}.dataset_spec.columns")
+
+    vault_catalog = {
+        "datasets": [
+            {
+                "dataset_id": dataset_id,
+                "tables": [
+                    {
+                        "table_name": table_name,
+                        "columns": columns,
+                    }
+                ],
+            }
+        ]
+    }
+
+    dataset_columns = {col["name"] for col in columns}
+    dataset_column_types = {col["name"]: col["type"] for col in columns}
+
+    return EvalTask(
+        task_id=task_id,
+        contract=contract,
+        contract_input_schema=contract_input_schema,
+        vault_catalog=vault_catalog,
+        dataset_columns=dataset_columns,
+        dataset_column_types=dataset_column_types,
+    )
+
+
+def _normalize_task_record(item: Any) -> EvalTask:
+    record = _require_mapping(item, field_name="task item")
+
+    has_explicit = all(k in record for k in ("vault_catalog", "dataset_columns", "dataset_column_types"))
+    has_compact = "dataset_spec" in record
+
+    if has_explicit and has_compact:
+        raise ValueError("task item must use either explicit shape or compact shape, not both")
+
+    if has_explicit:
+        return _task_from_explicit_record(record)
+
+    if has_compact:
+        return _task_from_compact_record(record)
+
+    raise ValueError(
+        "task item must contain either explicit fields "
+        "(vault_catalog, dataset_columns, dataset_column_types) "
+        "or compact field (dataset_spec)"
+    )
+
+
 def _load_tasks_from_json(path: Path) -> list[EvalTask]:
-	raw = json.loads(path.read_text(encoding="utf-8"))
-	tasks: list[EvalTask] = []
+    raw = json.loads(path.read_text(encoding="utf-8"))
 
-	for item in raw:
-		tasks.append(
-			EvalTask(
-				task_id=str(item["task_id"]),
-				contract=dict(item["contract"]),
-				contract_input_schema=dict(item["contract_input_schema"]),
-				vault_catalog=dict(item["vault_catalog"]),
-				dataset_columns={str(x) for x in item["dataset_columns"]},
-				dataset_column_types={str(k): str(v) for k, v in item["dataset_column_types"].items()},
-			)
-		)
+    if isinstance(raw, dict):
+        items = raw.get("tasks")
+        if not isinstance(items, list):
+            raise ValueError("tasks JSON object must contain a 'tasks' list")
+    elif isinstance(raw, list):
+        items = raw
+    else:
+        raise ValueError("tasks JSON must be either a list or an object with a 'tasks' list")
 
-	return tasks
+    tasks = [_normalize_task_record(item) for item in items]
+
+    if not tasks:
+        raise ValueError("tasks JSON must contain at least one task")
+
+    seen_ids: set[str] = set()
+    for task in tasks:
+        if task.task_id in seen_ids:
+            raise ValueError(f"duplicate task_id: {task.task_id}")
+        seen_ids.add(task.task_id)
+
+    return tasks
 
 
 def _make_ollama_client(model_name: str) -> OllamaClient:
@@ -439,6 +584,7 @@ def _parse_args() -> argparse.Namespace:
 	parser.add_argument("--task-summary-out", default="", help="Optional JSON file for task-level grouped rows.")
 
 	return parser.parse_args()
+
 
 
 # === end helpers =============
