@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import time
+import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping
@@ -351,7 +352,31 @@ def _load_tasks_from_json(path: Path) -> list[EvalTask]:
 
 
 def _make_ollama_client(model_name: str) -> OllamaClient:
-    return OllamaClient(OllamaConfig(model=model_name))
+    base_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
+
+    # IMPORTANT: bump default from 60s -> 600s for experiments
+    timeout_s = float(os.getenv("OLLAMA_TIMEOUT_S", "600"))
+
+    # Optional, but useful for larger prompts / structured outputs
+    num_ctx = int(os.getenv("OLLAMA_NUM_CTX", "4096"))
+    num_predict = int(os.getenv("OLLAMA_NUM_PREDICT", "900"))
+
+    structured_mode = os.getenv("OLLAMA_STRUCTURED_MODE", "auto").strip().lower()
+    if structured_mode not in ("json", "schema", "auto"):
+        structured_mode = "auto"
+
+    fallback_to_json = os.getenv("OLLAMA_FALLBACK_TO_JSON", "1").strip().lower() in ("1", "true", "yes", "on")
+
+    cfg = OllamaConfig(
+        base_url=base_url,
+        model=model_name,
+        timeout_s=timeout_s,
+        num_ctx=num_ctx,
+        num_predict=num_predict,
+        structured_mode=structured_mode,  # type: ignore[arg-type]
+        fallback_to_json_on_error=fallback_to_json,
+    )
+    return OllamaClient(cfg)
 
 
 def _build_client_factory(model_name: str) -> Callable[[], Any]:
@@ -375,19 +400,43 @@ def run_one(
     client = client_factory()
 
     start = time.perf_counter()
-    res = synthesize_plan_with_repairs(
-        client=client,
-        contract=task.contract,
-        contract_input_schema=task.contract_input_schema,
-        vault_catalog=task.vault_catalog,
-        dataset_columns=task.dataset_columns,
-        dataset_column_types=task.dataset_column_types,
-        max_iters=max_iters,
-        initial_candidates=initial_candidates,
-        use_candidate_retrieval=use_candidate_retrieval,
-        use_seed_hints=use_seed_hints,
-    )
-    elapsed_ms = int((time.perf_counter() - start) * 1000)
+    try:
+        res = synthesize_plan_with_repairs(
+            client=client,
+            contract=task.contract,
+            contract_input_schema=task.contract_input_schema,
+            vault_catalog=task.vault_catalog,
+            dataset_columns=task.dataset_columns,
+            dataset_column_types=task.dataset_column_types,
+            max_iters=max_iters,
+            initial_candidates=initial_candidates,
+            use_candidate_retrieval=use_candidate_retrieval,
+            use_seed_hints=use_seed_hints,
+        )
+        elapsed_ms = int((time.perf_counter() - start) * 1000)
+
+    except Exception as ex:
+        elapsed_ms = int((time.perf_counter() - start) * 1000)
+        # Produce a row that still lets aggregation work
+        return EvalResult(
+            task_id=task.task_id,
+            model_label=model_label,
+            repeat_index=repeat_index,
+            ok=False,
+            iterations=0,
+            elapsed_ms=elapsed_ms,
+            initial_candidates=initial_candidates,
+            max_iters=max_iters,
+            use_candidate_retrieval=use_candidate_retrieval,
+            use_seed_hints=use_seed_hints,
+            plan_id=None,
+            report_ok=None,
+            error_count=1,
+            warning_count=0,
+            first_error_types=[ex.__class__.__name__],
+            used_required_columns=[],
+            output_destination=None,
+        )
 
     report = res.report
     plan = res.plan

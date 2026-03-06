@@ -27,6 +27,8 @@ a machine-executable **Mapping Plan**.
   - `src/hdt_mcp/gateway.py`
   - `src/hdt_sources_mcp/server.py`
 
+>See `docs/EXPERIMENTS.md` for the end-to-end workflow to generate task suites, run the first experiment matrix, and aggregate paper tables.
+
 ---
 
 ## Repository layout (high-level)
@@ -412,6 +414,110 @@ These are already present and can be run independently of A2A:
 python -m hdt_mcp.gateway
 python -m hdt_sources_mcp.server
 ```
+
+---
+
+
+## Experiments: first task suite + first experiment matrix
+
+This repo includes a reproducible workflow to:
+1) generate an evaluation task suite from normalized benchmark pairs,
+2) run a small experiment matrix across models and ablations, and
+3) aggregate results into paper-ready tables.
+
+### 1) Generate `config/eval_tasks.generated.json` from normalized pairs
+
+Create or edit a normalized pair file (example template):
+- `config/benchmark_pairs.v0.json`
+
+Then generate evaluation tasks (compact task format):
+
+```powershell
+python scripts\build_eval_tasks_from_pairs.py `
+  --pairs-json config\benchmark_pairs.v0.json `
+  --out config\eval_tasks.generated.json
+````
+
+Sanity check:
+
+```powershell
+python -c "import json; d=json.load(open('config/eval_tasks.generated.json','r',encoding='utf-8')); print('tasks=',len(d['tasks']))"
+```
+
+### 2) Run the first experiment matrix (3 conditions × N models × 5 repeats)
+
+Baseline:
+
+* `initial_candidates=1`
+* retriever ON
+* seed hints ON
+
+Ablations:
+
+* retriever OFF (`--disable-retriever`)
+* seed hints OFF (`--disable-seed-hints`)
+
+Example PowerShell runner:
+
+```powershell
+$models = @(
+  "qwen2.5:7b-instruct-q4_0",
+  "llama3.1:8b-instruct-q4_0",
+  "mistral:7b-instruct-q4_0"
+)
+
+$tasks = "config\eval_tasks.generated.json"
+$root = "artifacts\experiments\v0"
+
+$conditions = @(
+  @{ name = "baseline"; args = @() },
+  @{ name = "no_retriever"; args = @("--disable-retriever") },
+  @{ name = "no_seed_hints"; args = @("--disable-seed-hints") }
+)
+
+foreach ($m in $models) {
+  $mDirName = $m.Replace(":", "_")
+  $outDir = Join-Path $root $mDirName
+  New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+
+  foreach ($c in $conditions) {
+    python scripts\eval_mapping_plans.py `
+      --model $m `
+      --tasks-json $tasks `
+      --out (Join-Path $outDir "$($c.name).jsonl") `
+      --summary-out (Join-Path $outDir "$($c.name).summary.json") `
+      --grouped-out (Join-Path $outDir "$($c.name).grouped.json") `
+      --task-summary-out (Join-Path $outDir "$($c.name).by_task.json") `
+      --repeats 5 `
+      --initial-candidates 1 `
+      --max-iters 3 `
+      @($c.args)
+  }
+}
+```
+
+Outputs per model/condition:
+
+* `*.jsonl` (per-run traces)
+* `*.summary.json` (overall summary)
+* `*.grouped.json` (grouped aggregates)
+* `*.by_task.json` (task-level aggregates)
+
+### 3) Aggregate summaries into paper tables
+
+Create paper-friendly tables:
+
+```powershell
+python scripts\aggregate_experiment_summaries.py `
+  --root artifacts\experiments\v0 `
+  --out-csv artifacts\experiments\v0\paper_table.v0.csv `
+  --out-md artifacts\experiments\v0\paper_table.v0.md
+```
+
+The Markdown table (`paper_table.v0.md`) can be pasted directly into the paper appendix or draft.
+
+For more details, see `docs/EXPERIMENTS.md`.
+
 
 ---
 

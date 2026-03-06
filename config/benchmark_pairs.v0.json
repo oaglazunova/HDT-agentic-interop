@@ -1,0 +1,239 @@
+{
+  "pairs": [
+    {
+      "pair_id": "oc_full_seed",
+      "contract": { "algo_id": "provider.obesityCoach", "algo_version": "0.1.0" },
+      "dataset": {
+        "dataset_id": "vault_dataset_A",
+        "table_name": "daily_profile",
+        "columns": [
+          { "name": "txn_id", "type": "TEXT" },
+          { "name": "dob", "type": "TEXT" },
+          { "name": "date", "type": "TEXT" },
+          { "name": "steps", "type": "INTEGER" },
+          { "name": "calories_in", "type": "INTEGER" },
+          { "name": "water_ml", "type": "INTEGER" },
+          { "name": "noise", "type": "TEXT" }
+        ]
+      },
+      "required_fields": [
+        { "pointer": "/recordId", "type": "string" },
+        { "pointer": "/person/birthDate", "type": "string", "format": "date" },
+        { "pointer": "/day/date", "type": "string", "format": "date" },
+        { "pointer": "/activity/steps", "type": "integer" },
+        { "pointer": "/nutrition/caloriesIn", "type": "number" },
+        { "pointer": "/hydration/waterMl", "type": "integer" }
+      ],
+      "metadata": { "difficulty": "easy", "profile": "seed_match" }
+    },
+
+    {
+      "pair_id": "oc_birthdate_only_seed",
+      "contract": { "algo_id": "provider.obesityCoach", "algo_version": "0.1.0" },
+      "dataset": {
+        "dataset_id": "vault_dataset_A",
+        "table_name": "daily_profile",
+        "columns": [
+          { "name": "dob", "type": "TEXT" },
+          { "name": "birth_year", "type": "INTEGER" },
+          { "name": "noise", "type": "TEXT" }
+        ]
+      },
+      "required_fields": [
+        { "pointer": "/person/birthDate", "type": "string", "format": "date" }
+      ],
+      "metadata": { "difficulty": "easy", "profile": "single_field" }
+    },
+
+    {
+      "pair_id": "oc_recordId_and_date_seed",
+      "contract": { "algo_id": "provider.obesityCoach", "algo_version": "0.1.0" },
+      "dataset": {
+        "dataset_id": "vault_dataset_A",
+        "table_name": "daily_profile",
+        "columns": [
+          { "name": "txn_id", "type": "TEXT" },
+          { "name": "date", "type": "TEXT" },
+          { "name": "noise", "type": "TEXT" }
+        ]
+      },
+      "required_fields": [
+        { "pointer": "/recordId", "type": "string" },
+        { "pointer": "/day/date", "type": "string", "format": "date" }
+      ],
+      "metadata": { "difficulty": "easy", "profile": "two_fields" }
+    },
+
+    {
+      "pair_id": "oc_full_synonyms",
+      "contract": { "algo_id": "provider.obesityCoach", "algo_version": "0.1.0" },
+      "dataset": {
+        "dataset_id": "vault_dataset_B",
+        "table_name": "daily_profile",
+        "columns": [
+          { "name": "record_id", "type": "TEXT" },
+          { "name": "birth_date", "type": "TEXT" },
+          { "name": "day_date", "type": "TEXT" },
+          { "name": "step_count", "type": "INTEGER" },
+          { "name": "kcal_in", "type": "INTEGER" },
+          { "name": "water_ml", "type": "INTEGER" },
+          { "name": "noise", "type": "TEXT" }
+        ]
+      },
+      "required_fields": [
+        { "pointer": "/recordId", "type": "string" },
+        { "pointer": "/person/birthDate", "type": "string", "format": "date" },
+        { "pointer": "/day/date", "type": "string", "format": "date" },
+        { "pointer": "/activity/steps", "type": "integer" },
+        { "pointer": "/nutrition/caloriesIn", "type": "number" },
+        { "pointer": "/hydration/waterMl", "type": "integer" }
+      ],
+      "metadata": { "difficulty": "medium", "profile": "synonyms" }
+    },
+
+    {
+      "pair_id": "oc_full_mixed_synonyms",
+      "contract": { "algo_id": "provider.obesityCoach", "algo_version": "0.1.0" },
+      "dataset": {
+        "dataset_id": "vault_dataset_C",
+        "table_name": "daily_profile",
+        "columns": [
+          { "name": "txn_id", "type": "TEXT" },
+          { "name": "birth_date", "type": "TEXT" },
+          { "name": "date", "type": "TEXT" },
+          { "name": "step_count", "type": "INTEGER" },
+          { "name": "calories_in", "type": "INTEGER" },
+          { "name": "water_ml", "type": "INTEGER" }
+        ]
+      },
+      "required_fields": [
+        { "pointer": "/recordId", "type": "string" },
+        { "pointer": "/person/birthDate", "type": "string", "format": "date" },
+        { "pointer": "/day/date", "type": "string", "format": "date" },
+        { "pointer": "/activity/steps", "type": "integer" },
+        { "pointer": "/nutrition/caloriesIn", "type": "number" },
+        { "pointer": "/hydration/waterMl", "type": "integer" }
+      ],
+      "metadata": { "difficulty": "medium", "profile": "mixed_names" }
+    },
+
+    {
+      "pair_id": "oc_full_with_distractors",
+      "contract": { "algo_id": "provider.obesityCoach", "algo_version": "0.1.0" },
+      "dataset": {
+        "dataset_id": "vault_dataset_D",
+        "table_name": "daily_profile",
+        "columns": [
+          { "name": "txn_id", "type": "TEXT" },
+          { "name": "dob", "type": "TEXT" },
+          { "name": "date", "type": "TEXT" },
+          { "name": "steps", "type": "INTEGER" },
+          { "name": "calories_in", "type": "INTEGER" },
+          { "name": "calories_out", "type": "INTEGER" },
+          { "name": "water_ml", "type": "INTEGER" },
+          { "name": "water_liters", "type": "NUMBER" },
+          { "name": "noise", "type": "TEXT" }
+        ]
+      },
+      "required_fields": [
+        { "pointer": "/recordId", "type": "string" },
+        { "pointer": "/person/birthDate", "type": "string", "format": "date" },
+        { "pointer": "/day/date", "type": "string", "format": "date" },
+        { "pointer": "/activity/steps", "type": "integer" },
+        { "pointer": "/nutrition/caloriesIn", "type": "number" },
+        { "pointer": "/hydration/waterMl", "type": "integer" }
+      ],
+      "metadata": { "difficulty": "medium", "profile": "distractors" }
+    },
+
+    {
+      "pair_id": "oc_birthdate_disambiguate_by_type",
+      "contract": { "algo_id": "provider.obesityCoach", "algo_version": "0.1.0" },
+      "dataset": {
+        "dataset_id": "vault_dataset_E",
+        "table_name": "daily_profile",
+        "columns": [
+          { "name": "dob", "type": "INTEGER" },
+          { "name": "birth_date", "type": "TEXT" },
+          { "name": "noise", "type": "TEXT" }
+        ]
+      },
+      "required_fields": [
+        { "pointer": "/person/birthDate", "type": "string", "format": "date" }
+      ],
+      "metadata": { "difficulty": "hard", "profile": "type_disambiguation" }
+    },
+
+    {
+      "pair_id": "oc_recordId_disambiguate_by_tokens",
+      "contract": { "algo_id": "provider.obesityCoach", "algo_version": "0.1.0" },
+      "dataset": {
+        "dataset_id": "vault_dataset_F",
+        "table_name": "daily_profile",
+        "columns": [
+          { "name": "id", "type": "TEXT" },
+          { "name": "record_id", "type": "TEXT" },
+          { "name": "txn_ref", "type": "TEXT" }
+        ]
+      },
+      "required_fields": [
+        { "pointer": "/recordId", "type": "string" }
+      ],
+      "metadata": { "difficulty": "hard", "profile": "token_disambiguation" }
+    },
+
+    {
+      "pair_id": "oc_steps_synonym_only",
+      "contract": { "algo_id": "provider.obesityCoach", "algo_version": "0.1.0" },
+      "dataset": {
+        "dataset_id": "vault_dataset_G",
+        "table_name": "daily_profile",
+        "columns": [
+          { "name": "step_count", "type": "INTEGER" },
+          { "name": "steps_total", "type": "INTEGER" },
+          { "name": "noise", "type": "TEXT" }
+        ]
+      },
+      "required_fields": [
+        { "pointer": "/activity/steps", "type": "integer" }
+      ],
+      "metadata": { "difficulty": "medium", "profile": "single_field_synonym" }
+    },
+
+    {
+      "pair_id": "oc_water_units_confusion",
+      "contract": { "algo_id": "provider.obesityCoach", "algo_version": "0.1.0" },
+      "dataset": {
+        "dataset_id": "vault_dataset_H",
+        "table_name": "daily_profile",
+        "columns": [
+          { "name": "water_ml", "type": "INTEGER" },
+          { "name": "water_liters", "type": "NUMBER" },
+          { "name": "water_glasses", "type": "INTEGER" }
+        ]
+      },
+      "required_fields": [
+        { "pointer": "/hydration/waterMl", "type": "integer" }
+      ],
+      "metadata": { "difficulty": "hard", "profile": "unit_confusion" }
+    },
+
+    {
+      "pair_id": "oc_date_vs_datetime",
+      "contract": { "algo_id": "provider.obesityCoach", "algo_version": "0.1.0" },
+      "dataset": {
+        "dataset_id": "vault_dataset_I",
+        "table_name": "daily_profile",
+        "columns": [
+          { "name": "date", "type": "TEXT" },
+          { "name": "datetime", "type": "DATETIME" },
+          { "name": "day", "type": "TEXT" }
+        ]
+      },
+      "required_fields": [
+        { "pointer": "/day/date", "type": "string", "format": "date" }
+      ],
+      "metadata": { "difficulty": "hard", "profile": "date_disambiguation" }
+    }
+  ]
+}

@@ -181,3 +181,13 @@ The validator is deterministic and remains the acceptance boundary.
 Repeated runs are still useful because model outputs may vary across calls.
 For real experiments, prefer external task files over built-in toy tasks.
 Keep experiment outputs under artifacts/ and archive the exact task JSON used for a run.
+
+
+Below are two ready-to-paste options:
+
+1. a **compact README section** (keeps README readable)
+2. a **separate doc** `docs/EXPERIMENTS.md` (recommended; more detail, reproducible workflow)
+
+You can use both: README gets the short “how to run,” doc gets the full recipe.
+
+---
