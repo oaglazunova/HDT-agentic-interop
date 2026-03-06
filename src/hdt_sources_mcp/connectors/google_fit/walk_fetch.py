@@ -91,7 +91,7 @@ def fetch_google_fit_walk_data(
     except Exception:
         default_days = 365
 
-    if (start_time == 0 and int(end_time) >= 4_000_000_000_000_000_000 and default_days > 0):
+    if start_time == 0 and int(end_time) >= 4_000_000_000_000_000_000 and default_days > 0:
         now = datetime.now(tz=tz)
         start_time = _to_nanos(now - timedelta(days=default_days))
         end_time = _to_nanos(now)

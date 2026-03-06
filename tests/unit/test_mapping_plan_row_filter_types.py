@@ -28,7 +28,10 @@ def test_row_filter_arity_mismatch_eq() -> None:
 def test_row_filter_and_requires_bool_args() -> None:
     plan = _load_example_plan()
     # numeric column used as boolean in AND
-    plan["row_filter"] = {"op": "and", "args": [{"op": "column", "name": "amount_eur"}, {"op": "not_null", "args": [{"op": "column", "name": "dob"}]}]}
+    plan["row_filter"] = {
+        "op": "and",
+        "args": [{"op": "column", "name": "amount_eur"}, {"op": "not_null", "args": [{"op": "column", "name": "dob"}]}],
+    }
 
     rep = validate_plan_semantics(
         plan,

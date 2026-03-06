@@ -8,7 +8,7 @@ version = "0.5.0"
 description = "Interoperable HDT prototype with MCP façade, vault, policy lanes, and telemetry."
 readme = "README.md"
 requires-python = ">=3.11"
-license = "MIT"
+license = { text = "MIT" }
 authors = [{ name = "Olga Glazunova", email = "o.glazunova@tue.nl" }]
 keywords = ["Model Context Protocol", "HDT", "interoperability", "digital health", "agentic systems"]
 
@@ -27,9 +27,8 @@ dev = [
   "pytest",
   "pytest-cov",
   "pytest-asyncio",
-  "python-dotenv",
-  "requests",
   "tzdata",
+  "ruff>=0.6.0",
 ]
 
 [project.urls]
@@ -37,7 +36,6 @@ Homepage = "https://github.com/oaglazunova/HDT-agentic-interop"
 Repository = "https://github.com/oaglazunova/HDT-agentic-interop"
 Issues = "https://github.com/oaglazunova/HDT-agentic-interop/issues"
 
-# Optional convenience script (adjust the module path if your server file differs)
 [project.scripts]
 hdt-mcp = "hdt_mcp.gateway:main"
 hdt-sources = "hdt_sources_mcp.server:main"
@@ -48,7 +46,6 @@ hdt-a2a-negotiate = "hdt_a2a.host.run_negotiation:main"
 [tool.pytest.ini_options]
 addopts = "-q"
 testpaths = ["tests"]
-# Keep consistent with pytest.ini (src-layout).
 pythonpath = ["src"]
 asyncio_mode = "auto"
 markers = [
@@ -56,7 +53,7 @@ markers = [
 ]
 
 [tool.setuptools]
-package-dir = {"" = "src"}
+package-dir = { "" = "src" }
 include-package-data = true
 
 [tool.setuptools.packages.find]
@@ -71,20 +68,30 @@ include = [
   "hdt_provider_a2a*",
   "hdt_user_a2a*",
 ]
+# This is where exclusion belongs (package discovery), not under package-data.
+exclude = [
+  "tests*",
+  "docs*",
+  "scripts*",
+  "data*",
+  "datasets*",
+  "demo*",
+  "artifacts*",
+  "examples*",
+]
 
 [tool.setuptools.package-data]
 hdt_mapping_plan = ["schema/*.json", "examples/*.json", "allowed_ops_profile.json"]
 hdt_provider_a2a = ["contracts/**/*.json"]
 
-exclude = [
-  "data*",
-  "examples*",
-  "docs*",
-  "scripts*",
-  "tests*",
-]
+[tool.ruff]
+line-length = 120
+target-version = "py311"
 
+[tool.ruff.lint]
+select = ["E", "F"]
+ignore = ["E501"]
 
-
-
-
+[tool.ruff.lint.per-file-ignores]
+"scripts/**" = ["E402"]
+"tests/**" = ["E501"]

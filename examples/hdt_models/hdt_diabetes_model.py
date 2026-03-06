@@ -10,11 +10,13 @@ import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any, Optional
 
 # Ensure repo root on sys.path (so `hdt_mcp` and `config` resolve when run as a script)
 _THIS_FILE = Path(__file__).resolve()
-_REPO_ROOT = _THIS_FILE.parents[2] if (_THIS_FILE.parents and (_THIS_FILE.parents[0].name == "hdt_models")) else Path.cwd()
+_REPO_ROOT = (
+    _THIS_FILE.parents[2] if (_THIS_FILE.parents and (_THIS_FILE.parents[0].name == "hdt_models")) else Path.cwd()
+)
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
@@ -54,6 +56,7 @@ def _load_runtime_env() -> None:
     """
     try:
         from hdt_config.settings import init_runtime  # type: ignore
+
         init_runtime()
     except Exception:
         # Intentionally no side-effects here. Provide env externally if needed.
@@ -115,10 +118,7 @@ def _pick_gateway_module() -> str:
         except Exception:
             continue
 
-    raise RuntimeError(
-        "Could not import a gateway module. Set HDT_GATEWAY_MODULE explicitly "
-        "(e.g., hdt_mcp.gateway)."
-    )
+    raise RuntimeError("Could not import a gateway module. Set HDT_GATEWAY_MODULE explicitly (e.g., hdt_mcp.gateway).")
 
 
 def _unwrap_tool_result(res: Any) -> Any:
@@ -216,9 +216,15 @@ async def fetch_user_data_via_mcp(
             sugar_payload = _as_json(_unwrap_tool_result(sugar_res))
 
             if not isinstance(trivia_payload, dict):
-                trivia_payload = {"error": {"code": "bad_shape", "message": "Trivia tool did not return dict"}, "raw": trivia_payload}
+                trivia_payload = {
+                    "error": {"code": "bad_shape", "message": "Trivia tool did not return dict"},
+                    "raw": trivia_payload,
+                }
             if not isinstance(sugar_payload, dict):
-                sugar_payload = {"error": {"code": "bad_shape", "message": "SugarVita tool did not return dict"}, "raw": sugar_payload}
+                sugar_payload = {
+                    "error": {"code": "bad_shape", "message": "SugarVita tool did not return dict"},
+                    "raw": sugar_payload,
+                }
 
             return FetchResult(trivia_payload=trivia_payload, sugarvita_payload=sugar_payload)
 
@@ -302,6 +308,7 @@ def _load_user_ids_from_config() -> list[int]:
     cfg_path = _REPO_ROOT / "config" / "users.json"
     try:
         from hdt_config.settings import config_dir  # type: ignore
+
         cfg_path = config_dir() / "users.json"
     except Exception:
         pass
@@ -331,7 +338,9 @@ async def main() -> int:
     ap.add_argument("--user-ids", default=os.getenv("HDT_DIABETES_USER_IDS", ""), help="Comma-separated user IDs.")
     ap.add_argument("--start-date", default=os.getenv("HDT_START_DATE"), help="YYYY-MM-DD (optional).")
     ap.add_argument("--end-date", default=os.getenv("HDT_END_DATE"), help="YYYY-MM-DD (optional).")
-    ap.add_argument("--purpose", default=os.getenv("HDT_PURPOSE", "modeling"), help="Policy lane/purpose (e.g., modeling).")
+    ap.add_argument(
+        "--purpose", default=os.getenv("HDT_PURPOSE", "modeling"), help="Policy lane/purpose (e.g., modeling)."
+    )
     ap.add_argument("--client-id", default=os.getenv("MCP_CLIENT_ID", "MODEL_DEVELOPER_1"), help="MCP client id.")
     ap.add_argument("--out", default=str(_default_storage_path()), help="Output JSON file path.")
     args = ap.parse_args()
@@ -344,7 +353,9 @@ async def main() -> int:
         user_ids = _load_user_ids_from_config()
 
     if not user_ids:
-        raise SystemExit("No user IDs provided (use --user-ids or set HDT_DIABETES_USER_IDS, or define config/users.json).")
+        raise SystemExit(
+            "No user IDs provided (use --user-ids or set HDT_DIABETES_USER_IDS, or define config/users.json)."
+        )
 
     storage_data = load_json(out_path)
 

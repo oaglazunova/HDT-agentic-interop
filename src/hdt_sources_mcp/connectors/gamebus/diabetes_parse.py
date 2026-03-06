@@ -1,9 +1,9 @@
 import json
 import logging
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-from datetime import datetime
 
 def parse_json_trivia(response_trivia):
     """
@@ -29,13 +29,13 @@ def parse_json_trivia(response_trivia):
         "NO_HINT_TYPE_OF_ANSWER": {
             "CORRECT": 0,  # Questions answered correctly without a hint
             "INCORRECT": 0,  # Questions answered incorrectly without a hint
-        }
+        },
     }
     latest_activity_info = {"id": None, "timestamp": None}
 
     try:
         # Check if response is valid
-        if not response_trivia or not hasattr(response_trivia, 'text') or not response_trivia.text:
+        if not response_trivia or not hasattr(response_trivia, "text") or not response_trivia.text:
             logger.warning("Empty or invalid response received from GameBus API")
             return metrics, latest_activity_info
 
@@ -52,8 +52,12 @@ def parse_json_trivia(response_trivia):
             latest_activity = sorted_activities[0]
             latest_activity_info["id"] = latest_activity["id"]
             # Convert UNIX timestamp to human-readable format
-            latest_activity_info["timestamp"] = datetime.utcfromtimestamp(latest_activity["date"] / 1000).strftime('%Y-%m-%d %H:%M:%S')
-            logger.info(f"Latest trivia activity found: ID {latest_activity_info['id']} at {latest_activity_info['timestamp']}")
+            latest_activity_info["timestamp"] = datetime.utcfromtimestamp(latest_activity["date"] / 1000).strftime(
+                "%Y-%m-%d %H:%M:%S"
+            )
+            logger.info(
+                f"Latest trivia activity found: ID {latest_activity_info['id']} at {latest_activity_info['timestamp']}"
+            )
         except (KeyError, IndexError) as e:
             logger.error(f"Error extracting latest activity info: {str(e)}")
 
@@ -81,10 +85,7 @@ def parse_json_trivia(response_trivia):
                     logger.error(f"Error parsing THROUGH_HINT in record {record_index}: {str(e)}")
 
                 try:
-                    if (
-                        element["property"]["translationKey"] == "QUESTION_CORRECT"
-                        and through_hint is False
-                    ):
+                    if element["property"]["translationKey"] == "QUESTION_CORRECT" and through_hint is False:
                         if element["value"] == "true":
                             metrics["NO_HINT_TYPE_OF_ANSWER"]["CORRECT"] += 1
                         elif element["value"] == "false":
@@ -98,7 +99,6 @@ def parse_json_trivia(response_trivia):
 
     logger.info(f"Parsed trivia metrics: {metrics}")
     return metrics, latest_activity_info
-
 
 
 def parse_json_sugarvita(response_pt, response_hl):
@@ -119,7 +119,10 @@ def parse_json_sugarvita(response_pt, response_hl):
         "GLUCOSE_CRITICAL_VALUE_RESPONSE": [],
         "TURN_TIME": [],
     }
-    latest_activity_info = {"playthrough": {"id": None, "timestamp": None}, "engagement": {"id": None, "timestamp": None}}
+    latest_activity_info = {
+        "playthrough": {"id": None, "timestamp": None},
+        "engagement": {"id": None, "timestamp": None},
+    }
 
     try:
         parsed_response_pt = json.loads(response_pt.text)
@@ -131,7 +134,9 @@ def parse_json_sugarvita(response_pt, response_hl):
             latest_playthrough = sorted_playthrough[0]
             latest_activity_info["playthrough"]["id"] = latest_playthrough["id"]
             # Convert UNIX timestamp to human-readable format
-            latest_activity_info["playthrough"]["timestamp"] = datetime.utcfromtimestamp(latest_playthrough["date"] / 1000).strftime('%Y-%m-%d %H:%M:%S')
+            latest_activity_info["playthrough"]["timestamp"] = datetime.utcfromtimestamp(
+                latest_playthrough["date"] / 1000
+            ).strftime("%Y-%m-%d %H:%M:%S")
 
         # Sort engagement data by date in descending order
         if parsed_response_hl:
@@ -139,7 +144,9 @@ def parse_json_sugarvita(response_pt, response_hl):
             latest_engagement = sorted_engagement[0]
             latest_activity_info["engagement"]["id"] = latest_engagement["id"]
             # Convert UNIX timestamp to human-readable format
-            latest_activity_info["engagement"]["timestamp"] = datetime.utcfromtimestamp(latest_engagement["date"] / 1000).strftime('%Y-%m-%d %H:%M:%S')
+            latest_activity_info["engagement"]["timestamp"] = datetime.utcfromtimestamp(
+                latest_engagement["date"] / 1000
+            ).strftime("%Y-%m-%d %H:%M:%S")
 
         # Parse playthrough data
         for record in parsed_response_pt:
@@ -147,20 +154,18 @@ def parse_json_sugarvita(response_pt, response_hl):
                 try:
                     if element["property"]["translationKey"] == "SCORE":
                         metrics_per_session["SCORES"].append(int(element["value"]))
-                except:
+                except (KeyError, ValueError, TypeError):
                     metrics_per_session["SCORES"].append("NaN")
 
                 try:
                     if element["property"]["translationKey"] == "PLAYTIME":
                         metrics_per_session["PLAYTIMES"].append(int(element["value"]))
-                except:
+                except (KeyError, ValueError, TypeError):
                     metrics_per_session["PLAYTIMES"].append("NaN")
 
                 try:
                     if element["property"]["translationKey"] == "GLUCOSE_RANGE_PERCENTAGE":
-                        metrics_per_session["GLUCOSE_ACCURACY"].append(
-                            int(element["value"])
-                        )
+                        metrics_per_session["GLUCOSE_ACCURACY"].append(int(element["value"]))
                 except Exception as e:
                     logger.error(f"Error parsing GLUCOSE_RANGE_PERCENTAGE: {str(e)}")
 
@@ -215,9 +220,17 @@ def parse_json_sugarvita(response_pt, response_hl):
                                         turn_time.append(turn["MinutesEnd"])
 
                                 if current_score and turn_time and glucose_values_each_turn:
-                                    metrics_per_session["SCORE_VARIATION"].append(current_score[:-1] if current_score[-1] == 0 else current_score)
-                                    metrics_per_session["TURN_TIME"].append(turn_time[:-1] if turn_time[-1] == 0 else turn_time)
-                                    metrics_per_session["GLUCOSE_LEVELS"].append(glucose_values_each_turn[:-1] if glucose_values_each_turn[-1] == 0 else glucose_values_each_turn)
+                                    metrics_per_session["SCORE_VARIATION"].append(
+                                        current_score[:-1] if current_score[-1] == 0 else current_score
+                                    )
+                                    metrics_per_session["TURN_TIME"].append(
+                                        turn_time[:-1] if turn_time[-1] == 0 else turn_time
+                                    )
+                                    metrics_per_session["GLUCOSE_LEVELS"].append(
+                                        glucose_values_each_turn[:-1]
+                                        if glucose_values_each_turn[-1] == 0
+                                        else glucose_values_each_turn
+                                    )
                                     metrics_per_session["TOTAL_TRIPS_HOSPITAL"].append(is_hospitalised)
                 except Exception as e:
                     logger.error(f"Error parsing ENGAGEMENT_DATA: {str(e)}")
@@ -285,7 +298,7 @@ def get_glucose_critical_value_response(glucose_levels, times):
                 values["time_red"] = times_playthrough[i]
 
                 # Look for closest green value after this red value
-                for j in range(i+1, len(glucose_playthrough)):
+                for j in range(i + 1, len(glucose_playthrough)):
                     next_glucose = glucose_playthrough[j]
 
                     # Check if next glucose is in green region

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 
 from hdt_mapping_plan.validate import validate_plan_type_compatibility
 from hdt_mapping_plan import errors as E
@@ -21,9 +20,7 @@ def test_strict_dates_unknown_inference_is_error() -> None:
 
     contract_input_schema = {
         "type": "object",
-        "properties": {
-            "person": {"type": "object", "properties": {"birthDate": {"type": "string", "format": "date"}}}
-        },
+        "properties": {"person": {"type": "object", "properties": {"birthDate": {"type": "string", "format": "date"}}}},
     }
 
     # No dataset_column_types => inferred becomes unknown for column op

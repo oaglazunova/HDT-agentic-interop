@@ -113,13 +113,10 @@ def _lint_thresholds(profile: Mapping[str, Any] | None) -> dict[str, float]:
     defaults: dict[str, float] = {
         # warn if usage >= this fraction of budget
         "near_budget_ratio": 0.8,
-
         # warn if stringy ops >= this count
         "string_ops_warn": 10.0,
-
         # warn if coalesce >= this count
         "coalesce_warn": 5.0,
-
         # output suspicion heuristic
         "max_total_output_bytes_warn_ratio": 0.9,  # near the max_total_output_bytes cap in plan
     }
@@ -155,8 +152,8 @@ def _semantic_budgets(profile: Mapping[str, Any] | None) -> dict[str, int]:
     return budgets
 
 
-
 # === end helpers ==============================
+
 
 def lint_plan(
     plan: Mapping[str, Any],

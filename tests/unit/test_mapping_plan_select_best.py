@@ -27,7 +27,7 @@ def test_select_best_plan_prefers_valid_and_simpler() -> None:
             "person": {
                 "type": "object",
                 "properties": {
-                    "birthDate": {"type": "string"},      # plan casts parsed date to string
+                    "birthDate": {"type": "string"},  # plan casts parsed date to string
                     "country": {"type": "string"},
                 },
                 "required": ["birthDate", "country"],

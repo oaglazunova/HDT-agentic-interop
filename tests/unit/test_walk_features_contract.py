@@ -1,6 +1,7 @@
 import pytest
 from hdt_mcp.governor import HDTGovernor
 
+
 @pytest.mark.asyncio
 async def test_walk_features_returns_no_raw_records_and_is_modeling_safe(monkeypatch):
     gov = HDTGovernor()

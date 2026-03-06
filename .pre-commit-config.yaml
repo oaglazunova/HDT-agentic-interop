@@ -1,22 +1,26 @@
 repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        args: ["--fix"]
+      - id: ruff-format
+
   - repo: local
     hooks:
-      # 1) Fast gate on commit: no coverage threshold here
       - id: pytest-quick
         name: pytest (quick)
         entry: python -m pytest --maxfail=1 --disable-warnings -q
         language: system
         pass_filenames: false
 
-      # 2) Strict gate on push (or run manually): coverage
       - id: pytest-cov
         name: pytest (coverage gate)
-        entry: python -m pytest -q --cov-config=.coveragerc --cov=hdt_mcp --cov-report=term --cov-report=term-missing --cov-fail-under=70
+        entry: python -m pytest -q --cov-config=.coveragerc --cov=hdt_mapping_plan --cov=hdt_a2a --cov=hdt_user_a2a --cov=hdt_provider_a2a --cov=hdt_mcp --cov-report=term --cov-report=term-missing --cov-fail-under=70
         language: system
         pass_filenames: false
         stages: [pre-push]
 
-      # 3) Optional: keep your smoke script as manual
       - id: smoke-mcp
         name: smoke_mcp (manual)
         entry: python scripts/demo_smoke_mcp.py

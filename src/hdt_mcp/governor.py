@@ -11,6 +11,7 @@ from hdt_common.context import get_request_id
 from hdt_common.errors import typed_error
 from hdt_mcp import vault_store
 
+
 def _shape_for_purpose(payload: dict, purpose: str) -> dict:
     purpose_norm = (purpose or "").strip().lower()
 
@@ -85,7 +86,9 @@ def _vault_try_read_walk(
     Always appends an attempt entry (ok True/False).
     """
     if not vault_store.enabled():
-        attempts.append({"source": label, "ok": False, "error": {"code": "vault_disabled", "message": "Vault disabled"}})
+        attempts.append(
+            {"source": label, "ok": False, "error": {"code": "vault_disabled", "message": "Vault disabled"}}
+        )
         return None
 
     try:
@@ -101,7 +104,13 @@ def _vault_try_read_walk(
             attempts.append({"source": label, "ok": True})
             return v
 
-        attempts.append({"source": label, "ok": False, "error": {"code": "vault_empty", "message": "Vault has no walk records for this query"}})
+        attempts.append(
+            {
+                "source": label,
+                "ok": False,
+                "error": {"code": "vault_empty", "message": "Vault has no walk records for this query"},
+            }
+        )
         return None
 
     except Exception as e:
@@ -124,7 +133,9 @@ def _vault_try_write_walk(
     try:
         vault_store.upsert_walk(user_id, records or [], source=source)
     except Exception as e:
-        attempts.append({"source": "vault_write", "ok": False, "error": {"code": "vault_write_failed", "message": str(e)}})
+        attempts.append(
+            {"source": "vault_write", "ok": False, "error": {"code": "vault_write_failed", "message": str(e)}}
+        )
 
 
 def _walk_features_from_records(records: list[dict]) -> dict:
@@ -168,15 +179,15 @@ class HDTGovernor:
         return _as_json(out)
 
     async def fetch_walk(
-            self,
-            user_id: int,
-            start_date: str | None = None,
-            end_date: Optional[str] = None,
-            limit: Optional[int] = None,
-            offset: Optional[int] = None,
-            prefer: str = "gamebus",
-            prefer_data: str = "auto",
-            purpose: str = "analytics"
+        self,
+        user_id: int,
+        start_date: str | None = None,
+        end_date: Optional[str] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        prefer: str = "gamebus",
+        prefer_data: str = "auto",
+        purpose: str = "analytics",
     ) -> Dict[str, Any]:
         t0 = time.perf_counter()
 
@@ -224,7 +235,6 @@ class HDTGovernor:
                 result = v
                 return _shape_for_purpose(result, purpose)
 
-
         # Explicit vault-only request and vault had no data.
         if prefer_data_norm == "vault":
             result = typed_error(
@@ -262,8 +272,11 @@ class HDTGovernor:
                     result = payload
                     break
 
-                err = payload.get("error", {}) if isinstance(payload, dict) else {"code": "unknown",
-                                                                                  "message": str(payload)}
+                err = (
+                    payload.get("error", {})
+                    if isinstance(payload, dict)
+                    else {"code": "unknown", "message": str(payload)}
+                )
                 attempts.append({"source": src, "ok": False, "error": err})
 
             # Live failed => error result
@@ -328,11 +341,7 @@ class HDTGovernor:
             )
 
     async def fetch_trivia(
-            self,
-            user_id: int,
-            start_date: str | None = None,
-            end_date: Optional[str] = None,
-            purpose: str = "analytics"
+        self, user_id: int, start_date: str | None = None, end_date: Optional[str] = None, purpose: str = "analytics"
     ) -> Dict[str, Any]:
         t0 = time.perf_counter()
         cid = os.getenv("MCP_CLIENT_ID", "MODEL_DEVELOPER_1")
@@ -355,12 +364,18 @@ class HDTGovernor:
                 payload["attempts"] = attempts
                 result = payload
             else:
-                err = payload.get("error", {}) if isinstance(payload, dict) else {"code": "unknown",
-                                                                                  "message": str(payload)}
+                err = (
+                    payload.get("error", {})
+                    if isinstance(payload, dict)
+                    else {"code": "unknown", "message": str(payload)}
+                )
                 attempts.append({"source": "gamebus", "ok": False, "error": err})
                 result = {
-                    "error": {"code": err.get("code", "unknown"), "message": err.get("message", "unknown error"),
-                              "details": attempts},
+                    "error": {
+                        "code": err.get("code", "unknown"),
+                        "message": err.get("message", "unknown error"),
+                        "details": attempts,
+                    },
                     "user_id": user_id,
                     "selected_source": selected_source,
                     "attempts": attempts,
@@ -387,22 +402,14 @@ class HDTGovernor:
             if exc:
                 log_payload["exception"] = exc
 
-            log_event(
-                "governor",
-                "trivia.fetch",
-                log_payload,
-                ok=ok,
-                ms=ms,
-                client_id=cid,
-                corr_id=get_request_id()
-            )
+            log_event("governor", "trivia.fetch", log_payload, ok=ok, ms=ms, client_id=cid, corr_id=get_request_id())
 
     async def fetch_sugarvita(
-            self,
-            user_id: int,
-            start_date: str | None = None,
-            end_date: Optional[str] = None,
-            purpose: str = "analytics",
+        self,
+        user_id: int,
+        start_date: str | None = None,
+        end_date: Optional[str] = None,
+        purpose: str = "analytics",
     ) -> Dict[str, Any]:
         t0 = time.perf_counter()
         cid = os.getenv("MCP_CLIENT_ID", "MODEL_DEVELOPER_1")
@@ -425,8 +432,11 @@ class HDTGovernor:
                 payload["attempts"] = attempts
                 result = payload
             else:
-                err = payload.get("error", {}) if isinstance(payload, dict) else {"code": "unknown",
-                                                                                  "message": str(payload)}
+                err = (
+                    payload.get("error", {})
+                    if isinstance(payload, dict)
+                    else {"code": "unknown", "message": str(payload)}
+                )
                 attempts.append({"source": "gamebus", "ok": False, "error": err})
                 result = {
                     "error": {
@@ -471,15 +481,15 @@ class HDTGovernor:
             )
 
     async def walk_features(
-            self,
-            user_id: int,
-            start_date: str | None = None,
-            end_date: Optional[str] = None,
-            limit: Optional[int] = None,
-            offset: Optional[int] = None,
-            prefer: str = "gamebus",
-            prefer_data: str = "auto",
-            purpose: str = "modeling",
+        self,
+        user_id: int,
+        start_date: str | None = None,
+        end_date: Optional[str] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        prefer: str = "gamebus",
+        prefer_data: str = "auto",
+        purpose: str = "modeling",
     ) -> Dict[str, Any]:
         t0 = time.perf_counter()
         cid = os.getenv("MCP_CLIENT_ID", "MODEL_DEVELOPER_1")
@@ -489,8 +499,9 @@ class HDTGovernor:
         try:
             # Enforce purpose for this tool (defense-in-depth)
             if (purpose or "").strip().lower() != "modeling":
-                result = typed_error("bad_request", "purpose must be modeling for hdt.walk.features.v1",
-                                     user_id=user_id, purpose=purpose)
+                result = typed_error(
+                    "bad_request", "purpose must be modeling for hdt.walk.features.v1", user_id=user_id, purpose=purpose
+                )
                 return result
 
             # Reuse existing fetch logic to get records, but request coaching internally
@@ -507,8 +518,11 @@ class HDTGovernor:
             )
 
             if not isinstance(raw, dict) or "error" in raw:
-                result = raw if isinstance(raw, dict) else {"error": {"code": "unknown", "message": str(raw)},
-                                                            "user_id": user_id}
+                result = (
+                    raw
+                    if isinstance(raw, dict)
+                    else {"error": {"code": "unknown", "message": str(raw)}, "user_id": user_id}
+                )
                 return result
 
             feats = _walk_features_from_records(raw.get("records", []))

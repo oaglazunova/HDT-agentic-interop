@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Tuple
 
@@ -54,7 +53,7 @@ def _table_columns(con: sqlite3.Connection, table: str) -> List[Dict[str, Any]]:
     rows = con.execute(f"PRAGMA table_info({table});").fetchall()
     # columns: cid, name, type, notnull, dflt_value, pk
     cols: List[Dict[str, Any]] = []
-    for (_cid, name, decl_type, notnull, _dflt, pk) in rows:
+    for _cid, name, decl_type, notnull, _dflt, pk in rows:
         cols.append(
             {
                 "name": str(name),

@@ -20,7 +20,6 @@ def test_gamebus_adapter_monkeypatched_module(monkeypatch):
     assert out and out[0]["steps"] == 321
 
 
-
 def test_google_fit_adapter_monkeypatched_module(monkeypatch):
     monkeypatch.setenv("HDT_TZ", "UTC")
 
@@ -36,4 +35,3 @@ def test_google_fit_adapter_monkeypatched_module(monkeypatch):
 
     out = gf.fetch_google_fit_walk_data("p-2", auth_bearer=None, start_date="2025-11-04", end_date="2025-11-05")
     assert out and out[0]["steps"] == 654
-

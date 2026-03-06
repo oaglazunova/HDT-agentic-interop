@@ -3,6 +3,7 @@ import pytest
 import hdt_common.tooling as tooling
 from hdt_common.tooling import InstrumentConfig, PolicyConfig, instrument_async_tool
 
+
 @pytest.mark.asyncio
 async def test_instrument_async_tool_rejects_bad_purpose(monkeypatch):
     # capture telemetry calls without writing files

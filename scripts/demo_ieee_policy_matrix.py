@@ -92,11 +92,23 @@ async def _run_for_client(*, client_id: str, policy_path: Path, telemetry_dir: P
 
                 # 2) representative tool calls
                 # - modeling on raw fetch should be denied before governor/sources
-                r1 = await _call(session, "hdt.walk.fetch.v1", {"user_id": 1, "purpose": "modeling", "prefer": "gamebus", "prefer_data": "vault"})
+                r1 = await _call(
+                    session,
+                    "hdt.walk.fetch.v1",
+                    {"user_id": 1, "purpose": "modeling", "prefer": "gamebus", "prefer_data": "vault"},
+                )
                 # - analytics raw fetch should succeed (and be redacted)
-                r2 = await _call(session, "hdt.walk.fetch.v1", {"user_id": 1, "purpose": "analytics", "prefer": "gamebus", "prefer_data": "vault"})
+                r2 = await _call(
+                    session,
+                    "hdt.walk.fetch.v1",
+                    {"user_id": 1, "purpose": "analytics", "prefer": "gamebus", "prefer_data": "vault"},
+                )
                 # - modeling features should succeed
-                r3 = await _call(session, "hdt.walk.features.v1", {"user_id": 1, "purpose": "modeling", "prefer": "gamebus", "prefer_data": "vault"})
+                r3 = await _call(
+                    session,
+                    "hdt.walk.features.v1",
+                    {"user_id": 1, "purpose": "modeling", "prefer": "gamebus", "prefer_data": "vault"},
+                )
 
                 def _parse(x):
                     try:
@@ -126,14 +138,16 @@ async def main() -> int:
     root = repo_root()
     policy_path = (root / "config" / "policy_ieee_demo.json").resolve()
     if not policy_path.exists():
-        raise SystemExit(f"Policy file not found: {policy_path}.\n"                         f"Tip: run from repo root or set HDT_REPO_ROOT / HDT_POLICY_PATH.")
+        raise SystemExit(
+            f"Policy file not found: {policy_path}.\nTip: run from repo root or set HDT_REPO_ROOT / HDT_POLICY_PATH."
+        )
     telemetry_dir = (root / "artifacts" / "telemetry" / f"demo_ieee_policy_{time.strftime('%Y%m%d_%H%M%S')}").resolve()
     telemetry_dir.mkdir(parents=True, exist_ok=True)
 
     # Ensure a deterministic vault exists.
     db_path = (root / "artifacts" / "vault" / "hdt_vault_ieee_demo.sqlite").resolve()
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    vault_store.init(str(db_path))    
+    vault_store.init(str(db_path))
 
     print("\n=== IEEE Demo: Policy Matrix (clients x purposes x tools) ===")
     print(f"Policy: {policy_path}")

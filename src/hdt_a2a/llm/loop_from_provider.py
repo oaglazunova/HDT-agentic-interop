@@ -18,6 +18,9 @@ def synthesize_plan_via_provider(
     dataset_id: str | None = None,
     table_name: str | None = None,
     max_iters: int = 3,
+    initial_candidates: int = 1,
+    use_candidate_retrieval: bool = True,
+    use_seed_hints: bool = True,
 ) -> LoopResult:
     bundle = fetch_contract_bundle(
         provider_url=provider_url,
@@ -35,4 +38,7 @@ def synthesize_plan_via_provider(
         dataset_id=dataset_id,
         table_name=table_name,
         max_iters=max_iters,
+        initial_candidates=initial_candidates,
+        use_candidate_retrieval=use_candidate_retrieval,
+        use_seed_hints=use_seed_hints,
     )

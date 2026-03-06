@@ -23,9 +23,7 @@ from hdt_mapping_plan.vault_catalog import get_dataset_schema  # ok to import; n
 
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-_DATETIME_RE = re.compile(
-    r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:\d{2})?$"
-)
+_DATETIME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:\d{2})?$")
 
 _FILTER_BOOL_OPS = {"and", "or", "not", "eq", "neq", "lt", "lte", "gt", "gte", "is_null", "not_null"}
 _NUMERIC_KINDS = {"int64", "float64"}
@@ -35,10 +33,10 @@ _WINDOWS_ABS_PATH_RE = re.compile(r"^[a-zA-Z]:[\\/]")
 
 @dataclass(frozen=True)
 class CriticIssue:
-    code: str                 # e.g. "SCHEMA_INVALID"
-    path: str                 # JSON Pointer into the plan, e.g. "/contract/contract_hash"
-    detail: str               # human-readable message
-    severity: str = "error"   # "error" | "warning"
+    code: str  # e.g. "SCHEMA_INVALID"
+    path: str  # JSON Pointer into the plan, e.g. "/contract/contract_hash"
+    detail: str  # human-readable message
+    severity: str = "error"  # "error" | "warning"
     hint: str | None = None
 
 
@@ -50,6 +48,7 @@ class CriticReport:
 
 
 # === helpers =============================================
+
 
 def _load_mapping_plan_schema() -> dict[str, Any]:
     """Load MappingPlan JSON Schema shipped with the package."""
@@ -192,6 +191,8 @@ def _check_max_args(
                 base_path_parts=[*base_path_parts, "args", i],
                 issues=issues,
             )
+
+
 def _pointer_unescape(token: str) -> str:
     # JSON Pointer decoding: ~1 => /, ~0 => ~
     return token.replace("~1", "/").replace("~0", "~")
@@ -495,7 +496,9 @@ def _infer_expr_kind(
 
     if op == "cast":
         a = need_arity(1, 1)
-        inner = _infer_expr_kind(a[0], dataset_column_types=dataset_column_types, issues=issues, path_parts=[*path_parts, "args", 0]) if a else "unknown"
+        _infer_expr_kind(
+            a[0], dataset_column_types=dataset_column_types, issues=issues, path_parts=[*path_parts, "args", 0]
+        )
         # cast target is definitive
         tgt = str(expr.get("type") or "")
         if tgt in ("string", "int64", "float64", "bool", "date", "datetime"):
@@ -505,41 +508,53 @@ def _infer_expr_kind(
     if op == "to_string":
         a = need_arity(1, 1)
         if a:
-            _infer_expr_kind(a[0], dataset_column_types=dataset_column_types, issues=issues, path_parts=[*path_parts, "args", 0])
+            _infer_expr_kind(
+                a[0], dataset_column_types=dataset_column_types, issues=issues, path_parts=[*path_parts, "args", 0]
+            )
         return "string"
 
     if op == "parse_date":
         a = need_arity(1, 1)
         if a:
-            k = _infer_expr_kind(a[0], dataset_column_types=dataset_column_types, issues=issues, path_parts=[*path_parts, "args", 0])
+            k = _infer_expr_kind(
+                a[0], dataset_column_types=dataset_column_types, issues=issues, path_parts=[*path_parts, "args", 0]
+            )
             require_kind(k, {"string", "date", "datetime"}, at=[*path_parts, "args", 0])
         return "date"
 
     if op == "parse_datetime":
         a = need_arity(1, 1)
         if a:
-            k = _infer_expr_kind(a[0], dataset_column_types=dataset_column_types, issues=issues, path_parts=[*path_parts, "args", 0])
+            k = _infer_expr_kind(
+                a[0], dataset_column_types=dataset_column_types, issues=issues, path_parts=[*path_parts, "args", 0]
+            )
             require_kind(k, {"string", "date", "datetime"}, at=[*path_parts, "args", 0])
         return "datetime"
 
     if op in ("lower", "upper"):
         a = need_arity(1, 1)
         if a:
-            k = _infer_expr_kind(a[0], dataset_column_types=dataset_column_types, issues=issues, path_parts=[*path_parts, "args", 0])
+            k = _infer_expr_kind(
+                a[0], dataset_column_types=dataset_column_types, issues=issues, path_parts=[*path_parts, "args", 0]
+            )
             require_kind(k, {"string"}, at=[*path_parts, "args", 0])
         return "string"
 
     if op == "scale":
         a = need_arity(1, 1)
         if a:
-            k = _infer_expr_kind(a[0], dataset_column_types=dataset_column_types, issues=issues, path_parts=[*path_parts, "args", 0])
+            k = _infer_expr_kind(
+                a[0], dataset_column_types=dataset_column_types, issues=issues, path_parts=[*path_parts, "args", 0]
+            )
             require_kind(k, {"int64", "float64"}, at=[*path_parts, "args", 0])
         return "float64"
 
     if op == "round":
         a = need_arity(1, 1)
         if a:
-            k = _infer_expr_kind(a[0], dataset_column_types=dataset_column_types, issues=issues, path_parts=[*path_parts, "args", 0])
+            k = _infer_expr_kind(
+                a[0], dataset_column_types=dataset_column_types, issues=issues, path_parts=[*path_parts, "args", 0]
+            )
             require_kind(k, {"int64", "float64"}, at=[*path_parts, "args", 0])
             # preserve int64 if rounding an int64 (optional)
             return "int64" if k == "int64" else "float64"
@@ -549,7 +564,9 @@ def _infer_expr_kind(
         a = need_arity(1, 8)
         kinds: list[str] = []
         for i, child in enumerate(a):
-            k = _infer_expr_kind(child, dataset_column_types=dataset_column_types, issues=issues, path_parts=[*path_parts, "args", i])
+            k = _infer_expr_kind(
+                child, dataset_column_types=dataset_column_types, issues=issues, path_parts=[*path_parts, "args", i]
+            )
             if k != "unknown":
                 kinds.append(k)
 
@@ -707,10 +724,7 @@ def _validate_row_filter_types(
 
     # ---- type checks by op category ----
     # Infer kinds of immediate args (including literals)
-    kinds = [
-        _infer_filter_expr_kind(a, dataset_column_types=dataset_column_types)
-        for a in args_list
-    ]
+    kinds = [_infer_filter_expr_kind(a, dataset_column_types=dataset_column_types) for a in args_list]
 
     # Warn once if we see column refs but have no type info
     if dataset_column_types is None:
@@ -901,8 +915,8 @@ def _required_leaf_contract_pointers(schema: Mapping[str, Any], prefix: str = ""
     return out
 
 
-
 # === end helpers ==================================================================================
+
 
 def validate_plan_contract_required_fields(
     plan: dict[str, Any],
@@ -956,9 +970,9 @@ def validate_plan_schema(plan: dict[str, Any]) -> CriticReport:
 
     errors: list[CriticIssue] = []
     for err in sorted(
-            v.iter_errors(plan),
-            key=lambda e: (list(e.absolute_path), e.validator, str(e.message)),
-                      ):
+        v.iter_errors(plan),
+        key=lambda e: (list(e.absolute_path), e.validator, str(e.message)),
+    ):
         errors.append(
             CriticIssue(
                 code=E.SCHEMA_INVALID,
@@ -1029,7 +1043,6 @@ def validate_plan_semantics(
     # 2) record_mapping expressions: op allowlist + column usage
     rm = plan.get("record_mapping") or {}
     if isinstance(rm, dict):
-
         # (A) record_mapping size budget
         if len(rm) > limits["max_record_mappings"]:
             issues.append(
@@ -1194,7 +1207,6 @@ def validate_plan_semantics(
             path_parts=["row_filter"],
         )
 
-
     # 4) grouping: treat group_by/order_by as column references
     grp = plan.get("grouping")
     if isinstance(grp, dict):
@@ -1222,7 +1234,6 @@ def validate_plan_semantics(
                             severity="error",
                         )
                     )
-
 
     # 5) output confinement
     out = plan.get("output")
@@ -1282,10 +1293,10 @@ def validate_plan_semantics(
 def validate_plan_contract_pointers(
     plan: dict[str, Any],
     *,
-        dataset_columns: set[str] | None = None,
-        dataset_column_types: Mapping[str, str] | None = None,
-        allowed_ops_profile: Mapping[str, Any] | None = None,
-        contract_input_schema: Mapping[str, Any] | None = None,
+    dataset_columns: set[str] | None = None,
+    dataset_column_types: Mapping[str, str] | None = None,
+    allowed_ops_profile: Mapping[str, Any] | None = None,
+    contract_input_schema: Mapping[str, Any] | None = None,
 ) -> CriticReport:
     """S2 Contract pointer integrity: every record_mapping JSON pointer must exist in input schema."""
     if not contract_input_schema:
@@ -1442,12 +1453,14 @@ def validate_plan_type_compatibility(
     if not contract_input_schema:
         return CriticReport(
             ok=False,
-            errors=[CriticIssue(
-                code=E.CONTRACT_SCHEMA_MISSING,
-                path="/contract",
-                detail="contract_input_schema not provided; cannot validate type compatibility",
-                severity="error",
-            )],
+            errors=[
+                CriticIssue(
+                    code=E.CONTRACT_SCHEMA_MISSING,
+                    path="/contract",
+                    detail="contract_input_schema not provided; cannot validate type compatibility",
+                    severity="error",
+                )
+            ],
             warnings=[],
         )
 
@@ -1606,7 +1619,6 @@ def merge_reports(reports: list[CriticReport], *, profile: Mapping[str, Any] | N
     return CriticReport(ok=(len(errors_sorted) == 0), errors=errors_sorted, warnings=warnings_sorted)
 
 
-
 def resolve_dataset_schema_from_catalog(
     plan: Mapping[str, Any],
     *,
@@ -1624,6 +1636,7 @@ def resolve_dataset_schema_from_catalog(
         raise ValueError("plan.dataset.table_name missing/invalid")
 
     return get_dataset_schema(vault_catalog, dataset_id=dataset_id, table_name=table_name)
+
 
 def validate_plan(
     plan: dict[str, Any],
@@ -1726,6 +1739,7 @@ def validate_and_lint_plan(
     # Only lint if schema passed; otherwise linter assumptions may be noisy.
     if validate_plan_schema(plan).ok:
         from hdt_mapping_plan.lint import lint_plan  # local import avoids circular import
+
         rep_lint = lint_plan(plan, profile=allowed_ops_profile)
 
     return merge_reports([rep_validate, rep_lint], profile=allowed_ops_profile)

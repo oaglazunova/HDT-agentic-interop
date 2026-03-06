@@ -1,5 +1,6 @@
 from statistics import mean, pstdev
 
+
 # Manipulate initial metrics for trivia
 def manipulate_initial_metrics_trivia(metrics_cleaned):
     metrics_overview_hl_trivia = {
@@ -16,10 +17,15 @@ def manipulate_initial_metrics_trivia(metrics_cleaned):
 
     # Avoid division by zero for avg_correct and avg_incorrect
     if metrics_cleaned["WITH_HINT"]["FALSE"] > 0:
-        metrics_overview_hl_trivia["avg_correct"] = metrics_cleaned["NO_HINT_TYPE_OF_ANSWER"]["CORRECT"] / metrics_cleaned["WITH_HINT"]["FALSE"]
-        metrics_overview_hl_trivia["avg_incorrect"] = metrics_cleaned["NO_HINT_TYPE_OF_ANSWER"]["INCORRECT"] / metrics_cleaned["WITH_HINT"]["FALSE"]
+        metrics_overview_hl_trivia["avg_correct"] = (
+            metrics_cleaned["NO_HINT_TYPE_OF_ANSWER"]["CORRECT"] / metrics_cleaned["WITH_HINT"]["FALSE"]
+        )
+        metrics_overview_hl_trivia["avg_incorrect"] = (
+            metrics_cleaned["NO_HINT_TYPE_OF_ANSWER"]["INCORRECT"] / metrics_cleaned["WITH_HINT"]["FALSE"]
+        )
 
     return metrics_overview_hl_trivia
+
 
 # Manipulate initial metrics for SugarVita
 def manipulate_initial_metrics_sugarvita(metrics_cleaned):
@@ -66,10 +72,14 @@ def manipulate_initial_metrics_sugarvita(metrics_cleaned):
     if metrics_cleaned["TOTAL_TRIPS_HOSPITAL"]:
         trips = len(metrics_cleaned["TOTAL_TRIPS_HOSPITAL"])
         if trips > 0:
-            metrics_overview_hl_sugarvita["trips_to_hospital_per_game"] = sum(metrics_cleaned["TOTAL_TRIPS_HOSPITAL"]) / trips
+            metrics_overview_hl_sugarvita["trips_to_hospital_per_game"] = (
+                sum(metrics_cleaned["TOTAL_TRIPS_HOSPITAL"]) / trips
+            )
 
     if metrics_cleaned["GLUCOSE_CRITICAL_VALUE_RESPONSE"]:
-        metrics_overview_hl_sugarvita["avg_glucose_critical_value_response"] = mean(metrics_cleaned["GLUCOSE_CRITICAL_VALUE_RESPONSE"])
+        metrics_overview_hl_sugarvita["avg_glucose_critical_value_response"] = mean(
+            metrics_cleaned["GLUCOSE_CRITICAL_VALUE_RESPONSE"]
+        )
 
     return metrics_overview_pt_sugarvita, metrics_overview_hl_sugarvita
 
@@ -93,7 +103,7 @@ def normalize_metrics(metrics_overview):
     if vmax == vmin:
         return {k: 0.0 for k in keys}
 
-    denom = (vmax - vmin)
+    denom = vmax - vmin
     return {k: (float(metrics_overview[k]) - vmin) / denom for k in keys}
 
 
@@ -107,17 +117,25 @@ def calculate_score(weights, metrics_normalized):
             negative += value * metrics_normalized[key]
     return positive + negative
 
+
 def get_health_literacy_score_trivia(metrics_normalized):
     weights = {"avg_hint": -0.15, "avg_correct": 1, "avg_incorrect": -0.85}
     return calculate_score(weights, metrics_normalized)
 
+
 def get_health_literacy_score_sugarvita(metrics_normalized):
-    weights = {"avg_glucose_critical_value_response": 0.15, "trips_to_hospital_per_game": -1, "avg_glucose_accuracy": 0.85}
+    weights = {
+        "avg_glucose_critical_value_response": 0.15,
+        "trips_to_hospital_per_game": -1,
+        "avg_glucose_accuracy": 0.85,
+    }
     return calculate_score(weights, metrics_normalized)
+
 
 def get_final_health_literacy_score(trivia_score, sugarvita_score):
     weights = {"trivia": 0.6, "sugarvita": 0.4}
     return (weights["trivia"] * trivia_score) + (weights["sugarvita"] * sugarvita_score)
+
 
 def get_player_types(metrics_normalized):
     types = {

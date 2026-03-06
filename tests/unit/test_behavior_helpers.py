@@ -2,6 +2,7 @@ from datetime import date, timedelta
 
 from hdt_mcp.models.behavior import _avg_steps_last_days
 
+
 def test_avg_steps_last_days_edge_cases():
     # Empty -> 0
     assert _avg_steps_last_days([], days=7) == 0
@@ -39,4 +40,8 @@ def test_behavior_strategy_api_fallback(monkeypatch):
     assert plan["avg_steps"] > 0
     # With ~2250 avg, we should get the middle tier (<7000 and >=3000 is false, so first tier)
     # Actually 2250 < 3000 -> activation tier
-    assert any("Prompts" in s or "prompts" in s.lower() for s in plan["bct_refs"]) or "Action planning" in " ".join(plan["bct_refs"]) or plan["avg_steps"] < 3000
+    assert (
+        any("Prompts" in s or "prompts" in s.lower() for s in plan["bct_refs"])
+        or "Action planning" in " ".join(plan["bct_refs"])
+        or plan["avg_steps"] < 3000
+    )

@@ -13,10 +13,10 @@ from hdt_mapping_plan.vault_catalog import get_dataset_schema
 from hdt_mapping_plan.normalize import apply_limits_policy, fill_contract_refs
 from hdt_a2a.llm.plan_synthesis import (
     build_base_messages,
-    generate_mapping_plan_candidate,
     generate_mapping_plan_candidates,
 )
 from hdt_mapping_plan.select import select_best_plan
+from hdt_mapping_plan.contract_schema import required_leaf_pointers
 
 
 @dataclass(frozen=True)
@@ -30,6 +30,7 @@ class LoopResult:
 
 
 # === helpers: =========================
+
 
 def _apply_immutables(
     plan: dict[str, Any],
@@ -97,26 +98,6 @@ def _normalize_llm_plan_shape(plan: dict[str, Any]) -> dict[str, Any]:
 
     return plan
 
-def _required_leaf_pointers(schema: Mapping[str, Any], prefix: str = "") -> list[str]:
-    """
-    Collect required leaf JSON Pointers from a JSON Schema (object-only traversal).
-    Matches your prompt logic: only recurse into an object if that object is required at this level.
-    """
-    props = schema.get("properties")
-    if not isinstance(props, dict):
-        return []
-    required = set(schema.get("required") or [])
-    out: list[str] = []
-    for name, sub in props.items():
-        p = f"{prefix}/{name}"
-        if isinstance(sub, dict) and isinstance(sub.get("properties"), dict):
-            if name in required:
-                out.extend(_required_leaf_pointers(sub, p))
-        else:
-            if name in required:
-                out.append(p)
-    return out
-
 
 def _collect_column_names_from_expr(expr: Any) -> set[str]:
     cols: set[str] = set()
@@ -158,44 +139,6 @@ def _collect_column_names(plan: Mapping[str, Any]) -> set[str]:
     return cols
 
 
-def _obesitycoach_pointer_candidates() -> dict[str, list[str]]:
-    # Deterministic per-contract hints (same idea as your prompt payload).
-    return {
-        "/recordId": ["txn_id"],
-        "/person/birthDate": ["dob"],
-        "/day/date": ["date"],
-        "/activity/steps": ["steps"],
-        "/nutrition/caloriesIn": ["calories_in"],
-        "/hydration/waterMl": ["water_ml"],
-        "/sleep/minutes": ["sleep_minutes"],
-    }
-
-
-def _snakeish(s: str) -> str:
-    # Minimal camel->snake for common cases
-    out = []
-    for ch in s:
-        if ch.isupper():
-            out.append("_")
-            out.append(ch.lower())
-        else:
-            out.append(ch)
-    return "".join(out).lstrip("_")
-
-
-def _fallback_candidate_for_pointer(ptr: str, dataset_columns: set[str]) -> str | None:
-    # Very small heuristic fallback if not in the curated dict.
-    # Use last token and try direct / snake_case matches.
-    last = ptr.rsplit("/", 1)[-1]
-    if not last:
-        return None
-    cands = [last, _snakeish(last)]
-    for c in cands:
-        if c in dataset_columns:
-            return c
-    return None
-
-
 def _ensure_required_contract_mappings(
     plan: dict[str, Any],
     *,
@@ -207,16 +150,15 @@ def _ensure_required_contract_mappings(
     Deterministically ensure that every required leaf pointer has a record_mapping entry.
     This prevents LLM "forgetfulness" from breaking strict validation.
     """
-    required_ptrs = _required_leaf_pointers(contract_input_schema)
+    required_ptrs = required_leaf_pointers(contract_input_schema)
     rm = plan.get("record_mapping")
     if not isinstance(rm, dict):
         rm = {}
         plan["record_mapping"] = rm
 
-    # Choose deterministic candidate map (per algo)
-    pointer_to_cols: dict[str, list[str]] = {}
-    if algo_id == "provider.obesityCoach":
-        pointer_to_cols = _obesitycoach_pointer_candidates()
+    from hdt_mapping_plan.candidate_retrieval import provider_seed_pointer_candidates
+
+    pointer_to_cols = provider_seed_pointer_candidates(algo_id)
 
     for ptr in required_ptrs:
         if ptr in rm:
@@ -229,9 +171,13 @@ def _ensure_required_contract_mappings(
                 chosen = c
                 break
 
-        # 2) Fallback: simple heuristic
-        if chosen is None:
-            chosen = _fallback_candidate_for_pointer(ptr, dataset_columns)
+        # 2) Fallback: call central retriever
+        from hdt_mapping_plan.candidate_retrieval import rank_candidate_columns_for_pointer
+
+        ranked = rank_candidate_columns_for_pointer(
+            pointer=ptr, dataset_columns=dataset_columns, algo_id=algo_id, top_k=1, use_seed_hints=True
+        )
+        chosen = ranked[0] if ranked else None
 
         # 3) Create deterministic expression (with date parsing for known date pointers)
         if chosen is not None:
@@ -269,15 +215,16 @@ def _enforce_plan_invariants(
     contract_input_schema: Mapping[str, Any],
     dataset_columns: set[str],
     algo_id: str,
+    host_backfill_required_mappings: bool,
 ) -> dict[str, Any]:
-    # 1) ensure required pointers exist
-    plan = _ensure_required_contract_mappings(
-        plan,
-        contract_input_schema=contract_input_schema,
-        dataset_columns=dataset_columns,
-        algo_id=algo_id,
-    )
-    # 2) required_columns must match actual referenced columns (minimized)
+    if host_backfill_required_mappings:
+        plan = _ensure_required_contract_mappings(
+            plan,
+            contract_input_schema=contract_input_schema,
+            dataset_columns=dataset_columns,
+            algo_id=algo_id,
+        )
+
     plan = _recompute_required_columns(plan)
     return plan
 
@@ -293,6 +240,7 @@ def _postprocess_generated_plan(
     algo_version: str,
     contract_input_schema: Mapping[str, Any],
     dataset_columns: set[str],
+    host_backfill_required_mappings: bool,
 ) -> dict[str, Any]:
     """
     Apply the deterministic host-side post-processing pipeline to a newly
@@ -317,29 +265,31 @@ def _postprocess_generated_plan(
         contract_input_schema=contract_input_schema,
         dataset_columns=dataset_columns,
         algo_id=algo_id,
+        host_backfill_required_mappings=host_backfill_required_mappings,
     )
 
     return plan
+
 
 # === end helpers ===========================
 
 
 def synthesize_plan_with_repairs(
-        *,
-        client: OllamaClient,
-        contract: Mapping[str, Any],
-        contract_input_schema: Mapping[str, Any],
-        vault_catalog: Mapping[str, Any],
-        allowed_ops_profile: Mapping[str, Any] | None = None,
-        dataset_id: str | None = None,
-        table_name: str | None = None,
-        dataset_columns: set[str] | None = None,
-        dataset_column_types: Mapping[str, str] | None = None,
-        contract_hash_strict: bool = True,
-        max_iters: int = 3,
-        initial_candidates: int = 1,
-        use_candidate_retrieval: bool = True,
-        use_seed_hints: bool = True,
+    *,
+    client: OllamaClient,
+    contract: Mapping[str, Any],
+    contract_input_schema: Mapping[str, Any],
+    vault_catalog: Mapping[str, Any],
+    allowed_ops_profile: Mapping[str, Any] | None = None,
+    dataset_id: str | None = None,
+    table_name: str | None = None,
+    dataset_columns: set[str] | None = None,
+    dataset_column_types: Mapping[str, str] | None = None,
+    max_iters: int = 3,
+    initial_candidates: int = 1,
+    use_candidate_retrieval: bool = True,
+    use_seed_hints: bool = True,
+    host_backfill_required_mappings: bool = False,
 ) -> LoopResult:
     """
     Generate a MappingPlan candidate via structured output and repair using deterministic validation.
@@ -347,11 +297,6 @@ def synthesize_plan_with_repairs(
     - Uses the same base prompt context (contract schema + vault catalog).
     - Deterministic validator is the source of truth.
     - Stops when report.ok or max_iters reached.
-
-    contract_hash_strict:
-      If True, the validator will fail if contract_input_schema is missing or contract_hash mismatches.
-      If False, we still pass contract_input_schema to validators if available, but caller may choose to
-      tolerate missing schema earlier (not recommended for strict mode).
     """
     expected_hash = compute_contract_schema_hash(contract_input_schema)
 
@@ -368,8 +313,14 @@ def synthesize_plan_with_repairs(
             raise ValueError("vault_catalog missing dataset_id")
     elif dataset_id is not None and table_name is None:
         # If dataset has exactly one table, use it; otherwise require explicit table_name
-        ds = next((d for d in (vault_catalog.get("datasets") or []) if
-                   isinstance(d, dict) and d.get("dataset_id") == dataset_id), None)
+        ds = next(
+            (
+                d
+                for d in (vault_catalog.get("datasets") or [])
+                if isinstance(d, dict) and d.get("dataset_id") == dataset_id
+            ),
+            None,
+        )
         if not isinstance(ds, dict):
             raise ValueError(f"dataset_id not found in vault_catalog: {dataset_id}")
         tables = [t for t in (ds.get("tables") or []) if isinstance(t, dict)]
@@ -379,16 +330,12 @@ def synthesize_plan_with_repairs(
         if not table_name:
             raise ValueError("vault_catalog missing table_name")
 
-    # Validate that the chosen table exists (fails fast instead of silently drifting)
-    _ = get_dataset_schema(vault_catalog, dataset_id=dataset_id, table_name=table_name)
+    cols, types = get_dataset_schema(vault_catalog, dataset_id=dataset_id, table_name=table_name)
 
-    # If caller didn't provide column metadata, derive it deterministically from vault_catalog
-    if dataset_columns is None or dataset_column_types is None:
-        cols, types = get_dataset_schema(vault_catalog, dataset_id=dataset_id, table_name=table_name)
-        if dataset_columns is None:
-            dataset_columns = cols
-        if dataset_column_types is None:
-            dataset_column_types = types
+    if dataset_columns is None:
+        dataset_columns = cols
+    if dataset_column_types is None:
+        dataset_column_types = types
 
     base_messages = build_base_messages(
         contract=contract,
@@ -430,6 +377,7 @@ def synthesize_plan_with_repairs(
             algo_version=algo_version,
             contract_input_schema=contract_input_schema,
             dataset_columns=dataset_columns,
+            host_backfill_required_mappings=host_backfill_required_mappings,
         )
         for p in raw_candidates
     ]
@@ -495,4 +443,5 @@ def synthesize_plan_with_repairs(
             algo_version=algo_version,
             contract_input_schema=contract_input_schema,
             dataset_columns=dataset_columns,
+            host_backfill_required_mappings=host_backfill_required_mappings,
         )

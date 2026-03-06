@@ -18,9 +18,9 @@ async def test_hdt_walk_fetch_delegates_and_filters_args(monkeypatch):
     out = await gw.hdt_walk_fetch(
         user_id=1,
         prefer_data="vault",
-        purpose="analytics",     # should be filtered out
-        start_date="2025-01-01", # should be filtered out
-        end_date="2025-01-31",   # should be filtered out
+        purpose="analytics",  # should be filtered out
+        start_date="2025-01-01",  # should be filtered out
+        end_date="2025-01-31",  # should be filtered out
     )
 
     assert isinstance(out, dict)

@@ -1,5 +1,6 @@
 import pytest
 
+
 @pytest.mark.asyncio
 async def test_gateway_denies_modeling_on_raw_fetch(monkeypatch):
     """

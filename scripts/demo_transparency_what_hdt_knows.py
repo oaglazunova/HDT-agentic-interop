@@ -205,9 +205,13 @@ async def main() -> int:
     vault_db = Path(vault_path)
     vault_db.parent.mkdir(parents=True, exist_ok=True)
     if not vault_db.exists():
-        subprocess.check_call([sys.executable, str(_REPO_ROOT / "scripts" / "init_sample_vault.py")], env=dict(os.environ))
+        subprocess.check_call(
+            [sys.executable, str(_REPO_ROOT / "scripts" / "init_sample_vault.py")], env=dict(os.environ)
+        )
 
-    telemetry_dir = (_REPO_ROOT / "artifacts" / "telemetry" / f"demo_what_hdt_knows_{datetime.now():%Y%m%d_%H%M%S}").resolve()
+    telemetry_dir = (
+        _REPO_ROOT / "artifacts" / "telemetry" / f"demo_what_hdt_knows_{datetime.now():%Y%m%d_%H%M%S}"
+    ).resolve()
     telemetry_dir.mkdir(parents=True, exist_ok=True)
 
     server_env = dict(os.environ)
@@ -224,7 +228,7 @@ async def main() -> int:
         env=server_env,
     )
 
-    print("\n=== \"What does the HDT know about me?\" (Transparency Agent) ===")
+    print('\n=== "What does the HDT know about me?" (Transparency Agent) ===')
     print(f"User: user_id={user_id}")
     print(f"Policy: {server_env.get('HDT_POLICY_PATH')}")
     print(f"Telemetry dir: {telemetry_dir}")
@@ -255,10 +259,15 @@ async def main() -> int:
                     if isinstance(out, dict) and "error" not in out:
                         policy_matrix[t][lane] = {"allow": out.get("allow"), "redact": out.get("redact", [])}
                     else:
-                        policy_matrix[t][lane] = {"allow": None, "error": out.get("error") if isinstance(out, dict) else out}
+                        policy_matrix[t][lane] = {
+                            "allow": None,
+                            "error": out.get("error") if isinstance(out, dict) else out,
+                        }
 
             # 2) Data inventory (bounded)
-            sources = await _call(session, "hdt.sources.status.v1", {"user_id": user_id, "purpose": "analytics"}, timeout_s)
+            sources = await _call(
+                session, "hdt.sources.status.v1", {"user_id": user_id, "purpose": "analytics"}, timeout_s
+            )
 
             walk = await _call(
                 session,
@@ -326,7 +335,9 @@ async def main() -> int:
 
             # fallback if query tool not available for some reason
             if isinstance(telemetry, dict) and isinstance(telemetry.get("error"), dict):
-                telemetry = await _call(session, "hdt.telemetry.recent.v1", {"n": 200, "purpose": "analytics"}, timeout_s)
+                telemetry = await _call(
+                    session, "hdt.telemetry.recent.v1", {"n": 200, "purpose": "analytics"}, timeout_s
+                )
 
             records = []
             if isinstance(telemetry, dict) and isinstance(telemetry.get("records"), list):

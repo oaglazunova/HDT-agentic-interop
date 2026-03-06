@@ -6,7 +6,7 @@ from typing import Any, Mapping, Sequence
 
 from hdt_mapping_plan.validate import compute_contract_schema_hash
 from hdt_mapping_plan.candidate_retrieval import build_pointer_candidate_cols
-
+from hdt_mapping_plan.contract_schema import required_leaf_pointers
 
 
 _PROMPT_SCHEMA_KEYS = {
@@ -86,28 +86,6 @@ def _leaf_contract_pointers(schema: Mapping[str, Any], prefix: str = "") -> list
     return out
 
 
-def _required_leaf_pointers(schema: dict, prefix: str = "") -> list[str]:
-    props = schema.get("properties")
-    if not isinstance(props, dict):
-        return []
-
-    required = set(schema.get("required") or [])
-    out: list[str] = []
-
-    for name, sub in props.items():
-        p = f"{prefix}/{name}"
-        if isinstance(sub, dict) and "properties" in sub:
-            # If the object itself is required, recurse and collect required leaves under it
-            # (and rely on nested "required" to pick leaves)
-            if name in required:
-                out.extend(_required_leaf_pointers(sub, p))
-        else:
-            if name in required:
-                out.append(p)
-
-    return out
-
-
 def _sanitize_schema_for_prompt(node: Any) -> Any:
     """
     Keep only structural JSON Schema content for prompting.
@@ -146,7 +124,9 @@ def _sanitize_schema_for_prompt(node: Any) -> Any:
 
     return out
 
+
 # === end helpers =========================
+
 
 def load_mapping_plan_schema() -> dict[str, Any]:
     p = resources.files("hdt_mapping_plan").joinpath("schema/mapping-plan.llm.schema.json")
@@ -181,10 +161,9 @@ def build_base_messages(
     use_candidate_retrieval: bool = True,
     use_seed_hints: bool = True,
 ) -> list[dict[str, str]]:
-
     contract_input_schema_dict = dict(contract_input_schema)
     prompt_contract_input_schema = _sanitize_schema_for_prompt(contract_input_schema_dict)
-    req_ptrs = _required_leaf_pointers(contract_input_schema_dict)
+    req_ptrs = required_leaf_pointers(contract_input_schema_dict)
     contract_schema_for_retrieval = contract_input_schema_dict
 
     # If caller didn't provide schema details for the selected dataset/table, extract them
@@ -252,19 +231,19 @@ def build_base_messages(
                     "dataset_columns": cols,
                     "dataset_column_types": types,
                     "constraints": [
-                      "record_mapping is a map: contract JSON Pointer -> expression.",
-                      "record_mapping keys MUST be JSON Pointers (start with '/')",
-                      "record_mapping MUST include ALL pointers in contract_required_leaf_pointers.",
-                      "record_mapping MUST NOT include pointers outside contract_required_leaf_pointers.",
-                      "For op:'column', you MUST include {'op':'column','name':'<column>'}.",
-                      "For /day/date you MUST output a date-typed expression. If the source column is a string (TEXT), wrap it: {'op':'parse_date','format':'%Y-%m-%d','args':[{'op':'column','name':'date'}]}.",
-                      "For /person/birthDate you MUST output a date-typed expression. If the source column is a string (TEXT), wrap it: {'op':'parse_date','format':'%Y-%m-%d','args':[{'op':'column','name':'dob'}]}.",
-                      "If pointer_to_candidate_cols has an entry for a pointer AND that column exists in dataset_columns, you MUST use op:'column' with that column name (do NOT use const).",
-                      "required_columns MUST contain every referenced column name used by op:'column', and ONLY those.",
-                      "If a required pointer cannot be sourced from dataset_columns, use op:'const' instead of inventing a column.",
-                      "output.destination MUST start with 'vault://'.",
-                      "contract.contract_hash MUST equal exactly the provided expected hash.",
-                      "recordId MUST be per-row. If dataset_columns contains 'txn_id', then /recordId MUST be {'op':'column','name':'txn_id'}. Do NOT use const for /recordId in that case.",
+                        "record_mapping is a map: contract JSON Pointer -> expression.",
+                        "record_mapping keys MUST be JSON Pointers (start with '/')",
+                        "record_mapping MUST include ALL pointers in contract_required_leaf_pointers.",
+                        "record_mapping MUST NOT include pointers outside contract_required_leaf_pointers.",
+                        "For op:'column', you MUST include {'op':'column','name':'<column>'}.",
+                        "For /day/date you MUST output a date-typed expression. If the source column is a string (TEXT), wrap it: {'op':'parse_date','format':'%Y-%m-%d','args':[{'op':'column','name':'date'}]}.",
+                        "For /person/birthDate you MUST output a date-typed expression. If the source column is a string (TEXT), wrap it: {'op':'parse_date','format':'%Y-%m-%d','args':[{'op':'column','name':'dob'}]}.",
+                        "If pointer_to_candidate_cols has an entry for a pointer AND that column exists in dataset_columns, you MUST use op:'column' with that column name (do NOT use const).",
+                        "required_columns MUST contain every referenced column name used by op:'column', and ONLY those.",
+                        "If a required pointer cannot be sourced from dataset_columns, use op:'const' instead of inventing a column.",
+                        "output.destination MUST start with 'vault://'.",
+                        "contract.contract_hash MUST equal exactly the provided expected hash.",
+                        "recordId MUST be per-row. If dataset_columns contains 'txn_id', then /recordId MUST be {'op':'column','name':'txn_id'}. Do NOT use const for /recordId in that case.",
                     ],
                     "defaults": {
                         "output": {
@@ -282,7 +261,7 @@ def build_base_messages(
                 },
                 ensure_ascii=False,
                 separators=(",", ":"),
-                sort_keys=True
+                sort_keys=True,
             ),
         },
     ]

@@ -15,7 +15,7 @@ _DEFAULT_TELEMETRY_DIR = (repo_root() / "artifacts" / "telemetry").resolve()
 _TELEMETRY_DIR = Path(os.getenv("HDT_TELEMETRY_DIR", str(_DEFAULT_TELEMETRY_DIR))).expanduser().resolve()
 _TELEMETRY_DIR.mkdir(parents=True, exist_ok=True)
 
-_DISABLE_TELEMETRY = (os.getenv("HDT_DISABLE_TELEMETRY", "0").strip().lower() in {"1", "true", "yes"})
+_DISABLE_TELEMETRY = os.getenv("HDT_DISABLE_TELEMETRY", "0").strip().lower() in {"1", "true", "yes"}
 
 # Optional: privacy-preserving per-subject linkability.
 # If set, we will compute `subject_hash` from the first `user_id` found in the event args.

@@ -1,5 +1,6 @@
 from hdt_mcp.governor import _walk_features_from_records
 
+
 def test_walk_features_from_records_basic():
     records = [{"steps": 100}, {"steps": 200}, {"steps": "300"}]
     feats = _walk_features_from_records(records)

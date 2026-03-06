@@ -60,7 +60,6 @@ def _parse_request(context: RequestContext) -> dict[str, Any]:
         return {"op": "text", "text": raw}
 
 
-
 class ProviderAgentExecutor(AgentExecutor):
     def __init__(self, registry: ContractRegistry | None = None) -> None:
         self._registry = registry or ContractRegistry()

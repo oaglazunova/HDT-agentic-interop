@@ -38,7 +38,6 @@ def test_many_casts_emits_warning_and_increases_score() -> None:
     assert s > 0
 
 
-
 def _load_example_plan() -> dict:
     p = resources.files("hdt_mapping_plan").joinpath("examples/example_plan.json")
     return json.loads(p.read_text(encoding="utf-8"))
@@ -50,7 +49,7 @@ def test_near_budget_warning_on_nodes() -> None:
     # Make a long coalesce chain to create many nodes deterministically
     expr = {"op": "column", "name": "c0"}
     for i in range(50):
-        expr = {"op": "coalesce", "args": [expr, {"op": "column", "name": f"c{i+1}"}]}
+        expr = {"op": "coalesce", "args": [expr, {"op": "column", "name": f"c{i + 1}"}]}
     plan["record_mapping"]["/x/deep"] = expr
 
     rep = lint_plan(plan, profile={"limits": {"max_total_expr_nodes": 60}, "lint": {"near_budget_ratio": 0.8}})

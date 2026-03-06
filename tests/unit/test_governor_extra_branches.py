@@ -109,7 +109,7 @@ def test_vault_helpers_cover_disabled_and_write_failure(monkeypatch):
 
 
 def test_walk_features_from_records_empty_branch():
-    feats = mg._walk_features_from_records([{},{"steps": None},{"steps": "bad"}])
+    feats = mg._walk_features_from_records([{}, {"steps": None}, {"steps": "bad"}])
     assert feats == {"days": 0, "total_steps": 0, "avg_steps": 0}
 
 

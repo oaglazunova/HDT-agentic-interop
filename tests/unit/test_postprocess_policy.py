@@ -24,7 +24,14 @@ def test_fill_contract_refs_overrides_unknown() -> None:
 
 
 def test_apply_limits_policy_clamps_permissive() -> None:
-    plan = {"limits": {"max_rows": 100_000, "batch_rows": 5_000, "max_record_bytes": 100_000, "max_total_output_bytes": 200_000_000}}
+    plan = {
+        "limits": {
+            "max_rows": 100_000,
+            "batch_rows": 5_000,
+            "max_record_bytes": 100_000,
+            "max_total_output_bytes": 200_000_000,
+        }
+    }
     out = apply_limits_policy(plan)
 
     limits = out["limits"]

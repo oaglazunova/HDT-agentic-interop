@@ -70,7 +70,7 @@ def _filter_and_page(
     if limit is None:
         return out[off:]
     lim = max(int(limit), 0)
-    return out[off: off + lim]
+    return out[off : off + lim]
 
 
 def _gamebus_date_iso(date_str: str | None, *, end: bool = False) -> str | None:
@@ -92,7 +92,7 @@ def _load_users() -> dict[int, dict]:
 
 
 def _find_primary_connector(user: dict, connector_key: str, app: str) -> Connector | None:
-    entries = (user.get(connector_key) or [])
+    entries = user.get(connector_key) or []
     if not isinstance(entries, list):
         return None
 
@@ -137,12 +137,14 @@ def _gamebus_diabetes_connector(u: dict) -> Connector | None:
     if not walk:
         return None
 
-    entries = (u.get("connected_apps_diabetes_data") or [])
+    entries = u.get("connected_apps_diabetes_data") or []
     if isinstance(entries, list) and entries:
         first = entries[0] if isinstance(entries[0], dict) else {}
         tok = _strip_bearer_prefix(first.get("auth_bearer"))
         if tok:
-            return Connector(connected_application=walk.connected_application, player_id=walk.player_id, auth_bearer=tok)
+            return Connector(
+                connected_application=walk.connected_application, player_id=walk.player_id, auth_bearer=tok
+            )
 
     return walk
 
@@ -154,9 +156,11 @@ def _cfg(name: str) -> InstrumentConfig:
 def _instrument(name: str):
     def decorator(fn):
         import inspect
+
         is_async = inspect.iscoroutinefunction(fn)
         instr = instrument_async_tool if is_async else instrument_sync_tool
         return instr(_cfg(name))(fn)
+
     return decorator
 
 
@@ -192,16 +196,17 @@ async def sources_context_set(corr_id: str | None = None) -> dict:
 @_instrument("sources.status.v1")
 async def sources_status(user_id: int) -> dict:
     import logging
-    l = logging.getLogger(__name__)
-    l.info("sources_status called for user_id=%s", user_id)
+
+    logger = logging.getLogger(__name__)
+    logger.info("sources_status called for user_id=%s", user_id)
     # Run CPU-bound/IO-bound work in a way that doesn't block the loop
     # but for this smoke test, a simple async def is enough to rule out thread issues.
     u, err = _get_user_or_error(user_id)
     if err:
-        l.warning("user not found or error: %s", err)
+        logger.warning("user not found or error: %s", err)
         return err
 
-    l.info("user found, resolving connectors...")
+    logger.info("user found, resolving connectors...")
     gb_walk = _find_primary_connector(u, "connected_apps_walk_data", "GameBus")
     gf_walk = _find_primary_connector(u, "connected_apps_walk_data", "Google Fit")
     gb_diab = _find_primary_connector(u, "connected_apps_diabetes_data", "GameBus")
@@ -222,9 +227,8 @@ async def sources_status(user_id: int) -> dict:
         "diabetes": {"gamebus": _conn_state(gb_diab)},
         "note": "Checks local config only; does not validate tokens upstream.",
     }
-    l.info("sources_status returning result")
+    logger.info("sources_status returning result")
     return res
-
 
 
 @mcp.tool(name="source.gamebus.walk.fetch.v1")
@@ -270,7 +274,6 @@ def source_gamebus_walk_fetch(
     }
 
 
-
 @mcp.tool(name="source.googlefit.walk.fetch.v1")
 @_instrument("source.googlefit.walk.fetch.v1")
 def source_googlefit_walk_fetch(
@@ -314,7 +317,6 @@ def source_googlefit_walk_fetch(
     }
 
 
-
 @mcp.tool(name="source.gamebus.trivia.fetch.v1")
 @_instrument("source.gamebus.trivia.fetch.v1")
 def source_gamebus_trivia_fetch(
@@ -331,7 +333,9 @@ def source_gamebus_trivia_fetch(
         return typed_error("not_connected", "User not connected to GameBus for diabetes/trivia data", user_id=user_id)
 
     if not c.auth_bearer:
-        return typed_error("missing_token", "Missing GameBus auth_bearer for diabetes/trivia connector", user_id=user_id)
+        return typed_error(
+            "missing_token", "Missing GameBus auth_bearer for diabetes/trivia connector", user_id=user_id
+        )
 
     data, latest = fetch_trivia_data(
         player_id=c.player_id,
@@ -355,7 +359,6 @@ def source_gamebus_trivia_fetch(
     }
 
 
-
 @mcp.tool(name="source.gamebus.sugarvita.fetch.v1")
 @_instrument("source.gamebus.sugarvita.fetch.v1")
 def source_gamebus_sugarvita_fetch(
@@ -369,10 +372,14 @@ def source_gamebus_sugarvita_fetch(
 
     c = _gamebus_diabetes_connector(u)
     if not c:
-        return typed_error("not_connected", "User not connected to GameBus for diabetes/sugarvita data", user_id=user_id)
+        return typed_error(
+            "not_connected", "User not connected to GameBus for diabetes/sugarvita data", user_id=user_id
+        )
 
     if not c.auth_bearer:
-        return typed_error("missing_token", "Missing GameBus auth_bearer for diabetes/sugarvita connector", user_id=user_id)
+        return typed_error(
+            "missing_token", "Missing GameBus auth_bearer for diabetes/sugarvita connector", user_id=user_id
+        )
 
     data, latest = fetch_sugarvita_data(
         player_id=c.player_id,
@@ -381,7 +388,9 @@ def source_gamebus_sugarvita_fetch(
         auth_bearer=c.auth_bearer,
     )
     if data is None and latest is None:
-        return typed_error("upstream_error", "GameBus sugarvita fetch returned no data (upstream error)", user_id=user_id)
+        return typed_error(
+            "upstream_error", "GameBus sugarvita fetch returned no data (upstream error)", user_id=user_id
+        )
 
     return {
         "user_id": user_id,

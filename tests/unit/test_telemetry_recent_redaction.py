@@ -3,6 +3,7 @@ import json
 
 import hdt_common.telemetry as t
 
+
 def test_telemetry_recent_redacts_pii_and_secrets(tmp_path, monkeypatch):
     monkeypatch.setenv("HDT_TELEMETRY_DIR", str(tmp_path))
     monkeypatch.delenv("HDT_DISABLE_TELEMETRY", raising=False)
@@ -11,17 +12,20 @@ def test_telemetry_recent_redacts_pii_and_secrets(tmp_path, monkeypatch):
 
     p = tmp_path / "mcp-telemetry.jsonl"
     p.write_text(
-        json.dumps({
-            "ts": "2025-01-01T00:00:00Z",
-            "kind": "governor",
-            "name": "walk.fetch",
-            "args": {
-                "args": {"user_id": 1, "email": "x@y", "token": "secret"},
-                "purpose": "analytics",
-            },
-            "ok": True,
-            "ms": 1,
-        }) + "\n",
+        json.dumps(
+            {
+                "ts": "2025-01-01T00:00:00Z",
+                "kind": "governor",
+                "name": "walk.fetch",
+                "args": {
+                    "args": {"user_id": 1, "email": "x@y", "token": "secret"},
+                    "purpose": "analytics",
+                },
+                "ok": True,
+                "ms": 1,
+            }
+        )
+        + "\n",
         encoding="utf-8",
     )
 

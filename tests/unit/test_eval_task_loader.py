@@ -122,7 +122,9 @@ def test_load_tasks_from_json_rejects_missing_shape_fields(tmp_path: Path) -> No
     path = tmp_path / "tasks.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
 
-    with pytest.raises(ValueError, match="either explicit fields|either explicit shape or compact shape|must contain either"):
+    with pytest.raises(
+        ValueError, match="either explicit fields|either explicit shape or compact shape|must contain either"
+    ):
         _load_tasks_from_json(path)
 
 

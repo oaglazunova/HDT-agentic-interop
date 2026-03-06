@@ -39,6 +39,7 @@ def _report_to_dict(report: Any) -> dict[str, Any]:
         "warnings": [getattr(w, "__dict__", {"message": str(w)}) for w in getattr(report, "warnings", [])],
     }
 
+
 def _get_str(d: dict[str, Any], key: str) -> str | None:
     v = d.get(key)
     if isinstance(v, str):
@@ -77,6 +78,31 @@ def _parse_ollama_overrides(req: dict[str, Any]) -> tuple[str | None, str | None
     return url, model
 
 
+def _get_bool(req: dict[str, Any], key: str) -> bool | None:
+    v = req.get(key)
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, int) and v in (0, 1):
+        return bool(v)
+    if isinstance(v, str):
+        s = v.strip().lower()
+        if s in ("true", "1", "yes", "y", "on"):
+            return True
+        if s in ("false", "0", "no", "n", "off"):
+            return False
+    return None
+
+
+def _get_int(req: dict[str, Any], key: str, default: int) -> int:
+    v = req.get(key)
+    try:
+        if v is None:
+            return default
+        return int(v)
+    except Exception:
+        return default
+
+
 # === end helpers ===========================
 
 
@@ -100,7 +126,10 @@ class UserAgentExecutor(AgentExecutor):
             if not provider_url or not algo_id or not algo_version or not isinstance(vault_catalog, dict):
                 payload = {
                     "ok": False,
-                    "error": {"code": "BAD_REQUEST", "message": "missing provider_url/algo_id/algo_version/vault_catalog"},
+                    "error": {
+                        "code": "BAD_REQUEST",
+                        "message": "missing provider_url/algo_id/algo_version/vault_catalog",
+                    },
                 }
             else:
                 ollama_url_override, ollama_model_override = _parse_ollama_overrides(req)
@@ -117,6 +146,18 @@ class UserAgentExecutor(AgentExecutor):
                 )
                 client = OllamaClient(cfg)
 
+                initial_candidates = max(_get_int(req, "initial_candidates", 1), 1)
+
+                use_candidate_retrieval = _get_bool(req, "use_candidate_retrieval")
+                if use_candidate_retrieval is None:
+                    disable_retriever = _get_bool(req, "disable_retriever")
+                    use_candidate_retrieval = not disable_retriever if disable_retriever is not None else True
+
+                use_seed_hints = _get_bool(req, "use_seed_hints")
+                if use_seed_hints is None:
+                    disable_seed_hints = _get_bool(req, "disable_seed_hints")
+                    use_seed_hints = not disable_seed_hints if disable_seed_hints is not None else True
+
                 try:
                     res = synthesize_plan_via_provider(
                         client=client,
@@ -128,13 +169,26 @@ class UserAgentExecutor(AgentExecutor):
                         dataset_id=req.get("dataset_id"),
                         table_name=req.get("table_name"),
                         max_iters=int(req.get("max_iters") or 3),
+                        initial_candidates=initial_candidates,
+                        use_candidate_retrieval=use_candidate_retrieval,
+                        use_seed_hints=use_seed_hints,
                     )
+
+                    reports_obj = getattr(res, "reports", None)
+                    if isinstance(reports_obj, list) and reports_obj:
+                        reports_list = [_report_to_dict(r) for r in reports_obj]
+                    else:
+                        # Backward compatible fallback (for older fakes/tests)
+                        reports_list = [_report_to_dict(res.report)]
+
                     payload = {
                         "ok": bool(res.ok),
                         "iterations": int(res.iterations),
                         "plan": res.plan,
-                        "report": _report_to_dict(res.report),
+                        "report": _report_to_dict(res.report),  # final
+                        "reports": reports_list,  # intermediate + final
                     }
+
                 except Exception as e:
                     payload = {"ok": False, "error": {"code": "INTERNAL", "message": str(e)}}
 

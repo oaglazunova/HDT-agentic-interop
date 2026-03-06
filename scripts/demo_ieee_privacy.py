@@ -13,7 +13,7 @@ from mcp.client.stdio import StdioServerParameters, stdio_client
 from hdt_config.settings import repo_root
 from hdt_mcp import vault_store
 
-CALL_TIMEOUT_SEC = float(os.getenv('HDT_DEMO_TIMEOUT_SEC', '30'))
+CALL_TIMEOUT_SEC = float(os.getenv("HDT_DEMO_TIMEOUT_SEC", "30"))
 
 
 def _pretty(x) -> str:
@@ -62,7 +62,9 @@ async def main() -> None:
     root = repo_root()
     policy_path = (root / "config" / "policy_ieee_demo.json").resolve()
     if not policy_path.exists():
-        raise SystemExit(f"Policy file not found: {policy_path}.\n"                         f"Tip: run from repo root or set HDT_REPO_ROOT / HDT_POLICY_PATH.")
+        raise SystemExit(
+            f"Policy file not found: {policy_path}.\nTip: run from repo root or set HDT_REPO_ROOT / HDT_POLICY_PATH."
+        )
     telemetry_dir = (root / "artifacts" / "telemetry" / f"demo_ieee_{time.strftime('%Y%m%d_%H%M%S')}").resolve()
     telemetry_dir.mkdir(parents=True, exist_ok=True)
 
@@ -142,15 +144,23 @@ async def main() -> None:
 
                 # 5) Vault-only: deterministic offline (no external sources)
                 print("\n5) Vault-only: analytics + hdt.walk.fetch.v1 (prefer_data=vault)")
-                out = await _call(session, "hdt.walk.fetch.v1", {"user_id": 1, "purpose": "analytics", "prefer": "gamebus", "prefer_data": "vault"})
+                out = await _call(
+                    session,
+                    "hdt.walk.fetch.v1",
+                    {"user_id": 1, "purpose": "analytics", "prefer": "gamebus", "prefer_data": "vault"},
+                )
                 print(_pretty(out))
 
                 # 6) Explain policy for one call
                 print("\n6) Policy explain: hdt.walk.fetch.v1 (analytics)")
-                out = await _call(session, "hdt.policy.explain.v1", {"tool": "hdt.walk.fetch.v1", "purpose": "analytics"})
+                out = await _call(
+                    session, "hdt.policy.explain.v1", {"tool": "hdt.walk.fetch.v1", "purpose": "analytics"}
+                )
                 print(_pretty(out))
 
-                print("\nNext step: run scripts/demo_ieee_transparency.py to see the trace (gateway/governor; sources when enabled).")
+                print(
+                    "\nNext step: run scripts/demo_ieee_transparency.py to see the trace (gateway/governor; sources when enabled)."
+                )
     except BaseExceptionGroup as eg:  # Python 3.11+
         if not _benign_stdio_shutdown_error(eg):
             raise

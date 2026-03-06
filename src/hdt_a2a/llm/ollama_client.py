@@ -7,6 +7,7 @@ import httpx
 import re
 import logging
 
+
 @dataclass(frozen=True)
 class OllamaConfig:
     base_url: str = "http://localhost:11434"
@@ -35,10 +36,12 @@ class OllamaConfig:
 class OllamaError(RuntimeError):
     pass
 
+
 # === helpers =====================================
 
 _JSON_FENCE_RE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$", re.IGNORECASE | re.MULTILINE)
 _TRAILING_COMMAS_RE = re.compile(r",(\s*[}\]])")
+
 
 def _extract_json_object(text: str) -> str:
     """Best-effort: take substring from first '{' to last '}'."""
@@ -47,6 +50,7 @@ def _extract_json_object(text: str) -> str:
     if start == -1 or end == -1 or end <= start:
         return text.strip()
     return text[start : end + 1].strip()
+
 
 def _loads_relaxed_json(content: Any) -> dict[str, Any]:
     # Already parsed by Ollama / httpx?
@@ -81,11 +85,13 @@ def _loads_relaxed_json(content: Any) -> dict[str, Any]:
         raise ValueError(f"expected JSON object, got {type(obj).__name__}")
     return obj
 
+
 def _normalize_messages(messages: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     """
     Ollama expects messages like: [{"role":"system|user|assistant", "content":"..."}]
     Keep it minimal and deterministic.
     """
+
     def _norm_content(val: Any) -> str:
         if val is None:
             return ""
@@ -122,6 +128,7 @@ def _contains_ref(obj: Any) -> bool:
     if isinstance(obj, list):
         return any(_contains_ref(v) for v in obj)
     return False
+
 
 # === end helpers ==================================
 
@@ -181,7 +188,13 @@ class OllamaClient:
 
         fmt, used_schema = _choose_format()
         self._log.info(
-            "ollama chat_json: model=%s structured_mode=%s used_schema=%s timeout_s=%.1f num_ctx=%s num_predict=%s", self.cfg.model, self.cfg.structured_mode, used_schema, self.cfg.timeout_s, self.cfg.num_ctx, self.cfg.num_predict
+            "ollama chat_json: model=%s structured_mode=%s used_schema=%s timeout_s=%.1f num_ctx=%s num_predict=%s",
+            self.cfg.model,
+            self.cfg.structured_mode,
+            used_schema,
+            self.cfg.timeout_s,
+            self.cfg.num_ctx,
+            self.cfg.num_predict,
         )
 
         payload_base: dict[str, Any] = {
@@ -225,10 +238,7 @@ class OllamaClient:
                     raw = content.decode("utf-8", errors="replace") if isinstance(content, bytes) else str(content)
                     head = raw[:300]
                     tail = raw[-200:] if len(raw) > 200 else raw
-                    raise OllamaError(
-                        "Failed to parse JSON from message.content: "
-                        f"{ex}; head={head!r}; tail={tail!r}"
-                    )
+                    raise OllamaError(f"Failed to parse JSON from message.content: {ex}; head={head!r}; tail={tail!r}")
 
             raise OllamaError(f"Unexpected structured output type: {type(content)}; response={data}")
 

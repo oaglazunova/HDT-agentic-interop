@@ -31,13 +31,14 @@ def parse_google_fit_walk_data(google_fit_data):
         duration_seconds = (end_time - start_time).total_seconds()
         duration = str(timedelta(seconds=int(duration_seconds)))
 
-        parsed_activities.append({
-            "date": start_time.strftime("%Y-%m-%d %H:%M:%S"),
-            "steps": steps,
-            "distance_meters": None,  # Google Fit step count doesn't include distance
-            "duration": duration if duration_seconds > 0 else None,
-            "kcalories": None,  # This data is not available in step count API
-        })
+        parsed_activities.append(
+            {
+                "date": start_time.strftime("%Y-%m-%d %H:%M:%S"),
+                "steps": steps,
+                "distance_meters": None,  # Google Fit step count doesn't include distance
+                "duration": duration if duration_seconds > 0 else None,
+                "kcalories": None,  # This data is not available in step count API
+            }
+        )
 
     return parsed_activities
-

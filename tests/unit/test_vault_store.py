@@ -2,23 +2,28 @@ import importlib
 import pytest
 
 
-@pytest.mark.parametrize("value,expected", [
-    ("1", True),
-    ("true", True),
-    ("yes", True),
-    ("on", True),
-    ("0", False),
-    ("false", False),
-    ("", False),
-])
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ("1", True),
+        ("true", True),
+        ("yes", True),
+        ("on", True),
+        ("0", False),
+        ("false", False),
+        ("", False),
+    ],
+)
 def test_enabled_env(monkeypatch, value, expected):
     import hdt_mcp.vault_store as vs
+
     monkeypatch.setenv("HDT_VAULT_ENABLE", value)
     assert vs.enabled() is expected
 
 
 def test_upsert_and_fetch_prefers_source(tmp_path, monkeypatch):
     import hdt_mcp.vault_store as vs
+
     importlib.reload(vs)
 
     db = tmp_path / "vault.sqlite"
@@ -54,7 +59,7 @@ def test_upsert_and_fetch_prefers_source(tmp_path, monkeypatch):
     rec2 = out["records"][1]
 
     assert rec1["date"] == "2025-01-01"
-    assert rec1["source"] == "gamebus"      # preferred wins
+    assert rec1["source"] == "gamebus"  # preferred wins
     assert rec1["steps"] == 100
 
     assert rec2["date"] == "2025-01-02"
@@ -67,6 +72,7 @@ def test_upsert_and_fetch_prefers_source(tmp_path, monkeypatch):
 
 def test_fetch_limit_offset(tmp_path):
     import hdt_mcp.vault_store as vs
+
     importlib.reload(vs)
 
     db = tmp_path / "vault.sqlite"
@@ -83,6 +89,7 @@ def test_fetch_limit_offset(tmp_path):
 
 def test_maintain_deletes_old_rows(tmp_path, monkeypatch):
     import hdt_mcp.vault_store as vs
+
     importlib.reload(vs)
 
     db = tmp_path / "vault.sqlite"

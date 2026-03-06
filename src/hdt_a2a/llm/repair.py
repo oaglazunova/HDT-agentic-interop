@@ -10,6 +10,7 @@ from hdt_mapping_plan.validate import CriticReport
 
 # === helpers =========================
 
+
 def _stable_json(obj: Any) -> str:
     return json.dumps(obj, indent=2, ensure_ascii=False, sort_keys=True)
 
@@ -47,11 +48,17 @@ def _critic_report_payload(report: CriticReport, *, max_items: int = 50) -> dict
     err_counts = dict(Counter(e["code"] for e in errs))
     warn_counts = dict(Counter(w["code"] for w in warns))
 
-    return {"ok": report.ok, "error_counts": err_counts, "warning_counts": warn_counts, "errors": errs[:max_items],
-            "warnings": warns[:max_items]}
+    return {
+        "ok": report.ok,
+        "error_counts": err_counts,
+        "warning_counts": warn_counts,
+        "errors": errs[:max_items],
+        "warnings": warns[:max_items],
+    }
 
 
 # === end helpers ============================================
+
 
 def build_repair_message(
     *,
@@ -64,7 +71,7 @@ def build_repair_message(
     payload = _critic_report_payload(critic_report)
 
     missing_required: list[str] = []
-    for e in (critic_report.errors or []):
+    for e in critic_report.errors or []:
         if e.code == "CONTRACT_REQUIRED_FIELD_MISSING" and isinstance(e.detail, str):
             # e.detail example: "missing required contract field mapping: /sleep/minutes"
             if ":" in e.detail:

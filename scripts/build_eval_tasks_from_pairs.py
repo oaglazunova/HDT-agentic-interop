@@ -165,9 +165,7 @@ def write_eval_tasks_json(*, tasks: list[dict[str, Any]], out_path: Path) -> Non
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Build evaluation task JSON from normalized benchmark-pair records."
-    )
+    parser = argparse.ArgumentParser(description="Build evaluation task JSON from normalized benchmark-pair records.")
     parser.add_argument("--pairs-json", required=True, help="Input normalized benchmark-pairs JSON file.")
     parser.add_argument("--out", required=True, help="Output eval task JSON file.")
     return parser.parse_args()

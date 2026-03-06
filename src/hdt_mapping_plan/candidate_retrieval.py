@@ -3,28 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any, Mapping, Sequence
 
-
-_PROVIDER_SEED_POINTER_CANDIDATES: dict[str, dict[str, list[str]]] = {
-    "provider.obesityCoach": {
-        "/recordId": ["txn_id"],
-        "/person/birthDate": ["dob"],
-        "/day/date": ["date"],
-        "/activity/steps": ["steps"],
-        "/nutrition/caloriesIn": ["calories_in"],
-        "/hydration/waterMl": ["water_ml"],
-        "/sleep/minutes": ["sleep_minutes"],
-    }
-}
-
-
-def provider_seed_pointer_candidates(algo_id: str) -> dict[str, list[str]]:
-    """
-    Optional deterministic per-provider hints.
-
-    Returned as a copy so callers can safely mutate.
-    """
-    base = _PROVIDER_SEED_POINTER_CANDIDATES.get(algo_id, {})
-    return {ptr: list(cols) for ptr, cols in base.items()}
+from hdt_mapping_plan.provider_hints import provider_seed_pointer_candidates
 
 
 def _snakeish(name: str) -> str:

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """Client helper for calling the internal Sources MCP server.
 
 Why this exists
@@ -20,6 +18,7 @@ For CI reliability and predictable behavior in an async server, this client
 opens a short-lived stdio session per call.
 """
 
+from __future__ import annotations
 import asyncio
 import os
 import sys
@@ -27,6 +26,7 @@ from typing import Any, Dict
 
 from hdt_config.settings import repo_root
 from hdt_common.context import get_request_id, new_request_id
+from mcp.client.stdio import StdioServerParameters
 
 
 class SourcesMCPClient:
@@ -54,8 +54,6 @@ class SourcesMCPClient:
 
     def _server_params(self):
         # Lazy import to keep module import-time side effects minimal.
-        from mcp.client.stdio import StdioServerParameters
-
         corr_id = get_request_id() or new_request_id()
 
         env = dict(os.environ)

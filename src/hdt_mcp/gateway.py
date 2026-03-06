@@ -39,6 +39,7 @@ _POLICY_CFG = PolicyConfig(
 P = ParamSpec("P")
 R = TypeVar("R")
 
+
 def _cfg(tool_name: str) -> InstrumentConfig:
     return InstrumentConfig(
         kind="tool",
@@ -46,6 +47,7 @@ def _cfg(tool_name: str) -> InstrumentConfig:
         client_id=MCP_CLIENT_ID,
         new_corr_id_per_call=True,
     )
+
 
 def _instrument(tool_name: str):
     return instrument_async_tool(_cfg(tool_name), policy=_POLICY_CFG)
@@ -56,6 +58,7 @@ def hdt_tool(name: str, *, sync: bool = False, instrument: bool = True):
     Registers an MCP tool and applies instrumentation (+ policy for async).
     Keeps tool signature stable for MCP schema generation.
     """
+
     def decorator(fn: Callable[P, R]) -> Callable[P, R]:
         sig = inspect.signature(fn)
 
@@ -74,12 +77,14 @@ def hdt_tool(name: str, *, sync: bool = False, instrument: bool = True):
 
     return decorator
 
+
 # All domain tools must delegate to HDTGovernor; gateway contains no domain logic
 def delegate_to_gov(method_name: str):
     """
     Replaces tool implementation with a call to gov.<method_name>(**bound_args),
     filtering out extra tool params not accepted by the gov method.
     """
+
     def decorator(fn):
         tool_sig = inspect.signature(fn)
 
@@ -91,10 +96,7 @@ def delegate_to_gov(method_name: str):
             method = getattr(gov, method_name)
             method_sig = inspect.signature(method)
 
-            accepts_varkw = any(
-                p.kind == inspect.Parameter.VAR_KEYWORD
-                for p in method_sig.parameters.values()
-            )
+            accepts_varkw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in method_sig.parameters.values())
 
             if accepts_varkw:
                 call_kwargs = dict(bound.arguments)
@@ -125,8 +127,7 @@ def hdt_healthz() -> dict:
 async def hdt_sources_status(
     user_id: int,
     purpose: str = "analytics",  # kept for lane validation + consistent auditing; governor ignores it
-) -> dict:
-    ...
+) -> dict: ...
 
 
 @hdt_tool("hdt.walk.fetch.v1")
@@ -140,20 +141,17 @@ async def hdt_walk_fetch(
     prefer: str = "gamebus",
     prefer_data: str = "auto",
     purpose: str = "analytics",
-) -> dict:
-    ...
-
+) -> dict: ...
 
 
 @hdt_tool("hdt.trivia.fetch.v1")
-@delegate_to_gov("fetch_trivia") #
+@delegate_to_gov("fetch_trivia")  #
 async def hdt_trivia_fetch(
     user_id: int,
     start_date: str | None = None,
     end_date: str | None = None,
     purpose: str = "analytics",
-) -> dict:
-    ...
+) -> dict: ...
 
 
 @hdt_tool("hdt.sugarvita.fetch.v1")
@@ -163,8 +161,7 @@ async def hdt_sugarvita_fetch(
     start_date: str | None = None,
     end_date: str | None = None,
     purpose: str = "analytics",
-) -> dict:
-    ...
+) -> dict: ...
 
 
 @hdt_tool("hdt.walk.features.v1")
@@ -178,8 +175,8 @@ async def hdt_walk_features(
     prefer: str = "gamebus",
     prefer_data: str = "auto",
     purpose: str = "modeling",
-) -> dict:
-    ...
+) -> dict: ...
+
 
 # internal (non-governor), still goes through instrumentation + policy for consistency
 @hdt_tool("hdt.policy.explain.v1")
@@ -191,6 +188,7 @@ async def hdt_policy_explain(tool: str, purpose: str = "analytics") -> dict:
 @hdt_tool("hdt.telemetry.recent.v1")
 async def hdt_telemetry_recent(n: int = 50, purpose: str = "analytics") -> dict:
     return telemetry_recent(n=n)
+
 
 @hdt_tool("hdt.telemetry.query.v1")
 async def hdt_telemetry_query(
@@ -222,7 +220,6 @@ async def hdt_telemetry_query(
         error_code=error_code,
         subject_hash=subject_hash,
     )
-
 
 
 def main() -> None:

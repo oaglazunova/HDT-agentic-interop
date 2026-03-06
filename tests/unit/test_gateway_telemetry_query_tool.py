@@ -17,10 +17,13 @@ async def test_gateway_telemetry_query_tool_filters(tmp_path, monkeypatch):
 
     # Ensure modules rebind env-configured telemetry dir and disable flag
     import hdt_common.telemetry as telem
+
     importlib.reload(telem)
     import hdt_common.tooling as tooling
+
     importlib.reload(tooling)
     import hdt_mcp.gateway as gw
+
     importlib.reload(gw)
 
     p = tmp_path / "mcp-telemetry.jsonl"

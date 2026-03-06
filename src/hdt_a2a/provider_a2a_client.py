@@ -89,9 +89,7 @@ def fetch_contract_bundle(
 
     computed = compute_contract_schema_hash(schema)
     if computed != expected:
-        raise ProviderA2AError(
-            f"Contract hash mismatch (provider={expected}, computed={computed}). Refuse to proceed."
-        )
+        raise ProviderA2AError(f"Contract hash mismatch (provider={expected}, computed={computed}). Refuse to proceed.")
 
     return {
         "contract": data["contract"],

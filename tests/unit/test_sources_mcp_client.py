@@ -13,6 +13,7 @@ class _FakeSessionFailOnceGlobal:
     Fails exactly once across reconnections, then succeeds.
     Uses shared fail_state so a new session after reconnect won't fail again.
     """
+
     def __init__(self, fail_state: dict):
         self.fail_state = fail_state
         self.calls = []
@@ -75,6 +76,7 @@ async def test_call_tool_invokes_corr_id_sync_then_tool(monkeypatch):
 
     import mcp
     import mcp.client.stdio as stdio_mod
+
     monkeypatch.setattr(mcp, "ClientSession", _FakeClientSession)
     monkeypatch.setattr(stdio_mod, "stdio_client", _fake_stdio_client)
 
@@ -126,6 +128,7 @@ def test_server_params_sets_env(monkeypatch):
             self.env = env
 
     import mcp.client.stdio as stdio_mod
+
     monkeypatch.setattr(stdio_mod, "StdioServerParameters", _FakeParams)
 
     params = client._server_params()
@@ -173,6 +176,7 @@ async def test_list_tools_returns_tools(monkeypatch):
 
     import mcp
     import mcp.client.stdio as stdio_mod
+
     monkeypatch.setattr(mcp, "ClientSession", _FakeClientSession)
     monkeypatch.setattr(stdio_mod, "stdio_client", _fake_stdio_client)
 

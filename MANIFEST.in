@@ -1,0 +1,10 @@
+prune demo
+prune scripts
+prune tests
+prune artifacts
+prune data
+prune datasets
+prune docs
+global-exclude *.pyc
+global-exclude __pycache__
+global-exclude .DS_Store

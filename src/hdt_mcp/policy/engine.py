@@ -155,11 +155,11 @@ def explain_policy(purpose: str, tool_name: str, *, client_id: str | None = None
       - contributing layers (defaults/client/tool)
     """
     pol = _policy() or {}
-    defaults_layer = ((pol.get("defaults", {}) or {}).get(purpose) or {})
+    defaults_layer = (pol.get("defaults", {}) or {}).get(purpose) or {}
     client_layer = {}
     if client_id:
-        client_layer = (((pol.get("clients", {}) or {}).get(client_id, {}) or {}).get(purpose) or {})
-    tool_layer = (((pol.get("tools", {}) or {}).get(tool_name, {}) or {}).get(purpose) or {})
+        client_layer = ((pol.get("clients", {}) or {}).get(client_id, {}) or {}).get(purpose) or {}
+    tool_layer = ((pol.get("tools", {}) or {}).get(tool_name, {}) or {}).get(purpose) or {}
 
     resolved = _resolve_rule(purpose, tool_name, client_id)
 
@@ -174,4 +174,3 @@ def explain_policy(purpose: str, tool_name: str, *, client_id: str | None = None
             "tool": tool_layer,
         },
     }
-

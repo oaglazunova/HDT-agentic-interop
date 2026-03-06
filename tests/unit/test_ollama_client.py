@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from typing import Any
 
 import httpx
-import pytest
 
 from hdt_a2a.llm.ollama_client import OllamaClient, OllamaConfig
 
@@ -190,7 +189,7 @@ def test_schema_mode_error_retries_once_with_format_json(monkeypatch) -> None:
     # Two attempts happened: first schema, then json fallback
     assert len(posted) == 2
     assert isinstance(posted[0]["format"], dict)  # schema attempt
-    assert posted[1]["format"] == "json"          # fallback attempt
+    assert posted[1]["format"] == "json"  # fallback attempt
 
 
 def test_chat_json_parses_trailing_comma(monkeypatch) -> None:
@@ -206,7 +205,7 @@ def test_chat_json_parses_trailing_comma(monkeypatch) -> None:
 
 
 def test_chat_json_parses_fenced_json(monkeypatch) -> None:
-    fake = {"message": {"content": "```json\n{\"plan_id\":\"x\"}\n```"}}
+    fake = {"message": {"content": '```json\n{"plan_id":"x"}\n```'}}
     monkeypatch.setattr("hdt_a2a.llm.ollama_client.httpx.Client", lambda timeout: DummyClient(fake))
 
     c = OllamaClient(OllamaConfig(model="dummy"))

@@ -1,6 +1,13 @@
 from __future__ import annotations
 
-from scripts.eval_mapping_plans import EvalResult, EvalTask, run_suite, summarize_results, summarize_results_by_task, summarize_results_grouped
+from scripts.eval_mapping_plans import (
+    EvalResult,
+    EvalTask,
+    run_suite,
+    summarize_results,
+    summarize_results_by_task,
+    summarize_results_grouped,
+)
 from hdt_a2a.llm.ollama_client import OllamaClient, OllamaConfig
 from hdt_mapping_plan.validate import compute_contract_schema_hash
 from typing import Any, Mapping
@@ -113,6 +120,7 @@ def test_summary_helpers_aggregate_runs_correctly() -> None:
             report_ok=True,
             error_count=0,
             warning_count=1,
+            first_error_types=[],
             lint_warning_count=1,
             weighted_lint_score=3,
             used_required_columns=["a"],
@@ -133,6 +141,7 @@ def test_summary_helpers_aggregate_runs_correctly() -> None:
             report_ok=False,
             error_count=2,
             warning_count=0,
+            first_error_types=["SomeErrorType"],
             lint_warning_count=0,
             weighted_lint_score=0,
             used_required_columns=[],
@@ -153,6 +162,7 @@ def test_summary_helpers_aggregate_runs_correctly() -> None:
             report_ok=True,
             error_count=0,
             warning_count=0,
+            first_error_types=[],
             lint_warning_count=0,
             weighted_lint_score=0,
             used_required_columns=["b"],

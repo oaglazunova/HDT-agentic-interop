@@ -47,11 +47,9 @@ def main() -> int:
                 "note": "Synthetic demo user (no real data)",
                 "connected_apps_walk_data": [
                     {"connected_application": "GameBus", "player_id": "MOCK_PLAYER_123"},
-                    {"connected_application": "Google Fit", "player_id": "MOCK_PLAYER_123"}
+                    {"connected_application": "Google Fit", "player_id": "MOCK_PLAYER_123"},
                 ],
-                "connected_apps_diabetes_data": [
-                    {"connected_application": "GameBus", "player_id": "MOCK_PLAYER_123"}
-                ]
+                "connected_apps_diabetes_data": [{"connected_application": "GameBus", "player_id": "MOCK_PLAYER_123"}],
             }
         ]
     }
@@ -64,21 +62,21 @@ def main() -> int:
                     {
                         "connected_application": "GameBus",
                         "player_id": "MOCK_PLAYER_123",
-                        "auth_bearer": "YOUR_GAMEBUS_TOKEN_HERE"
+                        "auth_bearer": "YOUR_GAMEBUS_TOKEN_HERE",
                     },
                     {
                         "connected_application": "Google Fit",
                         "player_id": "MOCK_PLAYER_123",
-                        "auth_bearer": "YOUR_GOOGLE_FIT_TOKEN_HERE"
-                    }
+                        "auth_bearer": "YOUR_GOOGLE_FIT_TOKEN_HERE",
+                    },
                 ],
                 "connected_apps_diabetes_data": [
                     {
                         "connected_application": "GameBus",
                         "player_id": "MOCK_PLAYER_123",
-                        "auth_bearer": "YOUR_GAMEBUS_DIABETES_TOKEN_HERE"
+                        "auth_bearer": "YOUR_GAMEBUS_DIABETES_TOKEN_HERE",
                     }
-                ]
+                ],
             }
         ]
     }
@@ -91,7 +89,9 @@ def main() -> int:
     print(f"Wrote (or kept existing): {secrets_path}")
     print("\nNotes:")
     print("- These are placeholders only.")
-    print("- For deterministic offline demos (and to avoid external systems), use the seeded vault (prefer_data=vault).")
+    print(
+        "- For deterministic offline demos (and to avoid external systems), use the seeded vault (prefer_data=vault)."
+    )
     return 0
 
 

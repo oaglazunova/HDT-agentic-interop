@@ -211,7 +211,9 @@ def instrument_async_tool(cfg: InstrumentConfig, *, policy: PolicyConfig | None 
                     ms = int((time.perf_counter() - t0) * 1000)
                     args_for_log["error"] = payload.get("error")
                     args_for_log["out"] = _compute_out_stats(payload)
-                    log_event(cfg.kind, cfg.name, args_for_log, ok=False, ms=ms, client_id=cfg.client_id, corr_id=corr_id)
+                    log_event(
+                        cfg.kind, cfg.name, args_for_log, ok=False, ms=ms, client_id=cfg.client_id, corr_id=corr_id
+                    )
                     if cfg.attach_corr_id and isinstance(payload, dict):
                         payload.setdefault("corr_id", corr_id)
                     return payload
@@ -224,7 +226,9 @@ def instrument_async_tool(cfg: InstrumentConfig, *, policy: PolicyConfig | None 
                     args_for_log["policy"] = meta
                     args_for_log["error"] = probe.get("error")
                     args_for_log["out"] = _compute_out_stats(probe)
-                    log_event(cfg.kind, cfg.name, args_for_log, ok=False, ms=ms, client_id=cfg.client_id, corr_id=corr_id)
+                    log_event(
+                        cfg.kind, cfg.name, args_for_log, ok=False, ms=ms, client_id=cfg.client_id, corr_id=corr_id
+                    )
                     if cfg.attach_corr_id and isinstance(probe, dict):
                         probe.setdefault("corr_id", corr_id)
                     return probe

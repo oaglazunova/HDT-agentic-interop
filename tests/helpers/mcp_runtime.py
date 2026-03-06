@@ -47,7 +47,9 @@ def _require_mcp() -> None:
         )
 
 
-def build_test_env(tmp_path: Path, *, transport: str = "stdio", extra: Mapping[str, str] | None = None) -> dict[str, str]:
+def build_test_env(
+    tmp_path: Path, *, transport: str = "stdio", extra: Mapping[str, str] | None = None
+) -> dict[str, str]:
     """Build a clean environment for integration tests.
 
     - Starts from current process env (so PATH, python, etc. stay intact).
@@ -124,7 +126,9 @@ def unwrap_json_result(res: Any) -> dict[str, Any]:
     raise AssertionError(f"Unexpected tool result shape: {type(res)} {res!r}")
 
 
-async def call_tool_json(session: ClientSession, tool_name: str, args: Mapping[str, Any] | None = None) -> dict[str, Any]:
+async def call_tool_json(
+    session: ClientSession, tool_name: str, args: Mapping[str, Any] | None = None
+) -> dict[str, Any]:
     res = await asyncio.wait_for(session.call_tool(tool_name, dict(args or {})), timeout=30)
     return unwrap_json_result(res)
 

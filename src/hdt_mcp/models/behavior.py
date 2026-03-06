@@ -18,9 +18,11 @@ def _vault_enabled() -> bool:
     """
     return os.getenv("HDT_VAULT_ENABLE", "0").lower() in ("1", "true", "yes")
 
+
 # Optional API fallback (same envs you already use)
 HDT_API_BASE = os.environ.get("HDT_API_BASE", "http://localhost:5000")
-HDT_API_KEY  = os.environ.get("HDT_API_KEY", os.environ.get("MODEL_DEVELOPER_1_API_KEY", ""))
+HDT_API_KEY = os.environ.get("HDT_API_KEY", os.environ.get("MODEL_DEVELOPER_1_API_KEY", ""))
+
 
 class BehaviorPlan(TypedDict):
     message: str
@@ -28,6 +30,7 @@ class BehaviorPlan(TypedDict):
     avg_steps: int
     days_considered: int
     rationale: str
+
 
 def _headers() -> dict:
     if not HDT_API_KEY:
@@ -37,9 +40,11 @@ def _headers() -> dict:
         "Authorization": f"Bearer {HDT_API_KEY}",
     }
 
+
 def _fetch_walk_via_api(user_id: int) -> list[dict]:
     """Fallback: query your Flask API."""
     import requests
+
     url = f"{HDT_API_BASE.rstrip('/')}/get_walk_data"
     r = requests.get(url, headers=_headers(), params={"user_id": user_id}, timeout=20)
     r.raise_for_status()
@@ -49,12 +54,14 @@ def _fetch_walk_via_api(user_id: int) -> list[dict]:
     leaf = next((e for e in envelopes if str(e.get("user_id")) == str(user_id)), None) or {}
     return leaf.get("data") or leaf.get("records") or []
 
+
 def _parse_date(d: str) -> Optional[datetime]:
     try:
         # Accept "YYYY-MM-DD" or ISO with time
         return datetime.fromisoformat(d.split("T")[0])
     except Exception:
         return None
+
 
 def _avg_steps_last_days(records: list[dict], days: int = 7) -> int:
     if not records:
@@ -74,6 +81,7 @@ def _avg_steps_last_days(records: list[dict], days: int = 7) -> int:
         return 0
     return int(round(sum(vals) / len(vals)))
 
+
 # TODO: add a llm_client.py and replace _pick_message with an LLM call, but keep the same output keys
 def _pick_message(avg_steps: int) -> tuple[str, list[str], str]:
     """
@@ -87,19 +95,20 @@ def _pick_message(avg_steps: int) -> tuple[str, list[str], str]:
         return (
             "Let’s spark movement: add two 10-minute walks today. I’ll nudge you after lunch and early evening.",
             ["1.4 Action planning", "7.1 Prompts/cues", "8.3 Habit formation"],
-            "Low recent activity—short, scheduled bouts are easier to start."
+            "Low recent activity—short, scheduled bouts are easier to start.",
         )
     if avg_steps < 7000:
         return (
             "You’re on the move! Plan one 15-minute walk after dinner and take stairs when possible.",
             ["1.2 Problem solving", "1.4 Action planning", "8.1 Behavioral practice"],
-            "Moderate activity—structured small upgrades build habit strength."
+            "Moderate activity—structured small upgrades build habit strength.",
         )
     return (
         "Great consistency. Try one extra 1–2k steps mid-afternoon this week—keep it light and enjoyable.",
         ["8.7 Graded tasks", "10.4 Social reward", "2.2 Feedback on behavior"],
-        "High baseline—graded progression maintains motivation safely."
+        "High baseline—graded progression maintains motivation safely.",
     )
+
 
 def behavior_strategy(user_id: int, days: int = 7) -> BehaviorPlan:
     """

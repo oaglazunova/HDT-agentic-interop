@@ -1,14 +1,16 @@
 import sys
+
 sys.path.insert(0, "src")
 
 from hdt_a2a.llm.ollama_client import OllamaClient, OllamaConfig
+
 
 def main() -> None:
     client = OllamaClient(OllamaConfig(model="qwen2.5:7b-instruct-q4_0"))
 
     # 1) plain JSON mode (no schema)
     obj = client.chat_json(
-        [{"role": "user", "content": "Return JSON only: {\"ok\": true, \"n\": 1}"}],
+        [{"role": "user", "content": 'Return JSON only: {"ok": true, "n": 1}'}],
         json_schema=None,  # forces format="json"
     )
     print("json:", obj)
@@ -28,6 +30,7 @@ def main() -> None:
         json_schema=schema,
     )
     print("schema:", obj2)
+
 
 if __name__ == "__main__":
     main()

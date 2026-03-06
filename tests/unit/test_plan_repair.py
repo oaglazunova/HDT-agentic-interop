@@ -50,7 +50,10 @@ def test_repair_appends_repair_message() -> None:
     }
     vault_catalog = {
         "datasets": [
-            {"dataset_id": "vault_dataset_A", "tables": [{"table_name": "transactions", "columns": [{"name": "dob", "type": "date"}]}]}
+            {
+                "dataset_id": "vault_dataset_A",
+                "tables": [{"table_name": "transactions", "columns": [{"name": "dob", "type": "date"}]}],
+            }
         ]
     }
 

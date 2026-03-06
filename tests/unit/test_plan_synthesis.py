@@ -48,8 +48,10 @@ def test_generate_mapping_plan_candidate_smoke() -> None:
     }
     vault_catalog = {
         "datasets": [
-            {"dataset_id": "vault_dataset_A",
-             "tables": [{"table_name": "transactions", "columns": [{"name": "dob", "type": "date"}]}]},
+            {
+                "dataset_id": "vault_dataset_A",
+                "tables": [{"table_name": "transactions", "columns": [{"name": "dob", "type": "date"}]}],
+            },
         ]
     }
 

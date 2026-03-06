@@ -61,7 +61,10 @@ def test_synthesize_plan_with_repairs_stops_on_ok() -> None:
 
     vault_catalog = {
         "datasets": [
-            {"dataset_id": "vault_dataset_A", "tables": [{"table_name": "transactions", "columns": [{"name": "dob", "type": "date"}]}]}
+            {
+                "dataset_id": "vault_dataset_A",
+                "tables": [{"table_name": "transactions", "columns": [{"name": "dob", "type": "date"}]}],
+            }
         ]
     }
 
@@ -109,17 +112,29 @@ def test_loop_lifts_must_include_to_root() -> None:
                     "contract_hash": expected_hash,
                 },
                 "must_include": {
-                    "limits": {"max_rows": 10, "batch_rows": 5, "max_record_bytes": 1024, "max_total_output_bytes": 4096},
+                    "limits": {
+                        "max_rows": 10,
+                        "batch_rows": 5,
+                        "max_record_bytes": 1024,
+                        "max_total_output_bytes": 4096,
+                    },
                     "required_columns": ["dob"],
                     "record_mapping": {"/person/birthDate": {"op": "column", "name": "dob"}},
-                    "output": {"destination": "vault://results/x.jsonl", "format": "jsonl", "result_schema_ref": "oci://x#out"},
+                    "output": {
+                        "destination": "vault://results/x.jsonl",
+                        "format": "jsonl",
+                        "result_schema_ref": "oci://x#out",
+                    },
                 },
                 "rules": ["not allowed in schema"],
             }
 
     vault_catalog = {
         "datasets": [
-            {"dataset_id": "vault_dataset_A", "tables": [{"table_name": "transactions", "columns": [{"name": "dob", "type": "date"}]}]}
+            {
+                "dataset_id": "vault_dataset_A",
+                "tables": [{"table_name": "transactions", "columns": [{"name": "dob", "type": "date"}]}],
+            }
         ]
     }
 
@@ -136,8 +151,12 @@ def test_loop_lifts_must_include_to_root() -> None:
     assert res.ok is True
     assert "must_include" not in res.plan
     assert "rules" not in res.plan
-    assert "limits" in res.plan and "output" in res.plan and "record_mapping" in res.plan and "required_columns" in res.plan
-
+    assert (
+        "limits" in res.plan
+        and "output" in res.plan
+        and "record_mapping" in res.plan
+        and "required_columns" in res.plan
+    )
 
 
 def test_loop_returns_valid_initial_candidate_without_repair_when_multiple_are_requested() -> None:
@@ -169,7 +188,12 @@ def test_loop_returns_valid_initial_candidate_without_repair_when_multiple_are_r
                         "input_schema_ref": "x",
                         "contract_hash": expected_hash,
                     },
-                    "limits": {"max_rows": 10, "batch_rows": 5, "max_record_bytes": 1024, "max_total_output_bytes": 4096},
+                    "limits": {
+                        "max_rows": 10,
+                        "batch_rows": 5,
+                        "max_record_bytes": 1024,
+                        "max_total_output_bytes": 4096,
+                    },
                     "required_columns": ["UNKNOWN_COLUMN"],
                     "record_mapping": {"/person/birthDate": {"op": "column", "name": "UNKNOWN_COLUMN"}},
                     "output": {"destination": "vault://results/x.jsonl", "format": "jsonl", "result_schema_ref": "x"},
@@ -187,17 +211,29 @@ def test_loop_returns_valid_initial_candidate_without_repair_when_multiple_are_r
                         "input_schema_ref": "oci://x/contracts/provider.obesityCoach:0.1.0#input.schema.json",
                         "contract_hash": expected_hash,
                     },
-                    "limits": {"max_rows": 10, "batch_rows": 5, "max_record_bytes": 1024, "max_total_output_bytes": 4096},
+                    "limits": {
+                        "max_rows": 10,
+                        "batch_rows": 5,
+                        "max_record_bytes": 1024,
+                        "max_total_output_bytes": 4096,
+                    },
                     "required_columns": ["dob"],
                     "record_mapping": {"/person/birthDate": {"op": "column", "name": "dob"}},
-                    "output": {"destination": "vault://results/x.jsonl", "format": "jsonl", "result_schema_ref": "oci://x#out"},
+                    "output": {
+                        "destination": "vault://results/x.jsonl",
+                        "format": "jsonl",
+                        "result_schema_ref": "oci://x#out",
+                    },
                 }
 
             raise AssertionError("repair should not be called when a valid initial candidate exists")
 
     vault_catalog = {
         "datasets": [
-            {"dataset_id": "vault_dataset_A", "tables": [{"table_name": "transactions", "columns": [{"name": "dob", "type": "date"}]}]}
+            {
+                "dataset_id": "vault_dataset_A",
+                "tables": [{"table_name": "transactions", "columns": [{"name": "dob", "type": "date"}]}],
+            }
         ]
     }
 

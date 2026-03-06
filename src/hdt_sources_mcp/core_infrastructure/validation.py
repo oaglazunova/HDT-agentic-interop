@@ -3,8 +3,10 @@ import re
 
 _DURATION_RE = re.compile(r"^\d{2}:\d{2}:\d{2}$")
 
+
 class ValidationError(ValueError):
     pass
+
 
 def _normalize_iso_datetime(s):
     # Expect a string input under Python 3
@@ -32,6 +34,7 @@ def _normalize_iso_datetime(s):
     except Exception:
         raise ValidationError("invalid ISO date/datetime: {0!r}".format(s))
 
+
 def _coerce_int(value, min_value=None, name="value"):
     try:
         iv = int(value)
@@ -41,6 +44,7 @@ def _coerce_int(value, min_value=None, name="value"):
         raise ValidationError("{0} below minimum {1}: {2}".format(name, min_value, iv))
     return iv
 
+
 def _coerce_float_or_none(v):
     if v is None:
         return None
@@ -49,10 +53,12 @@ def _coerce_float_or_none(v):
     except Exception:
         raise ValidationError("not a float: {0!r}".format(v))
 
+
 def _coerce_str_or_none(v):
     if v is None:
         return None
     return str(v)
+
 
 def _coerce_duration_or_none(v):
     if v is None:
@@ -61,6 +67,7 @@ def _coerce_duration_or_none(v):
     if not _DURATION_RE.match(s):
         raise ValidationError("duration must be HH:MM:SS, got {0!r}".format(v))
     return s
+
 
 def sanitize_walk_record(rec):
     """
@@ -82,10 +89,10 @@ def sanitize_walk_record(rec):
 
     # optional numerics
     out["distance_meters"] = _coerce_float_or_none(rec.get("distance_meters"))
-    out["kcalories"]       = _coerce_float_or_none(rec.get("kcalories"))
+    out["kcalories"] = _coerce_float_or_none(rec.get("kcalories"))
 
     # optional duration (string-like)
-    out["duration"]        = _coerce_duration_or_none(rec.get("duration"))
+    out["duration"] = _coerce_duration_or_none(rec.get("duration"))
 
     # preserve any extra fields as-is if you want (comment out to be strict)
     for k, v in rec.items():
@@ -93,6 +100,7 @@ def sanitize_walk_record(rec):
             out[k] = v
 
     return out
+
 
 def sanitize_walk_records(records, strict=True):
     if records is None:
@@ -107,4 +115,3 @@ def sanitize_walk_records(records, strict=True):
                 raise ValidationError("record[{0}]: {1}".format(i, e))
             # else: skip / or collect stats
     return cleaned
-

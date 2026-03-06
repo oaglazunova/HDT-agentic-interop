@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-
 import pytest
 
 import hdt_user_a2a.user_executor as ue
@@ -72,7 +71,13 @@ async def test_execute_forwards_ops_profile_and_ollama_overrides(monkeypatch) ->
         dataset_id=None,
         table_name=None,
         max_iters: int = 3,
+        initial_candidates: int = 1,
+        use_candidate_retrieval: bool = True,
+        use_seed_hints: bool = True,
     ):
+        captured["initial_candidates"] = initial_candidates
+        captured["use_candidate_retrieval"] = use_candidate_retrieval
+        captured["use_seed_hints"] = use_seed_hints
         captured["provider_url"] = provider_url
         captured["algo_id"] = algo_id
         captured["algo_version"] = algo_version
@@ -96,6 +101,9 @@ async def test_execute_forwards_ops_profile_and_ollama_overrides(monkeypatch) ->
         "dataset_id": "vault_dataset_A",
         "table_name": "transactions",
         "max_iters": 2,
+        "initial_candidates": 3,
+        "use_candidate_retrieval": False,
+        "use_seed_hints": False,
     }
 
     executor = ue.UserAgentExecutor()
@@ -114,3 +122,7 @@ async def test_execute_forwards_ops_profile_and_ollama_overrides(monkeypatch) ->
     # Basic sanity: executor responded and closed the queue
     assert len(q.events) == 1
     assert q.closed is True
+
+    assert captured["initial_candidates"] == 3
+    assert captured["use_candidate_retrieval"] is False
+    assert captured["use_seed_hints"] is False
