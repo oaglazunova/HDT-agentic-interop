@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import hashlib
+
 from dataclasses import dataclass
 from typing import Any, Mapping
 
@@ -10,7 +12,12 @@ from hdt_a2a.llm.ollama_client import OllamaClient
 from hdt_a2a.llm.repair import repair_mapping_plan_candidate
 from hdt_mapping_plan.validate import CriticReport, validate_and_lint_plan, compute_contract_schema_hash
 from hdt_mapping_plan.vault_catalog import get_dataset_schema
-from hdt_mapping_plan.normalize import apply_limits_policy, fill_contract_refs
+from hdt_mapping_plan.normalize import (
+    apply_limits_policy,
+    coerce_date_columns,
+    fill_contract_refs,
+    normalize_expr_shapes,
+)
 from hdt_a2a.llm.plan_synthesis import (
     build_base_messages,
     generate_mapping_plan_candidates,
@@ -44,6 +51,15 @@ def _apply_immutables(
 ) -> dict[str, Any]:
     # Ensure required fixed structure exists and is consistent
     plan["plan_version"] = "1.0"
+
+    # Ensure a stable, schema-compliant plan_id exists
+    if _plan_id_is_too_short(plan.get("plan_id")):
+        plan["plan_id"] = _stable_plan_id(
+            contract=contract,
+            expected_hash=expected_hash,
+            dataset_id=dataset_id,
+            table_name=table_name,
+        )
 
     # algo (from host)
     plan["algo"] = {
@@ -209,14 +225,35 @@ def _recompute_required_columns(plan: dict[str, Any]) -> dict[str, Any]:
     return plan
 
 
+def _stable_plan_id(*, contract: Mapping[str, Any], expected_hash: str, dataset_id: str, table_name: str) -> str:
+    algo_id = str(contract.get("algo_id", ""))
+    algo_version = str(contract.get("algo_version", ""))
+    s = f"{algo_id}|{algo_version}|{dataset_id}|{table_name}|{expected_hash}"
+    digest = hashlib.sha256(s.encode("utf-8")).hexdigest()[:12]
+    return f"plan_{digest}"
+
+
+def _plan_id_is_too_short(plan_id: Any) -> bool:
+    if not isinstance(plan_id, str):
+        return True
+    # Keep it simple; your schema complained about "1.0" being too short.
+    # Use 8 as a conservative minimum.
+    return len(plan_id.strip()) < 8
+
+
 def _enforce_plan_invariants(
     plan: dict[str, Any],
     *,
     contract_input_schema: Mapping[str, Any],
     dataset_columns: set[str],
+    dataset_column_types: Mapping[str, str] | None,
     algo_id: str,
     host_backfill_required_mappings: bool,
 ) -> dict[str, Any]:
+    # 0) Normalize invalid expression shapes (schema-preserving)
+    plan = normalize_expr_shapes(plan)
+
+    # 1) Optional: ensure required pointers exist (ONLY if you kept backfill, and ONLY behind flag)
     if host_backfill_required_mappings:
         plan = _ensure_required_contract_mappings(
             plan,
@@ -225,7 +262,27 @@ def _enforce_plan_invariants(
             algo_id=algo_id,
         )
 
+    # 2) Coerce date pointers mapped to TEXT columns into parse_date(column)
+    schema = contract_input_schema if isinstance(contract_input_schema, dict) else dict(contract_input_schema)
+
+    if dataset_column_types is not None:
+        plan = coerce_date_columns(
+            plan,
+            contract_input_schema=dict(contract_input_schema),
+            dataset_column_types=dict(dataset_column_types),
+        )
+
+    # 3) Prune invented pointers: keep only required leaf pointers
+    allowed_ptrs = set(required_leaf_pointers(schema))
+    rm = plan.get("record_mapping")
+    if isinstance(rm, dict) and allowed_ptrs:
+        for ptr in list(rm.keys()):
+            if ptr not in allowed_ptrs:
+                rm.pop(ptr, None)
+
+    # 4) required_columns must match referenced columns (minimized)
     plan = _recompute_required_columns(plan)
+
     return plan
 
 
@@ -240,6 +297,7 @@ def _postprocess_generated_plan(
     algo_version: str,
     contract_input_schema: Mapping[str, Any],
     dataset_columns: set[str],
+    dataset_column_types: Mapping[str, str],
     host_backfill_required_mappings: bool,
 ) -> dict[str, Any]:
     """
@@ -258,12 +316,24 @@ def _postprocess_generated_plan(
 
     plan = fill_contract_refs(plan, algo_id=algo_id, algo_version=algo_version)
     plan = apply_limits_policy(plan)
+
+    # Normalize common invalid expression shapes (e.g., const(parse_date(...)) -> parse_date(...))
+    plan = normalize_expr_shapes(plan)
+
+    # Coerce date-typed pointers mapped to TEXT columns into parse_date(column)
+    plan = coerce_date_columns(
+        plan,
+        contract_input_schema=dict(contract_input_schema),
+        dataset_column_types=dict(dataset_column_types),
+    )
+
     plan = _normalize_llm_plan_shape(plan)
 
     plan = _enforce_plan_invariants(
         plan,
         contract_input_schema=contract_input_schema,
         dataset_columns=dataset_columns,
+        dataset_column_types=dataset_column_types,
         algo_id=algo_id,
         host_backfill_required_mappings=host_backfill_required_mappings,
     )
@@ -377,6 +447,7 @@ def synthesize_plan_with_repairs(
             algo_version=algo_version,
             contract_input_schema=contract_input_schema,
             dataset_columns=dataset_columns,
+            dataset_column_types=dataset_column_types,
             host_backfill_required_mappings=host_backfill_required_mappings,
         )
         for p in raw_candidates
@@ -443,5 +514,6 @@ def synthesize_plan_with_repairs(
             algo_version=algo_version,
             contract_input_schema=contract_input_schema,
             dataset_columns=dataset_columns,
+            dataset_column_types=dataset_column_types,
             host_backfill_required_mappings=host_backfill_required_mappings,
         )

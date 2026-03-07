@@ -109,7 +109,7 @@
   ],
   "expected": {
     "ok": true,
-    "iterations": 2,
+    "iterations": 1,
     "max_iters": 3,
     "dataset": {
       "dataset_id": "vault_dataset_A",

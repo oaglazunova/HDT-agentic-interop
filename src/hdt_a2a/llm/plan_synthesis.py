@@ -207,7 +207,7 @@ def build_base_messages(
             "content": (
                 "You output ONLY a single JSON object that matches the MappingPlan JSON Schema. "
                 "No markdown, no comments, no extra keys. "
-                "record_mapping values MUST be expression objects with an 'op'."
+                "record_mapping values MUST be expression objects with an 'op'. For op:'const', value MUST be a literal (never another expression)."
             ),
         },
         {
@@ -236,14 +236,16 @@ def build_base_messages(
                         "record_mapping MUST include ALL pointers in contract_required_leaf_pointers.",
                         "record_mapping MUST NOT include pointers outside contract_required_leaf_pointers.",
                         "For op:'column', you MUST include {'op':'column','name':'<column>'}.",
-                        "For /day/date you MUST output a date-typed expression. If the source column is a string (TEXT), wrap it: {'op':'parse_date','format':'%Y-%m-%d','args':[{'op':'column','name':'date'}]}.",
-                        "For /person/birthDate you MUST output a date-typed expression. If the source column is a string (TEXT), wrap it: {'op':'parse_date','format':'%Y-%m-%d','args':[{'op':'column','name':'dob'}]}.",
+                        "For /day/date you MUST output a date-typed expression. If the chosen source column is a string (TEXT), wrap it: {'op':'parse_date','format':'%Y-%m-%d','args':[{'op':'column','name':'<col>'}]}.",
+                        "For /person/birthDate you MUST output a date-typed expression. If the chosen source column is a string (TEXT), wrap it: {'op':'parse_date','format':'%Y-%m-%d','args':[{'op':'column','name':'<col>'}]}.",
                         "If pointer_to_candidate_cols has an entry for a pointer AND that column exists in dataset_columns, you MUST use op:'column' with that column name (do NOT use const).",
                         "required_columns MUST contain every referenced column name used by op:'column', and ONLY those.",
                         "If a required pointer cannot be sourced from dataset_columns, use op:'const' instead of inventing a column.",
                         "output.destination MUST start with 'vault://'.",
                         "contract.contract_hash MUST equal exactly the provided expected hash.",
-                        "recordId MUST be per-row. If dataset_columns contains 'txn_id', then /recordId MUST be {'op':'column','name':'txn_id'}. Do NOT use const for /recordId in that case.",
+                        # "recordId MUST be per-row. If dataset_columns contains 'txn_id', then /recordId MUST be {'op':'column','name':'txn_id'}. Do NOT use const for /recordId in that case.",
+                        "If dataset_columns contains a clear unique row identifier (e.g., txn_id/record_id/id) and the contract requires /recordId, prefer mapping /recordId to that column via op:'column' rather than using const.",
+                        'For op:\'const\', value MUST be a literal (string/number/integer/boolean/null). value MUST NOT be an expression object. For missing values use JSON null (literal null), NOT {"op":"null"}, and NEVER nest parse_date/parse_datetime inside const.value.',
                     ],
                     "defaults": {
                         "output": {

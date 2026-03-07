@@ -13,6 +13,7 @@ import argparse
 import json
 import time
 import os
+import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping
@@ -386,6 +387,79 @@ def _build_client_factory(model_name: str) -> Callable[[], Any]:
     return lambda: _make_ollama_client(model_name)
 
 
+def _safe_slug(s: str) -> str:
+    s = (s or "").strip()
+    if not s:
+        return "unknown"
+    # Keep filenames portable across OSes
+    return re.sub(r"[^a-zA-Z0-9_.-]+", "_", s)[:160]
+
+
+def _jsonable(obj: Any) -> Any:
+    """Best-effort conversion to JSON-serializable structures."""
+    if obj is None:
+        return None
+    if isinstance(obj, (str, int, float, bool)):
+        return obj
+    if isinstance(obj, list):
+        return [_jsonable(x) for x in obj]
+    if isinstance(obj, dict):
+        return {str(k): _jsonable(v) for k, v in obj.items()}
+    # dataclasses / objects
+    d = getattr(obj, "__dict__", None)
+    if isinstance(d, dict):
+        return {str(k): _jsonable(v) for k, v in d.items()}
+    return str(obj)
+
+
+def _report_to_json(report: Any) -> dict[str, Any]:
+    """
+    Serialize CriticReport (or similar) to JSON, without assuming internal types.
+    """
+    if report is None:
+        return {"ok": None, "errors": [], "warnings": [], "lint": None}
+
+    # If already dict-like (some paths may return dicts)
+    if isinstance(report, dict):
+        return _jsonable(report)
+
+    out: dict[str, Any] = {}
+    for k in ("ok", "errors", "warnings"):
+        out[k] = _jsonable(getattr(report, k, None))
+
+    lint = getattr(report, "lint", None)
+    out["lint"] = _jsonable(lint)
+    return out
+
+
+def _dump_failure(
+    *,
+    dump_dir: Path,
+    task_id: str,
+    repeat_index: int,
+    plan: Any,
+    final_report: Any,
+    all_reports: Any,
+) -> None:
+    dump_dir.mkdir(parents=True, exist_ok=True)
+    base = f"{_safe_slug(task_id)}.{repeat_index}"
+
+    # Plan dump
+    plan_path = dump_dir / f"{base}.plan.json"
+    if isinstance(plan, dict):
+        plan_path.write_text(json.dumps(plan, ensure_ascii=False, indent=2), encoding="utf-8")
+    else:
+        plan_path.write_text(json.dumps({"plan": _jsonable(plan)}, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    # Report dump (final + intermediate if present)
+    payload: dict[str, Any] = {"final_report": _report_to_json(final_report)}
+    if isinstance(all_reports, list) and all_reports:
+        payload["reports"] = [_report_to_json(r) for r in all_reports]
+
+    report_path = dump_dir / f"{base}.report.json"
+    report_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def run_one(
     *,
     client_factory: Callable[[], Any],
@@ -396,6 +470,7 @@ def run_one(
     use_candidate_retrieval: bool,
     use_seed_hints: bool,
     repeat_index: int,
+    dump_dir: Path | None = None,
 ) -> EvalResult:
     client = client_factory()
 
@@ -417,6 +492,19 @@ def run_one(
 
     except Exception as ex:
         elapsed_ms = int((time.perf_counter() - start) * 1000)
+        if dump_dir is not None:
+            _dump_failure(
+                dump_dir=dump_dir,
+                task_id=task.task_id,
+                repeat_index=repeat_index,
+                plan=None,
+                final_report={
+                    "ok": False,
+                    "errors": [{"type": ex.__class__.__name__, "message": str(ex)}],
+                    "warnings": [],
+                },
+                all_reports=None,
+            )
         # Produce a row that still lets aggregation work
         return EvalResult(
             task_id=task.task_id,
@@ -440,6 +528,17 @@ def run_one(
 
     report = res.report
     plan = res.plan
+
+    # Dump failing cases for analysis (plan + reports)
+    if dump_dir is not None and not res.ok:
+        _dump_failure(
+            dump_dir=dump_dir,
+            task_id=task.task_id,
+            repeat_index=repeat_index,
+            plan=res.plan,
+            final_report=res.report,
+            all_reports=getattr(res, "reports", None),
+        )
 
     used_required_columns: list[str] = []
     output_destination: str | None = None
@@ -503,6 +602,7 @@ def run_suite(
     use_candidate_retrieval: bool,
     use_seed_hints: bool,
     repeats: int = 1,
+    dump_dir: Path | None = None,
 ) -> list[EvalResult]:
     results: list[EvalResult] = []
     total_repeats = max(int(repeats), 1)
@@ -519,6 +619,7 @@ def run_suite(
                     use_candidate_retrieval=use_candidate_retrieval,
                     use_seed_hints=use_seed_hints,
                     repeat_index=repeat_index,
+                    dump_dir=dump_dir,
                 )
             )
 
@@ -669,6 +770,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--grouped-out", default="", help="Optional JSON file for grouped summary rows.")
     parser.add_argument("--task-summary-out", default="", help="Optional JSON file for task-level grouped rows.")
 
+    parser.add_argument(
+        "--dump-plans-dir",
+        default="",
+        help="If set, dump failing plans and critic reports for analysis.",
+    )
+
     return parser.parse_args()
 
 
@@ -677,6 +784,13 @@ def _parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = _parse_args()
+
+    # --- dump dir wiring ---
+    dump_dir: Path | None = None
+    if getattr(args, "dump_plans_dir", ""):
+        # Optional: nest under model and run label for collision safety
+        run_label = Path(args.out).stem  # e.g. baseline / no_retriever / no_seed_hints
+        dump_dir = Path(args.dump_plans_dir) / _safe_slug(args.model) / _safe_slug(run_label)
 
     tasks = _load_tasks_from_json(Path(args.tasks_json)) if args.tasks_json else _toy_tasks()
     client_factory = _build_client_factory(args.model)
@@ -693,6 +807,7 @@ def main() -> int:
         use_candidate_retrieval=use_candidate_retrieval,
         use_seed_hints=use_seed_hints,
         repeats=max(int(args.repeats), 1),
+        dump_dir=dump_dir,  # <-- ADD THIS
     )
 
     out_path = Path(args.out)
@@ -732,6 +847,12 @@ def main() -> int:
         task_path = Path(args.task_summary_out)
         task_path.parent.mkdir(parents=True, exist_ok=True)
         task_path.write_text(json.dumps(by_task, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    run_label = Path(args.out).stem  # e.g. baseline / no_retriever / no_seed_hints
+    dump_root = Path(args.dump_plans_dir) if args.dump_plans_dir else None
+    dump_dir = None
+    if dump_root is not None:
+        dump_dir = dump_root / _safe_slug(args.model) / _safe_slug(run_label)
 
     print(json.dumps(summary, ensure_ascii=False))
 
